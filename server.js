@@ -139,8 +139,9 @@ function formatManagerQuestions(analysis) {
 
   questions.forEach((q, i) => blocks.push(`${i + 1}. ${q}`));
 
-  // Every statement and every question is separated by one empty line.
-  return blocks.join("\n\n");
+  // Bitrix card view collapses ordinary CR/LF whitespace.
+  // Use Unicode paragraph separators so each block/question stays visually separated.
+  return blocks.join("\u2029\u2029");
 }
 
 function extractResponseText(payload) {
