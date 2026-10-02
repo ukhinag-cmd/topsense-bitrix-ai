@@ -13,7 +13,11 @@ function json(res, status, payload) {
 }
 
 function getNested(obj, path) {
-  return path.reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), obj);
+  return path.reduce(
+    (value, key) =>
+      value && typeof value === "object" ? value[key] : undefined,
+    obj
+  );
 }
 
 function parseBody(raw, contentType) {
@@ -25,8 +29,7 @@ function parseBody(raw, contentType) {
     }
   }
 
-  const params = new URLSearchParams(raw);
-  return { kind: "form", value: params };
+  return { kind: "form", value: new URLSearchParams(raw) };
 }
 
 function extractEvent(parsed) {
@@ -59,12 +62,91 @@ function extractEvent(parsed) {
   };
 }
 
+function bitrixBaseUrl() {
+  const raw = (process.env.BITRIX_WEBHOOK_BASE || "").trim();
+  if (!raw) {
+    throw new Error("BITRIX_WEBHOOK_BASE is not configured");
+  }
+  return raw.endsWith("/") ? raw : raw + "/";
+}
+
+async function fetchDeal(dealId) {
+  const url = new URL("crm.deal.get.json", bitrixBaseUrl());
+  url.searchParams.set("ID", String(dealId));
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Bitrix deal read failed with HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+
+  if (payload.error) {
+    throw new Error(
+      `Bitrix deal read failed: ${payload.error_description || payload.error}`
+    );
+  }
+
+  if (!payload.result || !payload.result.ID) {
+    throw new Error("Bitrix deal read returned no deal");
+  }
+
+  return payload.result;
+}
+
+async function processDeal(evt) {
+  if (String(evt.event || "").toUpperCase() !== "ONCRMDEALADD") {
+    return;
+  }
+
+  if (!evt.dealId) {
+    console.warn("Bitrix event has no deal ID");
+    return;
+  }
+
+  try {
+    const deal = await fetchDeal(evt.dealId);
+
+    // Log only operational metadata, not message bodies, emails, phones or webhook secrets.
+    console.log(
+      JSON.stringify({
+        source: "bitrix24",
+        action: "deal-read-ok",
+        dealId: String(deal.ID),
+        categoryId: deal.CATEGORY_ID || null,
+        stageId: deal.STAGE_ID || null,
+        assignedById: deal.ASSIGNED_BY_ID || null,
+        companyLinked: Boolean(deal.COMPANY_ID && deal.COMPANY_ID !== "0"),
+        contactLinked: Boolean(deal.CONTACT_ID && deal.CONTACT_ID !== "0"),
+        sourceId: deal.SOURCE_ID || null,
+        opportunity: deal.OPPORTUNITY || null,
+        readAt: new Date().toISOString(),
+      })
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        source: "bitrix24",
+        action: "deal-read-error",
+        dealId: String(evt.dealId),
+        error: error instanceof Error ? error.message : String(error),
+        at: new Date().toISOString(),
+      })
+    );
+  }
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && (req.url === "/" || req.url === "/health")) {
     return json(res, 200, {
       ok: true,
       service: "topsense-bitrix-ai",
       status: "ready",
+      bitrixReadConfigured: Boolean(process.env.BITRIX_WEBHOOK_BASE),
     });
   }
 
@@ -93,18 +175,25 @@ const server = http.createServer((req, res) => {
         return json(res, 401, { ok: false, error: "invalid token" });
       }
 
-      // Intentionally log only non-secret event metadata.
-      console.log(JSON.stringify({
-        source: "bitrix24",
-        event: evt.event,
-        dealId: evt.dealId,
-        receivedAt: new Date().toISOString(),
-      }));
+      console.log(
+        JSON.stringify({
+          source: "bitrix24",
+          action: "event-received",
+          event: evt.event,
+          dealId: evt.dealId,
+          receivedAt: new Date().toISOString(),
+        })
+      );
 
-      return json(res, 200, {
+      // Respond to Bitrix immediately, then read the deal in the background.
+      json(res, 200, {
         ok: true,
         event: evt.event,
         dealId: evt.dealId,
+      });
+
+      processDeal(evt).catch(error => {
+        console.error("Unexpected deal processing error", error);
       });
     });
 
