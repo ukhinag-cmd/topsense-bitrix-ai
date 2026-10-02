@@ -122,6 +122,82 @@ async function updateDealField(dealId, fieldName, value) {
   }
 }
 
+async function ensureMultilineDealField(fieldName) {
+  const listUrl = new URL("crm.deal.userfield.list.json", bitrixBaseUrl());
+
+  const listResponse = await fetch(listUrl, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      filter: { FIELD_NAME: fieldName },
+    }),
+  });
+
+  const listPayload = await listResponse.json();
+
+  if (!listResponse.ok || listPayload.error) {
+    throw new Error(
+      `Bitrix user field lookup failed: ${listPayload.error_description || listPayload.error || "unknown error"}`
+    );
+  }
+
+  const field = Array.isArray(listPayload.result)
+    ? listPayload.result.find(item => item.FIELD_NAME === fieldName)
+    : null;
+
+  if (!field) {
+    throw new Error(`Bitrix user field not found: ${fieldName}`);
+  }
+
+  if (field.USER_TYPE_ID !== "string") {
+    return;
+  }
+
+  const currentRows = Number(field.SETTINGS?.ROWS || 1);
+  if (currentRows >= 8) {
+    return;
+  }
+
+  const updateUrl = new URL("crm.deal.userfield.update.json", bitrixBaseUrl());
+
+  const updateResponse = await fetch(updateUrl, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      id: Number(field.ID),
+      fields: {
+        SETTINGS: {
+          ROWS: 10,
+        },
+      },
+    }),
+  });
+
+  const updatePayload = await updateResponse.json();
+
+  if (!updateResponse.ok || updatePayload.error || updatePayload.result !== true) {
+    throw new Error(
+      `Bitrix user field update failed: ${updatePayload.error_description || updatePayload.error || "unknown error"}`
+    );
+  }
+
+  console.log(
+    JSON.stringify({
+      source: "bitrix24",
+      action: "field-multiline-enabled",
+      field: fieldName,
+      rows: 10,
+      at: new Date().toISOString(),
+    })
+  );
+}
+
 function formatManagerQuestions(analysis) {
   const blocks = [];
 
@@ -143,7 +219,7 @@ function formatManagerQuestions(analysis) {
 
   questions.forEach((q, i) => blocks.push(`${i + 1}. ${q}`));
 
-  return blocks.join("\u2029\u2029");
+  return blocks.join("\r\n\r\n");
 }
 
 function extractResponseText(payload) {
@@ -320,6 +396,7 @@ async function processDeal(evt) {
     const fieldEmpty = !String(deal[targetField] || "").trim();
 
     if (isTestDeal && fieldEmpty) {
+      await ensureMultilineDealField(targetField);
       const text = formatManagerQuestions(result.analysis);
       await updateDealField(deal.ID, targetField, text);
 
