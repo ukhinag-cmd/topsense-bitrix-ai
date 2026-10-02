@@ -98,6 +98,51 @@ async function fetchDeal(dealId) {
   return payload.result;
 }
 
+async function updateDealField(dealId, fieldName, value) {
+  const url = new URL("crm.deal.update.json", bitrixBaseUrl());
+  const body = new URLSearchParams();
+  body.set("ID", String(dealId));
+  body.set(`FIELDS[${fieldName}]`, value);
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.error || payload.result !== true) {
+    throw new Error(
+      `Bitrix deal update failed: ${payload.error_description || payload.error || "unknown error"}`
+    );
+  }
+}
+
+function formatManagerQuestions(analysis) {
+  const lines = [];
+  lines.push("ИИ-анализ:");
+  lines.push(analysis.summary || "Нет краткого резюме.");
+  lines.push("");
+  lines.push("Тип клиента: " + (analysis.client_type || "Не определено"));
+  lines.push("Формат закупки: " + (analysis.purchase_format || "unknown"));
+  lines.push("Конечный заказчик: " + (analysis.end_customer || "unknown"));
+  lines.push("Срок поставки: " + (analysis.delivery_deadline || "unknown"));
+  lines.push("");
+  lines.push("Вопросы менеджеру:");
+
+  const questions = Array.isArray(analysis.manager_questions)
+    ? analysis.manager_questions.slice(0, 10)
+    : [];
+
+  questions.forEach((q, i) => lines.push(`${i + 1}. ${q}`));
+
+  return lines.join("\n");
+}
+
 function extractResponseText(payload) {
   const chunks = [];
   for (const item of payload.output || []) {
@@ -114,9 +159,9 @@ function extractResponseText(payload) {
 function parseJsonText(text) {
   const cleaned = String(text || "")
     .trim()
-    .replace(/^\`\`\`json\s*/i, "")
-    .replace(/^\`\`\`\s*/i, "")
-    .replace(/\s*\`\`\`$/i, "");
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "");
 
   return JSON.parse(cleaned);
 }
@@ -240,7 +285,6 @@ async function processDeal(evt) {
 
     const result = await analyzeDeal(deal);
 
-    // Test mode: AI result is logged only. Nothing is written back to Bitrix yet.
     console.log(
       JSON.stringify({
         source: "openai",
@@ -252,6 +296,34 @@ async function processDeal(evt) {
         analyzedAt: new Date().toISOString(),
       })
     );
+
+    const isTestDeal = String(deal.TITLE || "").startsWith("AI WEBHOOK TEST");
+    const targetField = "UF_CRM_1790850696723";
+    const fieldEmpty = !String(deal[targetField] || "").trim();
+
+    if (isTestDeal && fieldEmpty) {
+      const text = formatManagerQuestions(result.analysis);
+      await updateDealField(deal.ID, targetField, text);
+
+      console.log(
+        JSON.stringify({
+          source: "bitrix24",
+          action: "test-write-ok",
+          dealId: String(deal.ID),
+          field: targetField,
+          writtenAt: new Date().toISOString(),
+        })
+      );
+    } else {
+      console.log(
+        JSON.stringify({
+          source: "bitrix24",
+          action: "write-skipped",
+          dealId: String(deal.ID),
+          reason: !isTestDeal ? "not-test-deal" : "target-field-not-empty",
+        })
+      );
+    }
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -274,7 +346,7 @@ const server = http.createServer((req, res) => {
       bitrixReadConfigured: Boolean(process.env.BITRIX_WEBHOOK_BASE),
       openAIConfigured: Boolean(process.env.OPENAI_API_KEY),
       openAIModel: process.env.OPENAI_MODEL || "gpt-6-sol",
-      bitrixWriteEnabled: false,
+      bitrixWriteEnabled: "test-deals-only",
     });
   }
 
