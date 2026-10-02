@@ -98,6 +98,117 @@ async function fetchDeal(dealId) {
   return payload.result;
 }
 
+function extractResponseText(payload) {
+  const chunks = [];
+  for (const item of payload.output || []) {
+    if (item.type !== "message") continue;
+    for (const part of item.content || []) {
+      if (part.type === "output_text" && typeof part.text === "string") {
+        chunks.push(part.text);
+      }
+    }
+  }
+  return chunks.join("\n").trim();
+}
+
+function parseJsonText(text) {
+  const cleaned = String(text || "")
+    .trim()
+    .replace(/^\`\`\`json\s*/i, "")
+    .replace(/^\`\`\`\s*/i, "")
+    .replace(/\s*\`\`\`$/i, "");
+
+  return JSON.parse(cleaned);
+}
+
+function dealForAI(deal) {
+  return {
+    id: String(deal.ID),
+    title: deal.TITLE || "",
+    comments: deal.COMMENTS || "",
+    additional_info: deal.ADDITIONAL_INFO || "",
+    source_id: deal.SOURCE_ID || null,
+    category_id: deal.CATEGORY_ID || null,
+    stage_id: deal.STAGE_ID || null,
+    opportunity: deal.OPPORTUNITY || null,
+    currency: deal.CURRENCY_ID || null,
+    region: deal.UF_CRM_1728209888200 || "",
+    legal_address: deal.UF_CRM_1728209895847 || "",
+    inn: deal.UF_CRM_1789994254952 || "",
+    current_client_type: deal.UF_CRM_1739950675115 || "",
+    analogs: deal.UF_CRM_1728208192427 || "",
+    purchase_format: deal.UF_CRM_1728208250222 || "",
+    end_customer: deal.UF_CRM_1728208529434 || "",
+    delivery_deadline: deal.UF_CRM_1728208560055 || "",
+    competitor_prices: deal.UF_CRM_1728208500678 || "",
+  };
+}
+
+async function analyzeDeal(deal) {
+  const apiKey = (process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
+  const model = (process.env.OPENAI_MODEL || "gpt-6-sol").trim();
+  const input = dealForAI(deal);
+
+  const instructions = [
+    "Ты квалификатор входящих B2B-заявок российского производителя промышленных газоанализаторов ТОП-СЕНС.",
+    "Работай только по данным сделки. Не выдумывай факты.",
+    "Если данных недостаточно, явно укажи unknown и сформулируй вопрос менеджеру.",
+    "Допустимые типы клиента: Дилер, Потенциальный дилер, Дистрибьютор, Завод, Подрядчик, Сервисная компания, Тендерщики, СНГ, Не определено.",
+    "Не выводи телефоны, email и другие персональные контакты.",
+    "Ответь только валидным JSON без markdown.",
+    "JSON должен содержать поля: summary (string), client_type (string), confidence (number 0..1), purchase_format (string), end_customer (string), delivery_deadline (string), analogs (string), competitor_prices (string), manager_questions (array of strings, максимум 10), risks (array of strings), evidence (array of strings).",
+  ].join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      max_output_tokens: 1200,
+      instructions,
+      input: [
+        {
+          role: "user",
+          content:
+            "Проанализируй новую сделку и верни квалификацию. Данные сделки:\n" +
+            JSON.stringify(input),
+        },
+      ],
+    }),
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.error) {
+    const message =
+      payload?.error?.message ||
+      payload?.error_description ||
+      `OpenAI API HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const text = extractResponseText(payload);
+  if (!text) {
+    throw new Error("OpenAI returned no text output");
+  }
+
+  const analysis = parseJsonText(text);
+
+  return {
+    model: payload.model || model,
+    responseId: payload.id || null,
+    analysis,
+  };
+}
+
 async function processDeal(evt) {
   if (String(evt.event || "").toUpperCase() !== "ONCRMDEALADD") {
     return;
@@ -111,7 +222,6 @@ async function processDeal(evt) {
   try {
     const deal = await fetchDeal(evt.dealId);
 
-    // Log only operational metadata, not message bodies, emails, phones or webhook secrets.
     console.log(
       JSON.stringify({
         source: "bitrix24",
@@ -127,11 +237,26 @@ async function processDeal(evt) {
         readAt: new Date().toISOString(),
       })
     );
+
+    const result = await analyzeDeal(deal);
+
+    // Test mode: AI result is logged only. Nothing is written back to Bitrix yet.
+    console.log(
+      JSON.stringify({
+        source: "openai",
+        action: "ai-analysis-ok",
+        dealId: String(deal.ID),
+        model: result.model,
+        responseId: result.responseId,
+        analysis: result.analysis,
+        analyzedAt: new Date().toISOString(),
+      })
+    );
   } catch (error) {
     console.error(
       JSON.stringify({
-        source: "bitrix24",
-        action: "deal-read-error",
+        source: "pipeline",
+        action: "deal-processing-error",
         dealId: String(evt.dealId),
         error: error instanceof Error ? error.message : String(error),
         at: new Date().toISOString(),
@@ -147,6 +272,9 @@ const server = http.createServer((req, res) => {
       service: "topsense-bitrix-ai",
       status: "ready",
       bitrixReadConfigured: Boolean(process.env.BITRIX_WEBHOOK_BASE),
+      openAIConfigured: Boolean(process.env.OPENAI_API_KEY),
+      openAIModel: process.env.OPENAI_MODEL || "gpt-6-sol",
+      bitrixWriteEnabled: false,
     });
   }
 
@@ -185,7 +313,6 @@ const server = http.createServer((req, res) => {
         })
       );
 
-      // Respond to Bitrix immediately, then read the deal in the background.
       json(res, 200, {
         ok: true,
         event: evt.event,
