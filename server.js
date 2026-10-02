@@ -198,26 +198,177 @@ async function ensureMultilineDealField(fieldName) {
   );
 }
 
+const QUESTION_RULES = {
+  "Завод / промышленное предприятие": [
+    { key: "task", kind: "qualify", text: "Для какой задачи нужны приборы?" },
+    { key: "spec", kind: "qualify", text: "Какие газ, диапазон и количество нужны?" },
+    { key: "new_or_replace", kind: "qualify", text: "Это новая установка или замена существующих приборов?" },
+    { key: "brands", kind: "qualify", text: "Какие производители сейчас используются или рассматриваются?" },
+    { key: "purchase", kind: "qualify", text: "Тендер или прямая закупка?" },
+    { key: "deadline", kind: "qualify", text: "К какому сроку нужны приборы?" },
+    { key: "choice", kind: "sell", text: "На что в первую очередь будете смотреть при выборе?" },
+    { key: "win", kind: "sell", text: "Что должно быть в нашем предложении, чтобы вы выбрали нас?" },
+    { key: "current_problem", kind: "sell", text: "Что не устраивает в текущих приборах или поставщике?" },
+    { key: "options", kind: "sell", text: "Подготовить несколько вариантов под разные цены и характеристики?" }
+  ],
+  "Генподрядчик / EPC": [
+    { key: "stage", kind: "qualify", text: "На какой стадии проект: проектирование, комплектация или монтаж?" },
+    { key: "choice_right", kind: "qualify", text: "Вы сами выбираете оборудование или работаете по готовой спецификации?" },
+    { key: "alternative", kind: "qualify", text: "Можно предложить другой бренд или производитель уже закреплён?" },
+    { key: "requirements", kind: "qualify", text: "Какие требования спецификации обязательны?" },
+    { key: "quote_deadline", kind: "qualify", text: "К какому сроку нужно КП?" },
+    { key: "delivery_deadline", kind: "qualify", text: "К какому сроку нужна поставка?" },
+    { key: "approval", kind: "sell", text: "Что нужно, чтобы наше оборудование согласовали на объекте?" },
+    { key: "rejection", kind: "sell", text: "Из-за чего обычно отклоняют альтернативного производителя?" },
+    { key: "help_approve", kind: "sell", text: "Что мы можем подготовить, чтобы вам было проще согласовать ТОП-СЕНС?" },
+    { key: "win", kind: "sell", text: "Что нам нужно сделать, чтобы вы отдали эту поставку нам?" }
+  ],
+  "Промышленный подрядчик": [
+    { key: "use", kind: "qualify", text: "Приборы нужны для ваших работ или передаются на объект?" },
+    { key: "choice_right", kind: "qualify", text: "Вы сами выбираете оборудование или работаете по спецификации?" },
+    { key: "alternative", kind: "qualify", text: "Можно предложить аналог?" },
+    { key: "priority", kind: "qualify", text: "Что важнее: цена, срок поставки или точное соответствие требованиям?" },
+    { key: "deadline", kind: "qualify", text: "К какому сроку нужна поставка?" },
+    { key: "frequency", kind: "qualify", text: "Такие запросы у вас возникают регулярно?" },
+    { key: "supplier_choice", kind: "sell", text: "Что для вас будет главным при выборе поставщика?" },
+    { key: "win", kind: "sell", text: "Что нужно сделать, чтобы эту закупку вы сделали у нас?" },
+    { key: "speed", kind: "sell", text: "Если дадим быстрее конкурентов, это повлияет на решение?" },
+    { key: "options", kind: "sell", text: "Упростит выбор, если подготовим 2–3 подходящих варианта?" }
+  ],
+  "КИПиА / АСУ ТП интегратор": [
+    { key: "system", kind: "qualify", text: "Для какой системы или задачи подбираете оборудование?" },
+    { key: "choice_right", kind: "qualify", text: "Вы сами определяете производителя?" },
+    { key: "alternative", kind: "qualify", text: "Можно предложить аналог заложенного оборудования?" },
+    { key: "interfaces", kind: "qualify", text: "Какие выходы, интерфейсы и исполнение нужны?" },
+    { key: "brands", kind: "qualify", text: "Какие бренды обычно используете?" },
+    { key: "frequency", kind: "qualify", text: "Такие проекты возникают регулярно?" },
+    { key: "embed", kind: "sell", text: "Что нужно, чтобы вы начали закладывать ТОП-СЕНС в проекты?" },
+    { key: "support", kind: "sell", text: "Какая техническая поддержка от производителя для вас наиболее полезна?" },
+    { key: "analogs_service", kind: "sell", text: "Есть смысл нам быстро подбирать аналоги по вашим спецификациям?" },
+    { key: "priority", kind: "sell", text: "Что для вас важнее: цена, инженерная поддержка, срок или наличие?" }
+  ],
+  "Сервисная компания": [
+    { key: "for_whom", kind: "qualify", text: "Приборы нужны для вашей работы или для клиента?" },
+    { key: "task", kind: "qualify", text: "Для какой задачи используются приборы?" },
+    { key: "brands", kind: "qualify", text: "Какие марки газоанализаторов обычно используете или обслуживаете?" },
+    { key: "other_brands", kind: "qualify", text: "Рассматриваете другие бренды?" },
+    { key: "frequency", kind: "qualify", text: "Как часто возникают такие запросы?" },
+    { key: "partnership", kind: "qualify", text: "Интересны постоянные условия работы с ТОП-СЕНС?" },
+    { key: "recommend", kind: "sell", text: "Что нужно, чтобы вы чаще рекомендовали наши приборы клиентам?" },
+    { key: "conditions", kind: "sell", text: "Какие условия сделали бы регулярную работу с нами удобной?" },
+    { key: "priority", kind: "sell", text: "Что важнее: цена, наличие, срок ремонта/поставки или техподдержка?" }
+  ],
+  "Дилер": [
+    { key: "regions", kind: "qualify", text: "В каких регионах работаете?" },
+    { key: "industries", kind: "qualify", text: "В каких отраслях основные клиенты?" },
+    { key: "brands", kind: "qualify", text: "Какие бренды газоанализаторов сейчас продаёте?" },
+    { key: "frequency", kind: "qualify", text: "Как часто приходят запросы?" },
+    { key: "stock", kind: "qualify", text: "Работаете со склада или в основном под заказ?" },
+    { key: "volume", kind: "qualify", text: "Какой примерно объём таких запросов?" },
+    { key: "active_sales", kind: "sell", text: "Что нужно, чтобы вы начали активно предлагать ТОП-СЕНС?" },
+    { key: "margin", kind: "sell", text: "Какая маржа для вас интересна?" },
+    { key: "manufacturer_value", kind: "sell", text: "Что важнее от производителя: цена, наличие, защита сделки, техподдержка или лиды?" },
+    { key: "dealer_terms", kind: "sell", text: "Готовы обсудить дилерские условия?" }
+  ],
+  "Потенциальный дилер": [
+    { key: "customers", kind: "qualify", text: "Каким клиентам обычно продаёте оборудование?" },
+    { key: "regions", kind: "qualify", text: "В каких регионах работаете?" },
+    { key: "demand", kind: "qualify", text: "Есть ли сейчас запросы на газоанализаторы?" },
+    { key: "brands", kind: "qualify", text: "Какие бренды уже предлагаете?" },
+    { key: "frequency", kind: "qualify", text: "Как часто возникает такой спрос?" },
+    { key: "owner", kind: "qualify", text: "Есть ли человек, который занимается этим направлением?" },
+    { key: "conditions", kind: "sell", text: "Что должно быть в наших условиях, чтобы вы попробовали работать с ТОП-СЕНС?" },
+    { key: "barrier", kind: "sell", text: "Что мешает добавить ещё одного производителя в ассортимент?" },
+    { key: "first_order", kind: "sell", text: "С какого заказа удобнее всего начать сотрудничество?" },
+    { key: "dealer_terms", kind: "sell", text: "Интересно обсудить дилерские условия?" }
+  ],
+  "Дистрибьютор": [
+    { key: "regions", kind: "qualify", text: "Какие регионы покрываете?" },
+    { key: "network", kind: "qualify", text: "Есть филиалы или дилерская сеть?" },
+    { key: "brands", kind: "qualify", text: "Какие бренды газоаналитического оборудования уже есть в портфеле?" },
+    { key: "volume", kind: "qualify", text: "Какой примерно объём запросов на газоанализаторы?" },
+    { key: "stock", kind: "qualify", text: "Работаете со склада или под заказ?" },
+    { key: "industries", kind: "qualify", text: "Какие отрасли дают основной объём?" },
+    { key: "portfolio", kind: "sell", text: "Что нужно, чтобы ТОП-СЕНС появился в вашей постоянной линейке?" },
+    { key: "metrics", kind: "sell", text: "Какие показатели вы оцениваете перед вводом нового бренда?" },
+    { key: "margin", kind: "sell", text: "Какая маржинальность вам нужна?" },
+    { key: "launch", kind: "sell", text: "Что мы должны предоставить для запуска продаж через вашу сеть?" }
+  ],
+  "Торговая компания / комплектатор": [
+    { key: "repeat", kind: "qualify", text: "Это разовая заявка или регулярное направление?" },
+    { key: "alternative", kind: "qualify", text: "Требуется конкретный производитель или можно предложить аналог?" },
+    { key: "purchase", kind: "qualify", text: "Тендер или прямая закупка?" },
+    { key: "price", kind: "qualify", text: "Есть ориентир по цене или предложения конкурентов?" },
+    { key: "quote_deadline", kind: "qualify", text: "К какому сроку нужно КП?" },
+    { key: "delivery_deadline", kind: "qualify", text: "К какому сроку нужна поставка?" },
+    { key: "win_client", kind: "sell", text: "Что поможет вам получить эту поставку?" },
+    { key: "competition", kind: "sell", text: "На чём вы собираетесь конкурировать: цена, срок или характеристики?" },
+    { key: "help_sell", kind: "sell", text: "Что нам нужно дать вам, чтобы наше предложение было проще продать дальше?" },
+    { key: "options", kind: "sell", text: "Подготовить несколько вариантов под разные бюджеты?" }
+  ],
+  "Проектная организация / проектный институт": [
+    { key: "stage", kind: "qualify", text: "На какой стадии находится проект?" },
+    { key: "brand_status", kind: "qualify", text: "Производитель уже заложен или его ещё можно выбрать?" },
+    { key: "requirements", kind: "qualify", text: "Какие параметры оборудования обязательны?" },
+    { key: "spec_deadline", kind: "qualify", text: "Когда должна быть утверждена спецификация?" },
+    { key: "buyer", kind: "qualify", text: "Кто будет проводить закупку?" },
+    { key: "docs", kind: "qualify", text: "Какие документы нужны для включения оборудования в проект?" },
+    { key: "embed", kind: "sell", text: "Что нужно, чтобы вы заложили ТОП-СЕНС в спецификацию?" },
+    { key: "materials", kind: "sell", text: "Какие материалы помогут вам согласовать наше оборудование?" },
+    { key: "solution", kind: "sell", text: "Есть смысл подготовить готовое техническое решение?" }
+  ],
+  "Лаборатория / метрология": [
+    { key: "task", kind: "qualify", text: "Для какой задачи нужны приборы?" },
+    { key: "spec", kind: "qualify", text: "Какие газы и диапазоны нужны?" },
+    { key: "accuracy", kind: "qualify", text: "Какие требования к точности и поверке?" },
+    { key: "portable", kind: "qualify", text: "Нужны переносные или стационарные приборы?" },
+    { key: "quantity", kind: "qualify", text: "Какое количество требуется?" },
+    { key: "repeat", kind: "qualify", text: "Это разовая или регулярная потребность?" },
+    { key: "choice", kind: "sell", text: "На что будете в первую очередь смотреть при выборе?" },
+    { key: "current_problem", kind: "sell", text: "Что не устраивает в текущем оборудовании?" },
+    { key: "win", kind: "sell", text: "Что должно быть у нашего прибора, чтобы вы выбрали его?" },
+    { key: "options", kind: "sell", text: "Подготовить несколько вариантов под разные бюджеты?" }
+  ],
+  "Промышленная безопасность / аварийная служба": [
+    { key: "works", kind: "qualify", text: "Для каких работ нужны приборы?" },
+    { key: "gases", kind: "qualify", text: "Какие газы необходимо контролировать?" },
+    { key: "portable", kind: "qualify", text: "Нужны переносные или стационарные приборы?" },
+    { key: "explosion", kind: "qualify", text: "Какие требования к исполнению и взрывозащите?" },
+    { key: "quantity", kind: "qualify", text: "Какое количество нужно?" },
+    { key: "frequency", kind: "qualify", text: "Такие закупки происходят регулярно?" },
+    { key: "priority", kind: "sell", text: "Что для вас критичнее всего: надёжность, срок поставки, удобство или цена?" },
+    { key: "current_problem", kind: "sell", text: "Какие проблемы есть у текущих приборов?" },
+    { key: "improve", kind: "sell", text: "Что должно быть лучше у нового оборудования?" },
+    { key: "test", kind: "sell", text: "Есть смысл дать прибор на сравнение или тест?" }
+  ]
+};
+
+function questionText(clientType, key) {
+  const questions = QUESTION_RULES[clientType] || [];
+  const item = questions.find(q => q.key === key);
+  return item ? item.text : null;
+}
+
 function formatManagerQuestions(analysis) {
   const blocks = [];
 
-  if (analysis.client_type && analysis.client_type !== "Не определено") {
-    blocks.push("Клиент: " + analysis.client_type);
+  blocks.push("Тип: " + (analysis.client_type || "Не определено"));
+
+  if (analysis.classification_reason) {
+    blocks.push("Почему: " + analysis.classification_reason);
   }
 
-  if (analysis.purchase_format && analysis.purchase_format !== "unknown") {
-    blocks.push("Закупка: " + analysis.purchase_format);
-  }
-
-  if (analysis.delivery_deadline && analysis.delivery_deadline !== "unknown") {
-    blocks.push("Срок: " + analysis.delivery_deadline);
-  }
-
-  const questions = Array.isArray(analysis.manager_questions)
-    ? analysis.manager_questions.slice(0, 6)
+  const keys = Array.isArray(analysis.question_keys)
+    ? analysis.question_keys.slice(0, 6)
     : [];
 
-  questions.forEach((q, i) => blocks.push(`${i + 1}. ${q}`));
+  const questions = keys
+    .map(key => questionText(analysis.client_type, key))
+    .filter(Boolean);
+
+  questions.forEach((q, i) => {
+    blocks.push(`${i + 1}. ${q}\r\nОтвет:`);
+  });
 
   return blocks.join("\r\n\r\n");
 }
@@ -279,27 +430,20 @@ async function analyzeDeal(deal) {
 
   const instructions = [
     "Ты квалификатор входящих B2B-заявок российского производителя промышленных газоанализаторов ТОП-СЕНС.",
-    "Работай только по данным сделки. Не выдумывай факты.",
-    "Если данных недостаточно, явно укажи unknown и сформулируй вопрос менеджеру.",
-    "Не придумывай новые направления квалификации и не меняй смысл вопросов.",
-    "manager_questions выбирай только из этого фиксированного списка и сохраняй формулировки дословно:",
-    "Какая модель, газ и диапазон измерения нужны?",
-    "Кто конечный заказчик?",
-    "Тендер или прямая закупка?",
-    "К какому сроку нужна поставка?",
-    "В какой регион нужна поставка?",
-    "Рассматриваете аналоги?",
-    "Каких производителей ещё рассматриваете?",
-    "Есть ли цены конкурентов?",
-    "Как часто бывают запросы на газоанализаторы?",
-    "Готовы рассмотреть дилерский договор?",
-    "Выбирай только вопросы, ответы на которые отсутствуют в сделке.",
-    "Не задавай вопросы про оплату, взрывозащиту и другие темы вне этого списка.",
-    "Оставляй максимум 6 вопросов.",
-    "Допустимые типы клиента: Дилер, Потенциальный дилер, Дистрибьютор, Завод, Подрядчик, Сервисная компания, Тендерщики, СНГ, Не определено.",
+    "Сначала определи тип компании по данным сделки. Не выдумывай факты.",
+    "Допустимые типы: " + Object.keys(QUESTION_RULES).concat(["Не определено"]).join(", ") + ".",
+    "СНГ — это география, а тендер — способ закупки, не тип компании.",
+    "Если тип нельзя определить уверенно, используй Не определено.",
+    "classification_reason — одно короткое предложение, почему выбран этот тип.",
+    "После определения типа выбери question_keys только из правил соответствующего типа.",
+    "Не придумывай новые вопросы и не меняй формулировки: текст вопросов хранится в коде.",
+    "Не выбирай вопрос, если ответ уже явно есть в названии, комментарии или полях сделки.",
+    "Обычно выбери 3–6 вопросов. Из них 1–2 могут быть продающими, если базовая потребность уже понятна.",
+    "Не требуй имя конечного заказчика, если оно не нужно для конкретного вопроса.",
     "Не выводи телефоны, email и другие персональные контакты.",
+    "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
     "Ответь только валидным JSON без markdown.",
-    "JSON должен содержать поля: summary (string), client_type (string), confidence (number 0..1), purchase_format (string), end_customer (string), delivery_deadline (string), analogs (string), competitor_prices (string), manager_questions (array of strings, максимум 10), risks (array of strings), evidence (array of strings).",
+    "JSON должен содержать: client_type (string), classification_reason (string), confidence (number 0..1), purchase_format (string), delivery_deadline (string), question_keys (array of strings), known_facts (array of strings)."
   ].join("\n");
 
   const response = await fetch("https://api.openai.com/v1/responses", {
