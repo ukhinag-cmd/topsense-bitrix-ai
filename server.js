@@ -123,24 +123,24 @@ async function updateDealField(dealId, fieldName, value) {
 }
 
 function formatManagerQuestions(analysis) {
-  const lines = [];
-  lines.push("ИИ-анализ:");
-  lines.push(analysis.summary || "Нет краткого резюме.");
-  lines.push("");
-  lines.push("Тип клиента: " + (analysis.client_type || "Не определено"));
-  lines.push("Формат закупки: " + (analysis.purchase_format || "unknown"));
-  lines.push("Конечный заказчик: " + (analysis.end_customer || "unknown"));
-  lines.push("Срок поставки: " + (analysis.delivery_deadline || "unknown"));
-  lines.push("");
-  lines.push("Вопросы менеджеру:");
+  const blocks = [];
+
+  blocks.push("ИИ-анализ:");
+  blocks.push(analysis.summary || "Нет краткого резюме.");
+  blocks.push("Тип клиента: " + (analysis.client_type || "Не определено"));
+  blocks.push("Формат закупки: " + (analysis.purchase_format || "unknown"));
+  blocks.push("Конечный заказчик: " + (analysis.end_customer || "unknown"));
+  blocks.push("Срок поставки: " + (analysis.delivery_deadline || "unknown"));
+  blocks.push("Вопросы менеджеру:");
 
   const questions = Array.isArray(analysis.manager_questions)
     ? analysis.manager_questions.slice(0, 10)
     : [];
 
-  questions.forEach((q, i) => lines.push(`${i + 1}. ${q}`));
+  questions.forEach((q, i) => blocks.push(`${i + 1}. ${q}`));
 
-  return lines.join("\n");
+  // Every statement and every question is separated by one empty line.
+  return blocks.join("\n\n");
 }
 
 function extractResponseText(payload) {
