@@ -125,22 +125,24 @@ async function updateDealField(dealId, fieldName, value) {
 function formatManagerQuestions(analysis) {
   const blocks = [];
 
-  blocks.push("ИИ-анализ:");
-  blocks.push(analysis.summary || "Нет краткого резюме.");
-  blocks.push("Тип клиента: " + (analysis.client_type || "Не определено"));
-  blocks.push("Формат закупки: " + (analysis.purchase_format || "unknown"));
-  blocks.push("Конечный заказчик: " + (analysis.end_customer || "unknown"));
-  blocks.push("Срок поставки: " + (analysis.delivery_deadline || "unknown"));
-  blocks.push("Вопросы менеджеру:");
+  if (analysis.client_type && analysis.client_type !== "Не определено") {
+    blocks.push("Клиент: " + analysis.client_type);
+  }
+
+  if (analysis.purchase_format && analysis.purchase_format !== "unknown") {
+    blocks.push("Закупка: " + analysis.purchase_format);
+  }
+
+  if (analysis.delivery_deadline && analysis.delivery_deadline !== "unknown") {
+    blocks.push("Срок: " + analysis.delivery_deadline);
+  }
 
   const questions = Array.isArray(analysis.manager_questions)
-    ? analysis.manager_questions.slice(0, 10)
+    ? analysis.manager_questions.slice(0, 6)
     : [];
 
   questions.forEach((q, i) => blocks.push(`${i + 1}. ${q}`));
 
-  // Bitrix card view collapses ordinary CR/LF whitespace.
-  // Use Unicode paragraph separators so each block/question stays visually separated.
   return blocks.join("\u2029\u2029");
 }
 
@@ -203,6 +205,9 @@ async function analyzeDeal(deal) {
     "Ты квалификатор входящих B2B-заявок российского производителя промышленных газоанализаторов ТОП-СЕНС.",
     "Работай только по данным сделки. Не выдумывай факты.",
     "Если данных недостаточно, явно укажи unknown и сформулируй вопрос менеджеру.",
+    "Вопросы менеджеру делай короткими и разговорными: один вопрос — одна мысль, желательно до 8–12 слов.",
+    "Не повторяй в вопросах то, что уже известно из сделки.",
+    "Оставляй только 3–6 самых важных вопросов для следующего разговора.",
     "Допустимые типы клиента: Дилер, Потенциальный дилер, Дистрибьютор, Завод, Подрядчик, Сервисная компания, Тендерщики, СНГ, Не определено.",
     "Не выводи телефоны, email и другие персональные контакты.",
     "Ответь только валидным JSON без markdown.",
