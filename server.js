@@ -198,6 +198,506 @@ async function ensureMultilineDealField(fieldName) {
   );
 }
 
+
+const AI_FIELDS = {
+  dealType: "UF_CRM_AI_CLIENT_TYPE",
+  dealReason: "UF_CRM_AI_CLASS_REASON",
+  dealStatus: "UF_CRM_AI_QUAL_STATUS",
+  dealAnswers: "UF_CRM_AI_QUAL_ANSWERS",
+  companyType: "UF_CRM_AI_CLIENT_TYPE",
+  companyReason: "UF_CRM_AI_CLASS_REASON",
+  companyInn: "UF_CRM_AI_INN",
+};
+
+const LEGACY_TYPE_ENUM = {
+  "Дилер": 172,
+  "Потенциальный дилер": 174,
+  "Дистрибьютор": 176,
+  "Завод / промышленное предприятие": 178,
+  "Промышленный подрядчик": 180,
+  "Генподрядчик / EPC": 180,
+  "КИПиА / АСУ ТП интегратор": 180,
+  "Сервисная компания": 182,
+};
+
+const SELF_UPDATES = new Map();
+
+async function bitrixCall(method, params = {}) {
+  const url = new URL(method + ".json", bitrixBaseUrl());
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(params),
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.error) {
+    throw new Error(
+      `${method} failed: ${payload.error_description || payload.error || "HTTP " + response.status}`
+    );
+  }
+
+  return payload.result;
+}
+
+function isEmpty(value) {
+  if (value === null || value === undefined) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return String(value).trim() === "" || String(value) === "0";
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function cleanReason(value) {
+  return String(value || "")
+    .replace(/\(\[[^\]]+\]\([^)]+\)\)/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function ensureUserField(entity, code, label, rows = 1) {
+  const fullName = "UF_CRM_" + code;
+  const listMethod = `crm.${entity}.userfield.list`;
+  const addMethod = `crm.${entity}.userfield.add`;
+
+  try {
+    const existing = await bitrixCall(listMethod, {
+      filter: { FIELD_NAME: fullName },
+    });
+
+    const found = Array.isArray(existing)
+      ? existing.find(item => item.FIELD_NAME === fullName)
+      : null;
+
+    if (found) return fullName;
+
+    await bitrixCall(addMethod, {
+      fields: {
+        FIELD_NAME: code,
+        USER_TYPE_ID: "string",
+        MULTIPLE: "N",
+        MANDATORY: "N",
+        SHOW_FILTER: "Y",
+        EDIT_FORM_LABEL: { ru: label },
+        LIST_COLUMN_LABEL: { ru: label },
+        SETTINGS: { ROWS: rows },
+        SORT: 9900,
+      },
+    });
+
+    console.log(JSON.stringify({
+      source: "bitrix24",
+      action: "ai-field-created",
+      entity,
+      field: fullName,
+      at: new Date().toISOString(),
+    }));
+
+    return fullName;
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "bitrix24",
+      action: "ai-field-create-skipped",
+      entity,
+      field: fullName,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
+}
+
+async function ensureAIFields() {
+  await ensureUserField("deal", "AI_CLIENT_TYPE", "ИИ: Тип компании", 1);
+  await ensureUserField("deal", "AI_CLASS_REASON", "ИИ: Основание классификации", 3);
+  await ensureUserField("deal", "AI_QUAL_STATUS", "ИИ: Статус квалификации", 1);
+  await ensureUserField("deal", "AI_QUAL_ANSWERS", "ИИ: Ответы квалификации", 8);
+  await ensureUserField("company", "AI_CLIENT_TYPE", "ИИ: Тип компании", 1);
+  await ensureUserField("company", "AI_CLASS_REASON", "ИИ: Основание классификации", 3);
+  await ensureUserField("company", "AI_INN", "ИИ: ИНН", 1);
+}
+
+async function getCompany(id) {
+  if (!id || String(id) === "0") return null;
+  return bitrixCall("crm.company.get", { ID: Number(id) });
+}
+
+async function getContact(id) {
+  if (!id || String(id) === "0") return null;
+  return bitrixCall("crm.contact.get", { ID: Number(id) });
+}
+
+async function findContactByEmailOrPhone(email, phone) {
+  if (email) {
+    const result = await bitrixCall("crm.contact.list", {
+      order: { ID: "ASC" },
+      filter: { EMAIL: email },
+      select: ["ID", "NAME", "LAST_NAME", "SECOND_NAME", "POST", "COMPANY_ID", "EMAIL", "PHONE"],
+    });
+    if (Array.isArray(result) && result[0]) return result[0];
+  }
+
+  if (phone) {
+    const result = await bitrixCall("crm.contact.list", {
+      order: { ID: "ASC" },
+      filter: { PHONE: phone },
+      select: ["ID", "NAME", "LAST_NAME", "SECOND_NAME", "POST", "COMPANY_ID", "EMAIL", "PHONE"],
+    });
+    if (Array.isArray(result) && result[0]) return result[0];
+  }
+
+  return null;
+}
+
+async function findCompanyByAnalysis(company) {
+  if (!company) return null;
+
+  const inn = String(company.inn || "").trim();
+  if (inn) {
+    try {
+      const byInn = await bitrixCall("crm.company.list", {
+        order: { ID: "ASC" },
+        filter: { [AI_FIELDS.companyInn]: inn },
+        select: ["ID", "TITLE", AI_FIELDS.companyInn, "WEB", "PHONE", "EMAIL"],
+      });
+      if (Array.isArray(byInn) && byInn[0]) return byInn[0];
+    } catch {}
+  }
+
+  const title = String(company.name || "").trim();
+  if (title) {
+    const byTitle = await bitrixCall("crm.company.list", {
+      order: { ID: "ASC" },
+      filter: { TITLE: title },
+      select: ["ID", "TITLE", "WEB", "PHONE", "EMAIL"],
+    });
+    if (Array.isArray(byTitle) && byTitle[0]) return byTitle[0];
+  }
+
+  return null;
+}
+
+function multifieldHas(items, value, normalizer) {
+  const target = normalizer(value);
+  if (!target) return false;
+  return Array.isArray(items) && items.some(item => normalizer(item.VALUE) === target);
+}
+
+function addMultifieldPatch(patch, existing, key, value, normalizer) {
+  if (!value || multifieldHas(existing?.[key], value, normalizer)) return;
+  const current = Array.isArray(existing?.[key])
+    ? existing[key].map(item => ({ VALUE: item.VALUE, VALUE_TYPE: item.VALUE_TYPE || "WORK" }))
+    : [];
+  patch[key] = current.concat([{ VALUE: value, VALUE_TYPE: "WORK" }]);
+}
+
+async function upsertCompany(deal, analysis) {
+  const companyData = analysis.company || {};
+  let company = await getCompany(deal.COMPANY_ID);
+
+  if (!company) {
+    company = await findCompanyByAnalysis(companyData);
+  }
+
+  const title = String(companyData.name || "").trim();
+
+  if (!company && !title) return null;
+
+  if (!company) {
+    const fields = { TITLE: title };
+
+    if (companyData.address) fields.ADDRESS = companyData.address;
+    if (companyData.city) fields.ADDRESS_CITY = companyData.city;
+    if (companyData.region) fields.ADDRESS_REGION = companyData.region;
+    if (companyData.phone) fields.PHONE = [{ VALUE: companyData.phone, VALUE_TYPE: "WORK" }];
+    if (companyData.email) fields.EMAIL = [{ VALUE: companyData.email, VALUE_TYPE: "WORK" }];
+    if (companyData.website) fields.WEB = [{ VALUE: companyData.website, VALUE_TYPE: "WORK" }];
+    if (companyData.inn) fields[AI_FIELDS.companyInn] = String(companyData.inn);
+    fields[AI_FIELDS.companyType] = analysis.client_type || "";
+    fields[AI_FIELDS.companyReason] = cleanReason(analysis.classification_reason);
+
+    const id = await bitrixCall("crm.company.add", { fields });
+    company = await getCompany(id);
+
+    console.log(JSON.stringify({
+      source: "bitrix24",
+      action: "company-created",
+      dealId: String(deal.ID),
+      companyId: String(id),
+    }));
+  } else {
+    const patch = {};
+
+    if (isEmpty(company.TITLE) && title) patch.TITLE = title;
+    if (isEmpty(company.ADDRESS) && companyData.address) patch.ADDRESS = companyData.address;
+    if (isEmpty(company.ADDRESS_CITY) && companyData.city) patch.ADDRESS_CITY = companyData.city;
+    if (isEmpty(company.ADDRESS_REGION) && companyData.region) patch.ADDRESS_REGION = companyData.region;
+    if (isEmpty(company[AI_FIELDS.companyInn]) && companyData.inn) patch[AI_FIELDS.companyInn] = String(companyData.inn);
+    if (isEmpty(company[AI_FIELDS.companyType]) && analysis.client_type && analysis.client_type !== "Не определено") {
+      patch[AI_FIELDS.companyType] = analysis.client_type;
+    }
+    if (isEmpty(company[AI_FIELDS.companyReason]) && analysis.classification_reason) {
+      patch[AI_FIELDS.companyReason] = cleanReason(analysis.classification_reason);
+    }
+
+    addMultifieldPatch(patch, company, "PHONE", companyData.phone, normalizePhone);
+    addMultifieldPatch(patch, company, "EMAIL", companyData.email, normalizeEmail);
+    addMultifieldPatch(patch, company, "WEB", companyData.website, value => String(value || "").trim().toLowerCase());
+
+    if (Object.keys(patch).length) {
+      await bitrixCall("crm.company.update", { ID: Number(company.ID), fields: patch });
+      company = await getCompany(company.ID);
+      console.log(JSON.stringify({
+        source: "bitrix24",
+        action: "company-updated",
+        dealId: String(deal.ID),
+        companyId: String(company.ID),
+        fieldCount: Object.keys(patch).length,
+      }));
+    }
+  }
+
+  return company;
+}
+
+async function upsertContact(deal, analysis, company) {
+  const contactData = analysis.contact || {};
+  let contact = await getContact(deal.CONTACT_ID);
+
+  if (!contact) {
+    contact = await findContactByEmailOrPhone(contactData.email, contactData.phone);
+  }
+
+  const hasIdentity =
+    contactData.email ||
+    contactData.phone ||
+    contactData.first_name ||
+    contactData.last_name ||
+    contactData.name;
+
+  if (!contact && !hasIdentity) return null;
+
+  if (!contact) {
+    const fields = {};
+    if (contactData.first_name) fields.NAME = contactData.first_name;
+    else if (contactData.name) fields.NAME = contactData.name;
+    if (contactData.last_name) fields.LAST_NAME = contactData.last_name;
+    if (contactData.second_name) fields.SECOND_NAME = contactData.second_name;
+    if (contactData.position) fields.POST = contactData.position;
+    if (company?.ID) fields.COMPANY_ID = Number(company.ID);
+    if (contactData.email) fields.EMAIL = [{ VALUE: contactData.email, VALUE_TYPE: "WORK" }];
+    if (contactData.phone) fields.PHONE = [{ VALUE: contactData.phone, VALUE_TYPE: "WORK" }];
+
+    const id = await bitrixCall("crm.contact.add", { fields });
+    contact = await getContact(id);
+
+    console.log(JSON.stringify({
+      source: "bitrix24",
+      action: "contact-created",
+      dealId: String(deal.ID),
+      contactId: String(id),
+    }));
+  } else {
+    const patch = {};
+
+    if (isEmpty(contact.NAME) && (contactData.first_name || contactData.name)) {
+      patch.NAME = contactData.first_name || contactData.name;
+    }
+    if (isEmpty(contact.LAST_NAME) && contactData.last_name) patch.LAST_NAME = contactData.last_name;
+    if (isEmpty(contact.SECOND_NAME) && contactData.second_name) patch.SECOND_NAME = contactData.second_name;
+    if (isEmpty(contact.POST) && contactData.position) patch.POST = contactData.position;
+    if (isEmpty(contact.COMPANY_ID) && company?.ID) patch.COMPANY_ID = Number(company.ID);
+
+    addMultifieldPatch(patch, contact, "EMAIL", contactData.email, normalizeEmail);
+    addMultifieldPatch(patch, contact, "PHONE", contactData.phone, normalizePhone);
+
+    if (Object.keys(patch).length) {
+      await bitrixCall("crm.contact.update", { ID: Number(contact.ID), fields: patch });
+      contact = await getContact(contact.ID);
+      console.log(JSON.stringify({
+        source: "bitrix24",
+        action: "contact-updated",
+        dealId: String(deal.ID),
+        contactId: String(contact.ID),
+        fieldCount: Object.keys(patch).length,
+      }));
+    }
+  }
+
+  return contact;
+}
+
+function parseQuestionAnswers(text) {
+  const source = String(text || "");
+  const re = /(\d+)\.\s*([^\r\n]+)\r?\nОтвет:\s*([\s\S]*?)(?=(?:\r?\n){2,}\d+\.|$)/g;
+  const answers = [];
+  let match;
+
+  while ((match = re.exec(source)) !== null) {
+    const question = String(match[2] || "").trim();
+    const answer = String(match[3] || "").trim();
+    if (question && answer) answers.push({ question, answer });
+  }
+
+  return answers;
+}
+
+function answerHistoryText(existing, newAnswers) {
+  const previous = String(existing || "").trim();
+  const additions = newAnswers
+    .map(item => `${item.question}\r\nОтвет: ${item.answer}`)
+    .join("\r\n\r\n");
+
+  if (!additions) return previous;
+  if (!previous) return additions;
+
+  const unique = additions
+    .split(/\r?\n\r?\n/)
+    .filter(block => !previous.includes(block))
+    .join("\r\n\r\n");
+
+  return unique ? previous + "\r\n\r\n" + unique : previous;
+}
+
+function answerFieldPatch(answers) {
+  const patch = {};
+
+  for (const item of answers) {
+    const q = item.question.toLowerCase();
+    const a = item.answer.trim();
+    const al = a.toLowerCase();
+
+    if (q.includes("тендер или прямая закупка")) {
+      if (al.includes("тендер")) patch.UF_CRM_1728208250222 = [48];
+      else if (al.includes("прям")) patch.UF_CRM_1728208250222 = [50];
+    }
+
+    if (q.includes("можно предложить аналог") || q.includes("рассматриваете другие бренды")) {
+      if (/^(да|можно|рассматри)/i.test(a)) patch.UF_CRM_1728208192427 = 44;
+      else if (/^(нет|нельзя|не рассмат)/i.test(a)) patch.UF_CRM_1728208192427 = 46;
+    }
+
+    if (q.includes("какие производители") || q.includes("какие бренды")) {
+      patch.UF_CRM_1728208353618 = a;
+    }
+
+    if (q.includes("к какому сроку нужна поставка") || q.includes("к какому сроку нужны приборы")) {
+      patch.UF_CRM_1728208560055 = a;
+    }
+
+    if (q.includes("к какому сроку нужно кп")) {
+      patch.UF_CRM_1728208470685 = a;
+    }
+
+    if (q.includes("в каких регионах") || q.includes("какие регионы")) {
+      patch.UF_CRM_1728209888200 = a;
+    }
+
+    if (q.includes("как часто")) {
+      patch.UF_CRM_1728208292193 = a;
+    }
+
+    if (q.includes("дилерск")) {
+      if (/^(да|готов|интерес)/i.test(a)) patch.UF_CRM_1728208444263 = 66;
+      else if (/^(нет|не готов|не интерес)/i.test(a)) patch.UF_CRM_1728208444263 = 68;
+    }
+  }
+
+  return patch;
+}
+
+function qualificationStatus(analysis) {
+  if (!analysis || analysis.client_type === "Не определено") {
+    return "Нужно определить тип компании";
+  }
+
+  const count = Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0;
+  return count ? `Нужно уточнить: ${count}` : "Квалифицировано";
+}
+
+async function writeDealAIFields(deal, analysis, answers = []) {
+  const patch = {
+    [AI_FIELDS.dealType]: analysis.client_type || "Не определено",
+    [AI_FIELDS.dealReason]: cleanReason(analysis.classification_reason),
+    [AI_FIELDS.dealStatus]: qualificationStatus(analysis),
+  };
+
+  const legacy = LEGACY_TYPE_ENUM[analysis.client_type];
+  if (legacy && isEmpty(deal.UF_CRM_1739950675115)) {
+    patch.UF_CRM_1739950675115 = legacy;
+  }
+
+  if (analysis.company?.inn && isEmpty(deal.UF_CRM_1789994254952)) {
+    patch.UF_CRM_1789994254952 = String(analysis.company.inn);
+  }
+
+  if (analysis.company?.region && isEmpty(deal.UF_CRM_1728209888200)) {
+    patch.UF_CRM_1728209888200 = analysis.company.region;
+  }
+
+  if (analysis.company?.address && isEmpty(deal.UF_CRM_1728209895847)) {
+    patch.UF_CRM_1728209895847 = analysis.company.address;
+  }
+
+  Object.assign(patch, answerFieldPatch(answers));
+
+  const history = answerHistoryText(deal[AI_FIELDS.dealAnswers], answers);
+  if (history) patch[AI_FIELDS.dealAnswers] = history;
+
+  return patch;
+}
+
+async function updateDealFields(dealId, fields) {
+  if (!Object.keys(fields || {}).length) return;
+  SELF_UPDATES.set(String(dealId), Date.now());
+  await bitrixCall("crm.deal.update", { ID: Number(dealId), fields });
+}
+
+async function linkDealEntities(deal, company, contact) {
+  const patch = {};
+  if (company?.ID && isEmpty(deal.COMPANY_ID)) patch.COMPANY_ID = Number(company.ID);
+  if (contact?.ID && isEmpty(deal.CONTACT_ID)) patch.CONTACT_ID = Number(contact.ID);
+  if (Object.keys(patch).length) await updateDealFields(deal.ID, patch);
+}
+
+async function createQualificationActivity(deal, analysis) {
+  if (process.env.AUTO_QUAL_ACTIVITY !== "1") return null;
+  const count = Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0;
+  if (!count) return null;
+
+  const deadline = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
+
+  try {
+    return await bitrixCall("crm.activity.todo.add", {
+      ownerTypeId: 2,
+      ownerId: Number(deal.ID),
+      deadline,
+      responsibleId: Number(deal.ASSIGNED_BY_ID || 1),
+      title: `Уточнить квалификацию — ${count} вопроса`,
+      description: "Получите ответы на вопросы из поля «Вопросы менеджеру и ответы клиента».",
+      pingOffsets: [0, 30],
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "bitrix24",
+      action: "qualification-activity-skipped",
+      dealId: String(deal.ID),
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
+}
+
 const QUESTION_RULES = {
   "Завод / промышленное предприятие": [
     { key: "task", kind: "qualify", text: "Для какой задачи нужны приборы?" },
