@@ -373,6 +373,34 @@ function formatManagerQuestions(analysis) {
   return blocks.join("\r\n\r\n");
 }
 
+function extractWebSources(payload) {
+  const seen = new Set();
+  const sources = [];
+
+  for (const item of payload.output || []) {
+    if (item.type !== "message") continue;
+    for (const part of item.content || []) {
+      for (const annotation of part.annotations || []) {
+        const url =
+          annotation.url ||
+          annotation.url_citation?.url ||
+          null;
+        const title =
+          annotation.title ||
+          annotation.url_citation?.title ||
+          null;
+
+        if (url && !seen.has(url)) {
+          seen.add(url);
+          sources.push({ title, url });
+        }
+      }
+    }
+  }
+
+  return sources.slice(0, 5);
+}
+
 function extractResponseText(payload) {
   const chunks = [];
   for (const item of payload.output || []) {
@@ -419,32 +447,11 @@ function dealForAI(deal) {
   };
 }
 
-async function analyzeDeal(deal) {
+async function callOpenAI(body) {
   const apiKey = (process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
-
-  const model = (process.env.OPENAI_MODEL || "gpt-6-sol").trim();
-  const input = dealForAI(deal);
-
-  const instructions = [
-    "Ты квалификатор входящих B2B-заявок российского производителя промышленных газоанализаторов ТОП-СЕНС.",
-    "Сначала определи тип компании по данным сделки. Не выдумывай факты.",
-    "Допустимые типы: " + Object.keys(QUESTION_RULES).concat(["Не определено"]).join(", ") + ".",
-    "СНГ — это география, а тендер — способ закупки, не тип компании.",
-    "Если тип нельзя определить уверенно, используй Не определено.",
-    "classification_reason — одно короткое предложение, почему выбран этот тип.",
-    "После определения типа выбери question_keys только из правил соответствующего типа.",
-    "Не придумывай новые вопросы и не меняй формулировки: текст вопросов хранится в коде.",
-    "Не выбирай вопрос, если ответ уже явно есть в названии, комментарии или полях сделки.",
-    "Обычно выбери 3–6 вопросов. Из них 1–2 могут быть продающими, если базовая потребность уже понятна.",
-    "Не требуй имя конечного заказчика, если оно не нужно для конкретного вопроса.",
-    "Не выводи телефоны, email и другие персональные контакты.",
-    "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
-    "Ответь только валидным JSON без markdown.",
-    "JSON должен содержать: client_type (string), classification_reason (string), confidence (number 0..1), purchase_format (string), delivery_deadline (string), question_keys (array of strings), known_facts (array of strings)."
-  ].join("\n");
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -452,20 +459,7 @@ async function analyzeDeal(deal) {
       authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      store: false,
-      max_output_tokens: 1200,
-      instructions,
-      input: [
-        {
-          role: "user",
-          content:
-            "Проанализируй новую сделку и верни квалификацию. Данные сделки:\n" +
-            JSON.stringify(input),
-        },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
   const payload = await response.json();
@@ -478,17 +472,112 @@ async function analyzeDeal(deal) {
     throw new Error(message);
   }
 
-  const text = extractResponseText(payload);
-  if (!text) {
+  return payload;
+}
+
+function analysisInstructions() {
+  return [
+    "Ты квалификатор входящих B2B-заявок российского производителя промышленных газоанализаторов ТОП-СЕНС.",
+    "Сначала определи тип компании по данным сделки. Не выдумывай факты.",
+    "Допустимые типы: " + Object.keys(QUESTION_RULES).concat(["Не определено"]).join(", ") + ".",
+    "СНГ — это география, а тендер — способ закупки, не тип компании.",
+    "Тип компании определяй по основной деятельности компании, а не только по товару в текущем запросе и не по должности отправителя.",
+    "Если тип нельзя определить уверенно, используй Не определено.",
+    "classification_reason — одно короткое предложение, почему выбран этот тип.",
+    "После определения типа выбери question_keys только из правил соответствующего типа.",
+    "Не придумывай новые вопросы и не меняй формулировки: текст вопросов хранится в коде.",
+    "Не выбирай вопрос, если ответ уже явно есть в названии, комментарии или полях сделки.",
+    "Обычно выбери 3–6 вопросов. Из них 1–2 могут быть продающими, если базовая потребность уже понятна.",
+    "Не требуй имя конечного заказчика.",
+    "Не выводи телефоны, email и другие персональные контакты.",
+    "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
+    "Ответь только валидным JSON без markdown.",
+    "JSON должен содержать: client_type (string), classification_reason (string), confidence (number 0..1), purchase_format (string), delivery_deadline (string), question_keys (array of strings), known_facts (array of strings)."
+  ].join("\n");
+}
+
+async function analyzeDeal(deal, allowWebSearch = false) {
+  const model = (process.env.OPENAI_MODEL || "gpt-6-luna").trim();
+  const input = dealForAI(deal);
+
+  const firstPayload = await callOpenAI({
+    model,
+    store: false,
+    max_output_tokens: 1200,
+    instructions: analysisInstructions(),
+    input: [
+      {
+        role: "user",
+        content:
+          "Проанализируй новую сделку и верни квалификацию. Данные сделки:\n" +
+          JSON.stringify(input),
+      },
+    ],
+  });
+
+  const firstText = extractResponseText(firstPayload);
+  if (!firstText) {
     throw new Error("OpenAI returned no text output");
   }
 
-  const analysis = parseJsonText(text);
+  let analysis = parseJsonText(firstText);
+  let finalPayload = firstPayload;
+  let webUsed = false;
+  let webSources = [];
+
+  const needsResearch =
+    allowWebSearch &&
+    (
+      analysis.client_type === "Не определено" ||
+      Number(analysis.confidence || 0) < 0.75
+    );
+
+  if (needsResearch) {
+    const researchPayload = await callOpenAI({
+      model,
+      store: false,
+      max_output_tokens: 1600,
+      tools: [{ type: "web_search" }],
+      tool_choice: "required",
+      instructions: [
+        analysisInstructions(),
+        "Перед ответом обязательно выполни веб-поиск.",
+        "Ищи компанию по названию, ИНН и сайту, если они присутствуют в данных сделки.",
+        "Приоритет: официальный сайт компании, затем надёжные бизнес-реестры и каталоги.",
+        "Определи тип по фактической основной деятельности компании.",
+        "Не делай вывод только по текущему товару, который компания запрашивает.",
+        "Если найденных данных всё равно недостаточно, оставь тип Не определено."
+      ].join("\n"),
+      input: [
+        {
+          role: "user",
+          content:
+            "Уточни тип компании через открытые источники и заново выбери вопросы. " +
+            "Данные сделки:\n" +
+            JSON.stringify(input) +
+            "\nПервичный анализ:\n" +
+            JSON.stringify(analysis),
+        },
+      ],
+    });
+
+    const researchText = extractResponseText(researchPayload);
+    if (!researchText) {
+      throw new Error("OpenAI web research returned no text output");
+    }
+
+    analysis = parseJsonText(researchText);
+    finalPayload = researchPayload;
+    webUsed = true;
+    webSources = extractWebSources(researchPayload);
+  }
 
   return {
-    model: payload.model || model,
-    responseId: payload.id || null,
+    model: finalPayload.model || model,
+    responseId: finalPayload.id || null,
     analysis,
+    webUsed,
+    webSources,
   };
 }
 
@@ -521,7 +610,8 @@ async function processDeal(evt) {
       })
     );
 
-    const result = await analyzeDeal(deal);
+    const isTestDeal = String(deal.TITLE || "").startsWith("AI WEBHOOK TEST");
+    const result = await analyzeDeal(deal, isTestDeal);
 
     console.log(
       JSON.stringify({
@@ -531,11 +621,12 @@ async function processDeal(evt) {
         model: result.model,
         responseId: result.responseId,
         analysis: result.analysis,
+        webUsed: result.webUsed,
+        webSourceCount: result.webSources.length,
         analyzedAt: new Date().toISOString(),
       })
     );
 
-    const isTestDeal = String(deal.TITLE || "").startsWith("AI WEBHOOK TEST");
     const targetField = "UF_CRM_1790850696723";
     const fieldEmpty = !String(deal[targetField] || "").trim();
 
