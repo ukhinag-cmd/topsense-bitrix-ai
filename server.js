@@ -1097,22 +1097,39 @@ async function analyzeDeal(deal, allowWebSearch = false) {
 }
 
 async function processDeal(evt) {
-  if (String(evt.event || "").toUpperCase() !== "ONCRMDEALADD") {
-    return;
-  }
+  const eventName = String(evt.event || "").toUpperCase();
+  const isAdd = eventName === "ONCRMDEALADD";
+  const isUpdate = eventName === "ONCRMDEALUPDATE";
+
+  if (!isAdd && !isUpdate) return;
 
   if (!evt.dealId) {
     console.warn("Bitrix event has no deal ID");
     return;
   }
 
+  const dealId = String(evt.dealId);
+
+  if (isUpdate) {
+    const selfUpdatedAt = SELF_UPDATES.get(dealId) || 0;
+    if (Date.now() - selfUpdatedAt < 15000) {
+      console.log(JSON.stringify({
+        source: "bitrix24",
+        action: "self-update-skipped",
+        dealId,
+      }));
+      return;
+    }
+  }
+
   try {
-    const deal = await fetchDeal(evt.dealId);
+    let deal = await fetchDeal(evt.dealId);
 
     console.log(
       JSON.stringify({
         source: "bitrix24",
         action: "deal-read-ok",
+        event: eventName,
         dealId: String(deal.ID),
         categoryId: deal.CATEGORY_ID || null,
         stageId: deal.STAGE_ID || null,
@@ -1126,7 +1143,26 @@ async function processDeal(evt) {
     );
 
     const isTestDeal = String(deal.TITLE || "").startsWith("AI WEBHOOK TEST");
-    const result = await analyzeDeal(deal, isTestDeal);
+
+    // Until the test contour is approved, do not enrich or modify real deals.
+    if (!isTestDeal) {
+      console.log(JSON.stringify({
+        source: "pipeline",
+        action: "non-test-deal-skipped",
+        dealId: String(deal.ID),
+      }));
+      return;
+    }
+
+    await ensureAIFields();
+    await ensureMultilineDealField("UF_CRM_1790850696723");
+
+    // Re-read after possible custom-field creation so new fields are present.
+    deal = await fetchDeal(evt.dealId);
+
+    const answers = parseQuestionAnswers(deal.UF_CRM_1790850696723);
+
+    const result = await analyzeDeal(deal, true);
 
     console.log(
       JSON.stringify({
@@ -1135,46 +1171,55 @@ async function processDeal(evt) {
         dealId: String(deal.ID),
         model: result.model,
         responseId: result.responseId,
-        analysis: result.analysis,
+        clientType: result.analysis?.client_type || null,
+        confidence: result.analysis?.confidence ?? null,
+        questionCount: Array.isArray(result.analysis?.question_keys)
+          ? result.analysis.question_keys.length
+          : 0,
         webUsed: result.webUsed,
         webSourceCount: result.webSources.length,
         analyzedAt: new Date().toISOString(),
       })
     );
 
-    const targetField = "UF_CRM_1790850696723";
-    const fieldEmpty = !String(deal[targetField] || "").trim();
+    const company = await upsertCompany(deal, result.analysis);
+    const contact = await upsertContact(deal, result.analysis, company);
 
-    if (isTestDeal && fieldEmpty) {
-      await ensureMultilineDealField(targetField);
-      const text = formatManagerQuestions(result.analysis);
-      await updateDealField(deal.ID, targetField, text);
+    await linkDealEntities(deal, company, contact);
 
-      console.log(
-        JSON.stringify({
-          source: "bitrix24",
-          action: "test-write-ok",
-          dealId: String(deal.ID),
-          field: targetField,
-          writtenAt: new Date().toISOString(),
-        })
-      );
-    } else {
-      console.log(
-        JSON.stringify({
-          source: "bitrix24",
-          action: "write-skipped",
-          dealId: String(deal.ID),
-          reason: !isTestDeal ? "not-test-deal" : "target-field-not-empty",
-        })
-      );
+    // Refresh deal after linking so we only fill still-empty fields.
+    deal = await fetchDeal(evt.dealId);
+
+    const aiPatch = await writeDealAIFields(deal, result.analysis, answers);
+    await updateDealFields(deal.ID, aiPatch);
+
+    const workingText = formatManagerQuestions(result.analysis);
+    if (String(deal.UF_CRM_1790850696723 || "") !== workingText) {
+      await updateDealFields(deal.ID, {
+        UF_CRM_1790850696723: workingText,
+      });
     }
+
+    await createQualificationActivity(deal, result.analysis);
+
+    console.log(
+      JSON.stringify({
+        source: "pipeline",
+        action: "test-pipeline-ok",
+        dealId: String(deal.ID),
+        companyId: company?.ID ? String(company.ID) : null,
+        contactId: contact?.ID ? String(contact.ID) : null,
+        answersCaptured: answers.length,
+        qualificationStatus: qualificationStatus(result.analysis),
+        at: new Date().toISOString(),
+      })
+    );
   } catch (error) {
     console.error(
       JSON.stringify({
         source: "pipeline",
         action: "deal-processing-error",
-        dealId: String(evt.dealId),
+        dealId,
         error: error instanceof Error ? error.message : String(error),
         at: new Date().toISOString(),
       })
