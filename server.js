@@ -855,7 +855,7 @@ function formatManagerQuestions(analysis) {
   blocks.push("Тип: " + (analysis.client_type || "Не определено"));
 
   if (analysis.classification_reason) {
-    blocks.push("Почему: " + analysis.classification_reason);
+    blocks.push("Почему: " + cleanReason(analysis.classification_reason));
   }
 
   const keys = Array.isArray(analysis.question_keys)
@@ -944,6 +944,8 @@ function dealForAI(deal) {
     end_customer: deal.UF_CRM_1728208529434 || "",
     delivery_deadline: deal.UF_CRM_1728208560055 || "",
     competitor_prices: deal.UF_CRM_1728208500678 || "",
+    manager_questions_and_answers: deal.UF_CRM_1790850696723 || "",
+    qualification_answer_history: deal[AI_FIELDS.dealAnswers] || "",
   };
 }
 
@@ -989,10 +991,13 @@ function analysisInstructions() {
     "Не выбирай вопрос, если ответ уже явно есть в названии, комментарии или полях сделки.",
     "Обычно выбери 3–6 вопросов. Из них 1–2 могут быть продающими, если базовая потребность уже понятна.",
     "Не требуй имя конечного заказчика.",
-    "Не выводи телефоны, email и другие персональные контакты.",
+    "Извлеки из сделки данные компании и контактного лица. Данные можно брать только из сделки и, при веб-поиске, из открытых источников.",
+    "company должен содержать: name, inn, website, phone, email, region, city, address. Неизвестные значения оставляй пустой строкой.",
+    "contact должен содержать: name, first_name, last_name, second_name, position, email, phone. Неизвестные значения оставляй пустой строкой.",
+    "Для contact используй персональные данные только если они явно есть в самой заявке/подписи. Не ищи персональные контакты людей в интернете.",
     "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
     "Ответь только валидным JSON без markdown.",
-    "JSON должен содержать: client_type (string), classification_reason (string), confidence (number 0..1), purchase_format (string), delivery_deadline (string), question_keys (array of strings), known_facts (array of strings)."
+    "JSON должен содержать: client_type, classification_reason, confidence, purchase_format, delivery_deadline, question_keys, known_facts, company, contact."
   ].join("\n");
 }
 
@@ -1025,9 +1030,17 @@ async function analyzeDeal(deal, allowWebSearch = false) {
   let webUsed = false;
   let webSources = [];
 
+  const hasCompanyIdentity = Boolean(
+    analysis.company?.name ||
+    analysis.company?.inn ||
+    analysis.company?.website ||
+    input.inn
+  );
+
   const needsResearch =
     allowWebSearch &&
     (
+      hasCompanyIdentity ||
       analysis.client_type === "Не определено" ||
       Number(analysis.confidence || 0) < 0.75
     );
@@ -1045,6 +1058,8 @@ async function analyzeDeal(deal, allowWebSearch = false) {
         "Ищи компанию по названию, ИНН и сайту, если они присутствуют в данных сделки.",
         "Приоритет: официальный сайт компании, затем надёжные бизнес-реестры и каталоги.",
         "Определи тип по фактической основной деятельности компании.",
+        "Найди и заполни по открытым источникам компанию: официальное название, ИНН, сайт, общий телефон, общий email, регион, город и адрес, если они надёжно подтверждаются.",
+        "Не ищи в интернете персональные телефон, email или ФИО контактного лица.",
         "Не делай вывод только по текущему товару, который компания запрашивает.",
         "Если найденных данных всё равно недостаточно, оставь тип Не определено."
       ].join("\n"),
