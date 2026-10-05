@@ -1333,6 +1333,93 @@ async function callOpenAI(body) {
   return payload;
 }
 
+
+function analysisTextFormat() {
+  return {
+    format: {
+      type: "json_schema",
+      name: "deal_qualification",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          client_type: { type: "string" },
+          classification_reason: { type: "string" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          purchase_format: { type: "string" },
+          delivery_deadline: { type: "string" },
+          question_keys: {
+            type: "array",
+            items: { type: "string" },
+          },
+          known_facts: {
+            type: "array",
+            items: { type: "string" },
+          },
+          company: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              name: { type: "string" },
+              inn: { type: "string" },
+              website: { type: "string" },
+              phone: { type: "string" },
+              email: { type: "string" },
+              region: { type: "string" },
+              city: { type: "string" },
+              address: { type: "string" },
+            },
+            required: [
+              "name",
+              "inn",
+              "website",
+              "phone",
+              "email",
+              "region",
+              "city",
+              "address",
+            ],
+          },
+          contact: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              name: { type: "string" },
+              first_name: { type: "string" },
+              last_name: { type: "string" },
+              second_name: { type: "string" },
+              position: { type: "string" },
+              email: { type: "string" },
+              phone: { type: "string" },
+            },
+            required: [
+              "name",
+              "first_name",
+              "last_name",
+              "second_name",
+              "position",
+              "email",
+              "phone",
+            ],
+          },
+        },
+        required: [
+          "client_type",
+          "classification_reason",
+          "confidence",
+          "purchase_format",
+          "delivery_deadline",
+          "question_keys",
+          "known_facts",
+          "company",
+          "contact",
+        ],
+      },
+    },
+  };
+}
+
 function analysisInstructions() {
   return [
     "Ты квалификатор входящих B2B-заявок российского производителя промышленных газоанализаторов ТОП-СЕНС.",
@@ -1375,7 +1462,8 @@ async function analyzeDeal(deal, allowWebSearch = false) {
     const domainPayload = await callOpenAI({
       model,
       store: false,
-      max_output_tokens: 1800,
+      max_output_tokens: 2200,
+      text: analysisTextFormat(),
       tools: [{ type: "web_search" }],
       tool_choice: "required",
       instructions: [
@@ -1420,7 +1508,8 @@ async function analyzeDeal(deal, allowWebSearch = false) {
     const firstPayload = await callOpenAI({
       model,
       store: false,
-      max_output_tokens: 1200,
+      max_output_tokens: 1600,
+      text: analysisTextFormat(),
       instructions: analysisInstructions(),
       input: [{
         role: "user",
@@ -1457,7 +1546,8 @@ async function analyzeDeal(deal, allowWebSearch = false) {
       const researchPayload = await callOpenAI({
         model,
         store: false,
-        max_output_tokens: 1600,
+        max_output_tokens: 2200,
+        text: analysisTextFormat(),
         tools: [{ type: "web_search" }],
         tool_choice: "required",
         instructions: [
