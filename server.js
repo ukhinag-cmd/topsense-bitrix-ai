@@ -1452,12 +1452,93 @@ function contentDispositionFileName(header) {
 }
 
 async function downloadBitrixAttachment(file) {
+  const attachmentId = String(file?.id || "").trim();
+  const portal = new URL(bitrixBaseUrl());
+
+  // With disk permission, resolve the CRM attachment to a proper authenticated download URL.
+  if (attachmentId) {
+    try {
+      const diskFile = await bitrixCall("disk.file.get", { id: Number(attachmentId) });
+      if (diskFile) {
+        const downloadUrl = String(
+          diskFile.DOWNLOAD_URL ||
+          diskFile.downloadUrl ||
+          diskFile.download_url ||
+          ""
+        ).trim();
+
+        console.log(JSON.stringify({
+          source: "bitrix24",
+          action: "disk-file-resolved",
+          attachmentId,
+          fileName: diskFile.NAME || diskFile.name || "",
+          size: Number(diskFile.SIZE || diskFile.size || 0),
+          hasDownloadUrl: Boolean(downloadUrl),
+        }));
+
+        if (downloadUrl) {
+          const target = new URL(downloadUrl, portal.origin);
+          if (target.hostname !== portal.hostname) {
+            throw new Error("disk download URL host mismatch");
+          }
+
+          const response = await fetch(target, {
+            method: "GET",
+            redirect: "follow",
+            signal: AbortSignal.timeout(20000),
+          });
+
+          if (!response.ok) {
+            throw new Error("disk attachment download HTTP " + response.status);
+          }
+
+          const type = String(response.headers.get("content-type") || "");
+          const disposition = String(response.headers.get("content-disposition") || "");
+          const declaredLength = Number(response.headers.get("content-length") || 0);
+
+          if (declaredLength > 15 * 1024 * 1024) {
+            throw new Error("attachment too large");
+          }
+
+          const buffer = Buffer.from(await response.arrayBuffer());
+          if (buffer.length > 15 * 1024 * 1024) {
+            throw new Error("attachment too large");
+          }
+
+          const fileName =
+            diskFile.NAME ||
+            diskFile.name ||
+            contentDispositionFileName(disposition) ||
+            "attachment";
+
+          console.log(JSON.stringify({
+            source: "bitrix24",
+            action: "attachment-download-ok",
+            attachmentId,
+            fileName,
+            contentType: type,
+            bytes: buffer.length,
+            via: "disk.file.get",
+          }));
+
+          return { id: attachmentId, fileName, contentType: type, buffer };
+        }
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        source: "bitrix24",
+        action: "disk-file-resolve-failed",
+        attachmentId,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+
+  // Fallback for CRM URLs (usually returns an auth page, but kept for diagnostics).
   const rawUrl = String(file?.url || "").trim();
   if (!rawUrl) return null;
 
-  const portal = new URL(bitrixBaseUrl());
   const target = new URL(rawUrl, portal.origin);
-
   if (target.hostname !== portal.hostname) {
     throw new Error("attachment URL host mismatch");
   }
@@ -1474,17 +1555,7 @@ async function downloadBitrixAttachment(file) {
 
   const type = String(response.headers.get("content-type") || "");
   const disposition = String(response.headers.get("content-disposition") || "");
-  const declaredLength = Number(response.headers.get("content-length") || 0);
-
-  if (declaredLength > 15 * 1024 * 1024) {
-    throw new Error("attachment too large");
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  if (buffer.length > 15 * 1024 * 1024) {
-    throw new Error("attachment too large");
-  }
+  const buffer = Buffer.from(await response.arrayBuffer());
 
   const fileName =
     contentDispositionFileName(disposition) ||
@@ -1495,13 +1566,14 @@ async function downloadBitrixAttachment(file) {
   console.log(JSON.stringify({
     source: "bitrix24",
     action: "attachment-download-ok",
-    attachmentId: String(file.id || ""),
+    attachmentId,
     fileName,
     contentType: type,
     bytes: buffer.length,
+    via: "crm-url-fallback",
   }));
 
-  return { id: file.id || null, fileName, contentType: type, buffer };
+  return { id: attachmentId || null, fileName, contentType: type, buffer };
 }
 
 async function downloadRecentAttachments(activities) {
