@@ -244,6 +244,7 @@ async function bitrixCall(method, params = {}) {
       "content-type": "application/json",
     },
     body: JSON.stringify(params),
+    signal: AbortSignal.timeout(12000),
   });
 
   const payload = await response.json();
@@ -970,6 +971,13 @@ async function getRecentDealActivities(dealId) {
 
     if (!Array.isArray(activities)) return [];
 
+    console.log(JSON.stringify({
+      source: "bitrix24",
+      action: "activities-read-ok",
+      dealId: String(dealId),
+      count: activities.length,
+    }));
+
     return activities.slice(0, 8).map(item => ({
       id: item.ID,
       type_id: item.TYPE_ID,
@@ -1066,6 +1074,7 @@ async function callOpenAI(body) {
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90000),
   });
 
   const payload = await response.json();
