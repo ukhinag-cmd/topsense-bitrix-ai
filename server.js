@@ -1109,6 +1109,60 @@ async function analyzeDeal(deal, allowWebSearch = false) {
   };
 }
 
+async function reconcileRecentTestDeals() {
+  try {
+    const deals = await bitrixCall("crm.deal.list", {
+      order: { ID: "DESC" },
+      select: [
+        "ID",
+        "TITLE",
+        "COMMENTS",
+        "ADDITIONAL_INFO",
+        "UF_CRM_1790850696723"
+      ],
+      start: 0,
+    });
+
+    if (!Array.isArray(deals)) return;
+
+    const candidates = deals.slice(0, 50).filter(deal => {
+      const haystack = [
+        deal.TITLE,
+        deal.COMMENTS,
+        deal.ADDITIONAL_INFO,
+      ]
+        .filter(Boolean)
+        .join("\n")
+        .toUpperCase();
+
+      if (!haystack.includes("AI WEBHOOK TEST")) return false;
+
+      const questions = String(deal.UF_CRM_1790850696723 || "");
+      return !questions.includes("Тип:");
+    });
+
+    for (const deal of candidates.reverse()) {
+      console.log(JSON.stringify({
+        source: "pipeline",
+        action: "reconcile-test-deal",
+        dealId: String(deal.ID),
+      }));
+
+      await processDeal({
+        event: "ONCRMDEALADD",
+        dealId: String(deal.ID),
+      });
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      source: "pipeline",
+      action: "reconcile-error",
+      error: error instanceof Error ? error.message : String(error),
+      at: new Date().toISOString(),
+    }));
+  }
+}
+
 async function processDeal(evt) {
   const eventName = String(evt.event || "").toUpperCase();
   const isAdd = eventName === "ONCRMDEALADD";
@@ -1316,4 +1370,18 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`TOP-SENSE Bitrix receiver listening on port ${PORT}`);
+
+  // Reconcile missed Bitrix events after wake/redeploy.
+  setTimeout(() => {
+    reconcileRecentTestDeals().catch(error => {
+      console.error("Unexpected reconciliation error", error);
+    });
+  }, 4000);
+
+  // While the free instance is awake, re-check periodically.
+  setInterval(() => {
+    reconcileRecentTestDeals().catch(error => {
+      console.error("Unexpected reconciliation error", error);
+    });
+  }, 5 * 60 * 1000);
 });
