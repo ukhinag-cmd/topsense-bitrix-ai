@@ -1141,6 +1141,10 @@ async function analyzeDeal(deal, allowWebSearch = false) {
 
   let analysis = parseJsonText(firstText);
 
+  const linkedEmail = Array.isArray(context.linked_contact?.email)
+    ? context.linked_contact.email[0]
+    : "";
+
   console.log(JSON.stringify({
     source: "openai",
     action: "ai-first-pass",
@@ -1148,6 +1152,9 @@ async function analyzeDeal(deal, allowWebSearch = false) {
     clientType: analysis.client_type || null,
     confidence: analysis.confidence ?? null,
     companyName: analysis.company?.name || null,
+    companyInn: analysis.company?.inn || null,
+    companyWebsite: analysis.company?.website || null,
+    senderDomain: emailDomain(linkedEmail) || null,
     questionCount: Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0,
   }));
 
@@ -1180,7 +1187,9 @@ async function analyzeDeal(deal, allowWebSearch = false) {
       instructions: [
         analysisInstructions(),
         "Перед ответом обязательно выполни веб-поиск.",
-        "Ищи компанию по названию, ИНН и сайту, если они присутствуют в данных сделки.",
+        "Ищи точную компанию по сочетанию названия, ИНН, сайта и домена email отправителя, если они присутствуют в данных сделки.",
+        "Если название распространённое, домен корпоративной почты, сайт из подписи и реквизиты письма используй как основные признаки для снятия неоднозначности.",
+        "Публичные почтовые домены (mail.ru, yandex.ru, gmail.com и т.п.) не считай признаком компании.",
         "Приоритет: официальный сайт компании, затем надёжные бизнес-реестры и каталоги.",
         "Определи тип по фактической основной деятельности компании.",
         "Найди и заполни по открытым источникам компанию: официальное название, ИНН, сайт, общий телефон, общий email, регион, город и адрес, если они надёжно подтверждаются.",
