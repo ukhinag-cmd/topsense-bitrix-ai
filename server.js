@@ -278,6 +278,44 @@ function emailDomain(value) {
   return at > 0 ? email.slice(at + 1) : "";
 }
 
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  "mail.ru",
+  "inbox.ru",
+  "list.ru",
+  "bk.ru",
+  "yandex.ru",
+  "ya.ru",
+  "gmail.com",
+  "googlemail.com",
+  "outlook.com",
+  "hotmail.com",
+  "icloud.com",
+  "rambler.ru",
+]);
+
+function isCorporateDomain(domain) {
+  const value = String(domain || "").trim().toLowerCase();
+  return Boolean(value) && !PUBLIC_EMAIL_DOMAINS.has(value);
+}
+
+function corporateDomainFromContext(context = {}) {
+  const candidates = [];
+
+  for (const email of context.linked_contact?.email || []) {
+    candidates.push(emailDomain(email));
+  }
+
+  for (const activity of context.recent_activities || []) {
+    for (const communication of activity.communications || []) {
+      if (String(communication.type || "").toUpperCase() === "EMAIL") {
+        candidates.push(emailDomain(communication.value));
+      }
+    }
+  }
+
+  return candidates.find(isCorporateDomain) || "";
+}
+
 function cleanReason(value) {
   return String(value || "")
     .replace(/\(\[[^\]]+\]\([^)]+\)\)/g, "")
@@ -1062,6 +1100,7 @@ function dealForAI(deal, context = {}) {
     competitor_prices: deal.UF_CRM_1728208500678 || "",
     manager_questions_and_answers: deal.UF_CRM_1790850696723 || "",
     qualification_answer_history: deal[AI_FIELDS.dealAnswers] || "",
+    sender_domain: corporateDomainFromContext(context),
     linked_contact: context.linked_contact || null,
     recent_activities: context.recent_activities || [],
   };
@@ -1103,6 +1142,7 @@ function analysisInstructions() {
     "Допустимые типы: " + Object.keys(QUESTION_RULES).concat(["Не определено"]).join(", ") + ".",
     "СНГ — это география, а тендер — способ закупки, не тип компании.",
     "Тип компании определяй по основной деятельности компании, а не только по товару в текущем запросе и не по должности отправителя.",
+    "Если есть sender_domain, используй его сразу как один из главных идентификаторов компании. Название из подписи сверяй с этим доменом.",
     "Если тип нельзя определить уверенно, используй Не определено.",
     "classification_reason — одно короткое предложение, почему выбран этот тип.",
     "После определения типа выбери question_keys только из правил соответствующего типа.",
@@ -1124,87 +1164,112 @@ async function analyzeDeal(deal, allowWebSearch = false) {
   const model = (process.env.OPENAI_MODEL || "gpt-6-luna").trim();
   const context = await buildDealContext(deal);
   const input = dealForAI(deal, context);
+  const senderDomain = input.sender_domain || "";
 
-  const firstPayload = await callOpenAI({
-    model,
-    store: false,
-    max_output_tokens: 1200,
-    instructions: analysisInstructions(),
-    input: [
-      {
-        role: "user",
-        content:
-          "Проанализируй новую сделку и верни квалификацию. Данные сделки:\n" +
-          JSON.stringify(input),
-      },
-    ],
-  });
-
-  const firstText = extractResponseText(firstPayload);
-  if (!firstText) {
-    throw new Error("OpenAI returned no text output");
-  }
-
-  let analysis = parseJsonText(firstText);
-
-  const linkedEmail = Array.isArray(context.linked_contact?.email)
-    ? context.linked_contact.email[0]
-    : "";
-
-  console.log(JSON.stringify({
-    source: "openai",
-    action: "ai-first-pass",
-    dealId: String(deal.ID),
-    clientType: analysis.client_type || null,
-    confidence: analysis.confidence ?? null,
-    companyName: analysis.company?.name || null,
-    companyInn: analysis.company?.inn || null,
-    companyWebsite: analysis.company?.website || null,
-    senderDomain: emailDomain(linkedEmail) || null,
-    questionCount: Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0,
-  }));
-
-  let finalPayload = firstPayload;
+  let analysis = null;
+  let finalPayload = null;
   let webUsed = false;
   let webSources = [];
 
-  const hasCompanyIdentity = Boolean(
-    analysis.company?.name ||
-    analysis.company?.inn ||
-    analysis.company?.website ||
-    input.inn
-  );
-
-  const needsResearch =
-    allowWebSearch &&
-    (
-      hasCompanyIdentity ||
-      analysis.client_type === "Не определено" ||
-      Number(analysis.confidence || 0) < 0.75
-    );
-
-  if (needsResearch) {
-    const researchPayload = await callOpenAI({
+  // For inbound email from a corporate domain, identify the company by domain immediately.
+  if (allowWebSearch && senderDomain) {
+    const domainPayload = await callOpenAI({
       model,
       store: false,
-      max_output_tokens: 1600,
+      max_output_tokens: 1800,
       tools: [{ type: "web_search" }],
       tool_choice: "required",
       instructions: [
         analysisInstructions(),
-        "Перед ответом обязательно выполни веб-поиск.",
-        "Ищи точную компанию по сочетанию названия, ИНН, сайта и домена email отправителя, если они присутствуют в данных сделки.",
-        "Если название распространённое, домен корпоративной почты, сайт из подписи и реквизиты письма используй как основные признаки для снятия неоднозначности.",
-        "Публичные почтовые домены (mail.ru, yandex.ru, gmail.com и т.п.) не считай признаком компании.",
-        "Приоритет: официальный сайт компании, затем надёжные бизнес-реестры и каталоги.",
-        "Определи тип по фактической основной деятельности компании.",
-        "Найди и заполни по открытым источникам компанию: официальное название, ИНН, сайт, общий телефон, общий email, регион, город и адрес, если они надёжно подтверждаются.",
-        "Не ищи в интернете персональные телефон, email или ФИО контактного лица.",
-        "Не делай вывод только по текущему товару, который компания запрашивает.",
-        "Если найденных данных всё равно недостаточно, оставь тип Не определено."
+        "Перед квалификацией обязательно выполни веб-поиск.",
+        "Начни идентификацию компании с sender_domain: " + senderDomain + ".",
+        "Сначала установи, какой организации принадлежит этот домен, затем сверяй название компании из письма, подписи, ИНН и сайт.",
+        "Если название компании распространённое, домен имеет больший вес, чем одно только название.",
+        "Приоритет источников: официальный сайт этого домена, затем надёжные бизнес-реестры.",
+        "Заполни company только подтверждёнными данными: официальное название, ИНН, сайт, общий телефон, общий email, регион, город, адрес.",
+        "Не ищи в интернете персональные данные контактного лица."
       ].join("\n"),
-      input: [
-        {
+      input: [{
+        role: "user",
+        content:
+          "Определи точную компанию, её тип и вопросы менеджеру. Данные сделки:\n" +
+          JSON.stringify(input),
+      }],
+    });
+
+    const domainText = extractResponseText(domainPayload);
+    webUsed = true;
+    webSources = extractWebSources(domainPayload);
+
+    if (domainText) {
+      analysis = parseJsonText(domainText);
+      finalPayload = domainPayload;
+    } else {
+      console.warn(JSON.stringify({
+        source: "openai",
+        action: "domain-research-no-text-fallback",
+        dealId: String(deal.ID),
+        senderDomain,
+        at: new Date().toISOString(),
+      }));
+    }
+  }
+
+  // Fallback / non-email path.
+  if (!analysis) {
+    const firstPayload = await callOpenAI({
+      model,
+      store: false,
+      max_output_tokens: 1200,
+      instructions: analysisInstructions(),
+      input: [{
+        role: "user",
+        content:
+          "Проанализируй новую сделку и верни квалификацию. Данные сделки:\n" +
+          JSON.stringify(input),
+      }],
+    });
+
+    const firstText = extractResponseText(firstPayload);
+    if (!firstText) {
+      throw new Error("OpenAI returned no text output");
+    }
+
+    analysis = parseJsonText(firstText);
+    finalPayload = firstPayload;
+
+    const hasCompanyIdentity = Boolean(
+      analysis.company?.name ||
+      analysis.company?.inn ||
+      analysis.company?.website ||
+      input.inn
+    );
+
+    const needsResearch =
+      allowWebSearch &&
+      (
+        hasCompanyIdentity ||
+        analysis.client_type === "Не определено" ||
+        Number(analysis.confidence || 0) < 0.75
+      );
+
+    if (needsResearch) {
+      const researchPayload = await callOpenAI({
+        model,
+        store: false,
+        max_output_tokens: 1600,
+        tools: [{ type: "web_search" }],
+        tool_choice: "required",
+        instructions: [
+          analysisInstructions(),
+          "Перед ответом обязательно выполни веб-поиск.",
+          "Ищи точную компанию по сочетанию названия, ИНН, сайта и sender_domain, если они присутствуют.",
+          "Приоритет: официальный сайт компании, затем надёжные бизнес-реестры.",
+          "Определи тип по фактической основной деятельности компании.",
+          "Найди и заполни по открытым источникам компанию: официальное название, ИНН, сайт, общий телефон, общий email, регион, город и адрес.",
+          "Не ищи в интернете персональные данные контактного лица."
+        ].join("\n"),
+        input: [{
           role: "user",
           content:
             "Уточни тип компании через открытые источники и заново выбери вопросы. " +
@@ -1212,30 +1277,39 @@ async function analyzeDeal(deal, allowWebSearch = false) {
             JSON.stringify(input) +
             "\nПервичный анализ:\n" +
             JSON.stringify(analysis),
-        },
-      ],
-    });
+        }],
+      });
 
-    const researchText = extractResponseText(researchPayload);
-    webUsed = true;
-    webSources = extractWebSources(researchPayload);
+      const researchText = extractResponseText(researchPayload);
+      webUsed = true;
+      webSources = extractWebSources(researchPayload);
 
-    if (researchText) {
-      analysis = parseJsonText(researchText);
-      finalPayload = researchPayload;
-    } else {
-      console.warn(JSON.stringify({
-        source: "openai",
-        action: "web-research-no-text-fallback",
-        dealId: String(deal.ID),
-        at: new Date().toISOString(),
-      }));
+      if (researchText) {
+        analysis = parseJsonText(researchText);
+        finalPayload = researchPayload;
+      }
     }
   }
 
+  console.log(JSON.stringify({
+    source: "openai",
+    action: "ai-first-pass",
+    dealId: String(deal.ID),
+    senderDomain: senderDomain || null,
+    clientType: analysis.client_type || null,
+    confidence: analysis.confidence ?? null,
+    companyName: analysis.company?.name || null,
+    companyInn: analysis.company?.inn || null,
+    companyWebsite: analysis.company?.website || null,
+    questionCount: Array.isArray(analysis.question_keys)
+      ? analysis.question_keys.length
+      : 0,
+    webUsed,
+  }));
+
   return {
-    model: finalPayload.model || model,
-    responseId: finalPayload.id || null,
+    model: finalPayload?.model || model,
+    responseId: finalPayload?.id || null,
     analysis,
     webUsed,
     webSources,
