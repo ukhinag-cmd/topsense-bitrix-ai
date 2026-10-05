@@ -1118,14 +1118,20 @@ async function reconcileRecentTestDeals() {
         "TITLE",
         "COMMENTS",
         "ADDITIONAL_INFO",
-        "UF_CRM_1790850696723"
+        "UF_CRM_1790850696723",
+        "DATE_CREATE"
       ],
       start: 0,
     });
 
     if (!Array.isArray(deals)) return;
 
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+
     const candidates = deals.slice(0, 50).filter(deal => {
+      const createdAt = Date.parse(deal.DATE_CREATE || "");
+      if (!createdAt || createdAt < cutoff) return false;
+
       const haystack = [
         deal.TITLE,
         deal.COMMENTS,
@@ -1141,7 +1147,8 @@ async function reconcileRecentTestDeals() {
       return !questions.includes("Тип:");
     });
 
-    for (const deal of candidates.reverse()) {
+    // Reconcile only the newest missed test deal per pass.
+    for (const deal of candidates.slice(0, 1)) {
       console.log(JSON.stringify({
         source: "pipeline",
         action: "reconcile-test-deal",
