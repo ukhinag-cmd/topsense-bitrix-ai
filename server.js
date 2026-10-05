@@ -937,7 +937,96 @@ function parseJsonText(text) {
   return JSON.parse(cleaned);
 }
 
-function dealForAI(deal) {
+function stripHtml(value) {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function getRecentDealActivities(dealId) {
+  try {
+    const activities = await bitrixCall("crm.activity.list", {
+      order: { ID: "DESC" },
+      filter: {
+        OWNER_TYPE_ID: 2,
+        OWNER_ID: Number(dealId),
+      },
+      select: [
+        "ID",
+        "TYPE_ID",
+        "DIRECTION",
+        "PROVIDER_ID",
+        "SUBJECT",
+        "DESCRIPTION",
+        "DESCRIPTION_TYPE",
+        "COMMUNICATIONS",
+        "CREATED",
+      ],
+    });
+
+    if (!Array.isArray(activities)) return [];
+
+    return activities.slice(0, 8).map(item => ({
+      id: item.ID,
+      type_id: item.TYPE_ID,
+      direction: item.DIRECTION,
+      provider_id: item.PROVIDER_ID,
+      subject: String(item.SUBJECT || "").slice(0, 500),
+      description: stripHtml(item.DESCRIPTION).slice(0, 12000),
+      communications: Array.isArray(item.COMMUNICATIONS)
+        ? item.COMMUNICATIONS.slice(0, 10).map(c => ({
+            type: c.TYPE || "",
+            value: c.VALUE || "",
+            entity_type_id: c.ENTITY_TYPE_ID || null,
+            entity_id: c.ENTITY_ID || null,
+          }))
+        : [],
+      created: item.CREATED || null,
+    }));
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "bitrix24",
+      action: "activity-read-skipped",
+      dealId: String(dealId),
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return [];
+  }
+}
+
+async function buildDealContext(deal) {
+  let linkedContact = null;
+
+  try {
+    linkedContact = await getContact(deal.CONTACT_ID);
+  } catch {}
+
+  const activities = await getRecentDealActivities(deal.ID);
+
+  return {
+    linked_contact: linkedContact
+      ? {
+          name: linkedContact.NAME || "",
+          last_name: linkedContact.LAST_NAME || "",
+          second_name: linkedContact.SECOND_NAME || "",
+          position: linkedContact.POST || "",
+          email: Array.isArray(linkedContact.EMAIL)
+            ? linkedContact.EMAIL.map(x => x.VALUE).filter(Boolean)
+            : [],
+          phone: Array.isArray(linkedContact.PHONE)
+            ? linkedContact.PHONE.map(x => x.VALUE).filter(Boolean)
+            : [],
+        }
+      : null,
+    recent_activities: activities,
+  };
+}
+
+function dealForAI(deal, context = {}) {
   return {
     id: String(deal.ID),
     title: deal.TITLE || "",
@@ -959,6 +1048,8 @@ function dealForAI(deal) {
     competitor_prices: deal.UF_CRM_1728208500678 || "",
     manager_questions_and_answers: deal.UF_CRM_1790850696723 || "",
     qualification_answer_history: deal[AI_FIELDS.dealAnswers] || "",
+    linked_contact: context.linked_contact || null,
+    recent_activities: context.recent_activities || [],
   };
 }
 
@@ -1004,7 +1095,7 @@ function analysisInstructions() {
     "Не выбирай вопрос, если ответ уже явно есть в названии, комментарии или полях сделки.",
     "Обычно выбери 3–6 вопросов. Из них 1–2 могут быть продающими, если базовая потребность уже понятна.",
     "Не требуй имя конечного заказчика.",
-    "Извлеки из сделки данные компании и контактного лица. Данные можно брать только из сделки и, при веб-поиске, из открытых источников.",
+    "Извлеки из сделки данные компании и контактного лица. Для входящих email-заявок обязательно анализируй recent_activities: там может находиться тема, текст письма, подпись отправителя и коммуникации.",
     "company должен содержать: name, inn, website, phone, email, region, city, address. Неизвестные значения оставляй пустой строкой.",
     "contact должен содержать: name, first_name, last_name, second_name, position, email, phone. Неизвестные значения оставляй пустой строкой.",
     "Для contact используй персональные данные только если они явно есть в самой заявке/подписи. Не ищи персональные контакты людей в интернете.",
@@ -1016,7 +1107,8 @@ function analysisInstructions() {
 
 async function analyzeDeal(deal, allowWebSearch = false) {
   const model = (process.env.OPENAI_MODEL || "gpt-6-luna").trim();
-  const input = dealForAI(deal);
+  const context = await buildDealContext(deal);
+  const input = dealForAI(deal, context);
 
   const firstPayload = await callOpenAI({
     model,
@@ -1144,7 +1236,8 @@ async function reconcileRecentTestDeals() {
       if (!haystack.includes("AI WEBHOOK TEST")) return false;
 
       const questions = String(deal.UF_CRM_1790850696723 || "");
-      return !questions.includes("Тип:");
+      if (!questions.includes("Тип:")) return true;
+      return questions.includes("Тип: Не определено");
     });
 
     // Reconcile only the newest missed test deal per pass.
