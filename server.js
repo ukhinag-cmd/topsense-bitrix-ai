@@ -1757,7 +1757,7 @@ async function reconcileRecentTestDeals() {
       if (questions.includes("Тип: Не определено")) return true;
       if (
         String(deal.ID) === "39626" &&
-        questions.includes("Тип: Торговая компания / комплектатор")
+        !questions.includes("Роли:")
       ) return true;
       return false;
     });
