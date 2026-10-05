@@ -1190,6 +1190,7 @@ async function getRecentDealActivities(dealId) {
             name: f.NAME || f.name || "",
             bytes: Number(f.BYTES || f.bytes || 0),
             can_read: f.CAN_READ ?? f.can_read ?? null,
+            url: f.URL || f.url || "",
           }))
         : [],
       storage_element_ids: Array.isArray(item.STORAGE_ELEMENT_IDS)
@@ -1439,6 +1440,92 @@ async function fetchDomainWebsite(domain) {
   return null;
 }
 
+
+function contentDispositionFileName(header) {
+  const value = String(header || "");
+  const utf = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf?.[1]) {
+    try { return decodeURIComponent(utf[1].replace(/["']/g, "")); } catch {}
+  }
+  const plain = value.match(/filename="?([^";]+)"?/i);
+  return plain?.[1] || "";
+}
+
+async function downloadBitrixAttachment(file) {
+  const rawUrl = String(file?.url || "").trim();
+  if (!rawUrl) return null;
+
+  const portal = new URL(bitrixBaseUrl());
+  const target = new URL(rawUrl, portal.origin);
+
+  if (target.hostname !== portal.hostname) {
+    throw new Error("attachment URL host mismatch");
+  }
+
+  const response = await fetch(target, {
+    method: "GET",
+    redirect: "follow",
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (!response.ok) {
+    throw new Error("attachment download HTTP " + response.status);
+  }
+
+  const type = String(response.headers.get("content-type") || "");
+  const disposition = String(response.headers.get("content-disposition") || "");
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+
+  if (declaredLength > 15 * 1024 * 1024) {
+    throw new Error("attachment too large");
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (buffer.length > 15 * 1024 * 1024) {
+    throw new Error("attachment too large");
+  }
+
+  const fileName =
+    contentDispositionFileName(disposition) ||
+    file.name ||
+    target.pathname.split("/").pop() ||
+    "attachment";
+
+  console.log(JSON.stringify({
+    source: "bitrix24",
+    action: "attachment-download-ok",
+    attachmentId: String(file.id || ""),
+    fileName,
+    contentType: type,
+    bytes: buffer.length,
+  }));
+
+  return { id: file.id || null, fileName, contentType: type, buffer };
+}
+
+async function downloadRecentAttachments(activities) {
+  const files = (activities || [])
+    .flatMap(item => Array.isArray(item.files) ? item.files : [])
+    .filter(file => file.url);
+
+  const result = [];
+  for (const file of files.slice(0, 3)) {
+    try {
+      const downloaded = await downloadBitrixAttachment(file);
+      if (downloaded) result.push(downloaded);
+    } catch (error) {
+      console.warn(JSON.stringify({
+        source: "bitrix24",
+        action: "attachment-download-failed",
+        attachmentId: String(file.id || ""),
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+  return result;
+}
+
 async function buildDealContext(deal) {
   let linkedContact = null;
 
@@ -1447,6 +1534,7 @@ async function buildDealContext(deal) {
   } catch {}
 
   const activities = await getRecentDealActivities(deal.ID);
+  const attachments = await downloadRecentAttachments(activities);
 
   const baseContext = {
     linked_contact: linkedContact
@@ -1464,6 +1552,12 @@ async function buildDealContext(deal) {
         }
       : null,
     recent_activities: activities,
+    attachment_metadata: attachments.map(item => ({
+      id: item.id,
+      file_name: item.fileName,
+      content_type: item.contentType,
+      bytes: item.buffer.length,
+    })),
   };
 
   const senderDomain = corporateDomainFromContext(baseContext);
