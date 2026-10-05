@@ -1865,7 +1865,7 @@ async function reconcileRecentTestDeals() {
 
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
 
-    const candidates = deals.slice(0, 50).filter(deal => {
+    let candidates = deals.slice(0, 50).filter(deal => {
       const createdAt = Date.parse(deal.DATE_CREATE || "");
       if (!createdAt || createdAt < cutoff) return false;
 
@@ -1890,6 +1890,42 @@ async function reconcileRecentTestDeals() {
       ) return true;
       return false;
     });
+
+    // Some email-created deals don't keep the original subject in TITLE/COMMENTS.
+    // If no direct match is found, inspect recent email activities for the test marker.
+    if (!candidates.length) {
+      const recent = deals.slice(0, 12).filter(deal => {
+        const createdAt = Date.parse(deal.DATE_CREATE || "");
+        return createdAt && createdAt >= cutoff;
+      });
+
+      for (const deal of recent) {
+        try {
+          const activities = await bitrixCall("crm.activity.list", {
+            order: { ID: "DESC" },
+            filter: {
+              OWNER_TYPE_ID: 2,
+              OWNER_ID: Number(deal.ID),
+            },
+            select: ["ID", "SUBJECT", "DESCRIPTION"],
+          });
+
+          const activityHaystack = Array.isArray(activities)
+            ? activities
+                .slice(0, 5)
+                .flatMap(item => [item.SUBJECT, stripHtml(item.DESCRIPTION)])
+                .filter(Boolean)
+                .join("\n")
+                .toUpperCase()
+            : "";
+
+          if (activityHaystack.includes("AI WEBHOOK TEST 15")) {
+            candidates = [deal];
+            break;
+          }
+        } catch {}
+      }
+    }
 
     // Reconcile only the newest missed test deal per pass.
     for (const deal of candidates.slice(0, 1)) {
