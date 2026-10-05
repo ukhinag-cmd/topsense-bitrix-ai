@@ -1096,6 +1096,8 @@ async function getRecentDealActivities(dealId) {
         "DESCRIPTION",
         "DESCRIPTION_TYPE",
         "COMMUNICATIONS",
+        "FILES",
+        "STORAGE_ELEMENT_IDS",
         "CREATED",
       ],
     });
@@ -1107,6 +1109,11 @@ async function getRecentDealActivities(dealId) {
       action: "activities-read-ok",
       dealId: String(dealId),
       count: activities.length,
+      attachmentCount: activities.reduce((sum, item) => {
+        const files = Array.isArray(item.FILES) ? item.FILES.length : 0;
+        const storage = Array.isArray(item.STORAGE_ELEMENT_IDS) ? item.STORAGE_ELEMENT_IDS.length : 0;
+        return sum + Math.max(files, storage);
+      }, 0),
     }));
 
     return activities.slice(0, 8).map(item => ({
@@ -1123,6 +1130,17 @@ async function getRecentDealActivities(dealId) {
             entity_type_id: c.ENTITY_TYPE_ID || null,
             entity_id: c.ENTITY_ID || null,
           }))
+        : [],
+      files: Array.isArray(item.FILES)
+        ? item.FILES.slice(0, 10).map(f => ({
+            id: f.ID || f.id || null,
+            name: f.NAME || f.name || "",
+            bytes: Number(f.BYTES || f.bytes || 0),
+            can_read: f.CAN_READ ?? f.can_read ?? null,
+          }))
+        : [],
+      storage_element_ids: Array.isArray(item.STORAGE_ELEMENT_IDS)
+        ? item.STORAGE_ELEMENT_IDS.map(String)
         : [],
       created: item.CREATED || null,
     }));
