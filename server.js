@@ -1651,7 +1651,12 @@ async function reconcileRecentTestDeals() {
 
       const questions = String(deal.UF_CRM_1790850696723 || "");
       if (!questions.includes("Тип:")) return true;
-      return questions.includes("Тип: Не определено");
+      if (questions.includes("Тип: Не определено")) return true;
+      if (
+        String(deal.ID) === "39626" &&
+        questions.includes("Тип: Торговая компания / комплектатор")
+      ) return true;
+      return false;
     });
 
     // Reconcile only the newest missed test deal per pass.
