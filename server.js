@@ -71,31 +71,44 @@ function bitrixBaseUrl() {
 }
 
 async function fetchDeal(dealId) {
-  const url = new URL("crm.deal.get.json", bitrixBaseUrl());
-  url.searchParams.set("ID", String(dealId));
+  let lastError = null;
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { accept: "application/json" },
-  });
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const url = new URL("crm.deal.get.json", bitrixBaseUrl());
+    url.searchParams.set("ID", String(dealId));
 
-  if (!response.ok) {
-    throw new Error(`Bitrix deal read failed with HTTP ${response.status}`);
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { accept: "application/json" },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (
+        response.ok &&
+        !payload.error &&
+        payload.result &&
+        payload.result.ID
+      ) {
+        return payload.result;
+      }
+
+      lastError = new Error(
+        payload.error_description ||
+        payload.error ||
+        `Bitrix deal read failed with HTTP ${response.status}`
+      );
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt < 4) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 700));
+    }
   }
 
-  const payload = await response.json();
-
-  if (payload.error) {
-    throw new Error(
-      `Bitrix deal read failed: ${payload.error_description || payload.error}`
-    );
-  }
-
-  if (!payload.result || !payload.result.ID) {
-    throw new Error("Bitrix deal read returned no deal");
-  }
-
-  return payload.result;
+  throw lastError || new Error("Bitrix deal read returned no deal");
 }
 
 async function updateDealField(dealId, fieldName, value) {
@@ -1142,7 +1155,16 @@ async function processDeal(evt) {
       })
     );
 
-    const isTestDeal = String(deal.TITLE || "").startsWith("AI WEBHOOK TEST");
+    const testHaystack = [
+      deal.TITLE,
+      deal.COMMENTS,
+      deal.ADDITIONAL_INFO,
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .toUpperCase();
+
+    const isTestDeal = testHaystack.includes("AI WEBHOOK TEST");
 
     // Until the test contour is approved, do not enrich or modify real deals.
     if (!isTestDeal) {
