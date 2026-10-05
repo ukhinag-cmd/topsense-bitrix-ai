@@ -220,9 +220,13 @@ const AI_FIELDS = {
   dealReason: "UF_CRM_AI_CLASS_REASON",
   dealStatus: "UF_CRM_AI_QUAL_STATUS",
   dealAnswers: "UF_CRM_AI_QUAL_ANSWERS",
+  dealManufacturer: "UF_CRM_AI_IS_MANUFACTURER",
+  dealManufacturedProducts: "UF_CRM_AI_MANUFACTURED_PRODUCTS",
   companyType: "UF_CRM_AI_CLIENT_TYPE",
   companyReason: "UF_CRM_AI_CLASS_REASON",
   companyInn: "UF_CRM_AI_INN",
+  companyManufacturer: "UF_CRM_AI_IS_MANUFACTURER",
+  companyManufacturedProducts: "UF_CRM_AI_MANUFACTURED_PRODUCTS",
 };
 
 const LEGACY_TYPE_ENUM = {
@@ -383,9 +387,13 @@ async function ensureAIFields() {
   await ensureUserField("deal", "AI_CLASS_REASON", "ИИ: Основание классификации", 3);
   await ensureUserField("deal", "AI_QUAL_STATUS", "ИИ: Статус квалификации", 1);
   await ensureUserField("deal", "AI_QUAL_ANSWERS", "ИИ: Ответы квалификации", 8);
+  await ensureUserField("deal", "AI_IS_MANUFACTURER", "ИИ: Производитель", 1);
+  await ensureUserField("deal", "AI_MANUFACTURED_PRODUCTS", "ИИ: Что производит", 3);
   await ensureUserField("company", "AI_CLIENT_TYPE", "ИИ: Тип компании", 1);
   await ensureUserField("company", "AI_CLASS_REASON", "ИИ: Основание классификации", 3);
   await ensureUserField("company", "AI_INN", "ИИ: ИНН", 1);
+  await ensureUserField("company", "AI_IS_MANUFACTURER", "ИИ: Производитель", 1);
+  await ensureUserField("company", "AI_MANUFACTURED_PRODUCTS", "ИИ: Что производит", 3);
 }
 
 async function getCompany(id) {
@@ -486,6 +494,8 @@ async function upsertCompany(deal, analysis) {
     if (companyData.inn) fields[AI_FIELDS.companyInn] = String(companyData.inn);
     fields[AI_FIELDS.companyType] = analysis.client_type || "";
     fields[AI_FIELDS.companyReason] = cleanReason(analysis.classification_reason);
+    fields[AI_FIELDS.companyManufacturer] = analysis.company?.is_manufacturer || "Не определено";
+    fields[AI_FIELDS.companyManufacturedProducts] = analysis.company?.manufactured_products || "";
 
     const id = await bitrixCall("crm.company.add", { fields });
     company = await getCompany(id);
@@ -504,11 +514,32 @@ async function upsertCompany(deal, analysis) {
     if (isEmpty(company.ADDRESS_CITY) && companyData.city) patch.ADDRESS_CITY = companyData.city;
     if (isEmpty(company.ADDRESS_REGION) && companyData.region) patch.ADDRESS_REGION = companyData.region;
     if (isEmpty(company[AI_FIELDS.companyInn]) && companyData.inn) patch[AI_FIELDS.companyInn] = String(companyData.inn);
-    if (isEmpty(company[AI_FIELDS.companyType]) && analysis.client_type && analysis.client_type !== "Не определено") {
+    // AI-owned fields can be corrected by later research; human-owned fields above are only filled when empty.
+    if (
+      analysis.client_type &&
+      analysis.client_type !== "Не определено" &&
+      String(company[AI_FIELDS.companyType] || "") !== analysis.client_type
+    ) {
       patch[AI_FIELDS.companyType] = analysis.client_type;
     }
-    if (isEmpty(company[AI_FIELDS.companyReason]) && analysis.classification_reason) {
-      patch[AI_FIELDS.companyReason] = cleanReason(analysis.classification_reason);
+    if (analysis.classification_reason) {
+      const reason = cleanReason(analysis.classification_reason);
+      if (String(company[AI_FIELDS.companyReason] || "") !== reason) {
+        patch[AI_FIELDS.companyReason] = reason;
+      }
+    }
+    if (
+      analysis.company?.is_manufacturer &&
+      analysis.company.is_manufacturer !== "Не определено" &&
+      String(company[AI_FIELDS.companyManufacturer] || "") !== analysis.company.is_manufacturer
+    ) {
+      patch[AI_FIELDS.companyManufacturer] = analysis.company.is_manufacturer;
+    }
+    if (
+      analysis.company?.manufactured_products &&
+      String(company[AI_FIELDS.companyManufacturedProducts] || "") !== analysis.company.manufactured_products
+    ) {
+      patch[AI_FIELDS.companyManufacturedProducts] = analysis.company.manufactured_products;
     }
 
     addMultifieldPatch(patch, company, "PHONE", companyData.phone, normalizePhone);
@@ -691,6 +722,8 @@ async function writeDealAIFields(deal, analysis, answers = []) {
     [AI_FIELDS.dealType]: analysis.client_type || "Не определено",
     [AI_FIELDS.dealReason]: cleanReason(analysis.classification_reason),
     [AI_FIELDS.dealStatus]: qualificationStatus(analysis),
+    [AI_FIELDS.dealManufacturer]: analysis.company?.is_manufacturer || "Не определено",
+    [AI_FIELDS.dealManufacturedProducts]: analysis.company?.manufactured_products || "",
   };
 
   const legacy = LEGACY_TYPE_ENUM[analysis.client_type];
@@ -922,6 +955,13 @@ function formatManagerQuestions(analysis) {
   const blocks = [];
 
   blocks.push("Тип: " + (analysis.client_type || "Не определено"));
+
+  const manufacturer = analysis.company?.is_manufacturer || "Не определено";
+  blocks.push("Производитель: " + manufacturer);
+
+  if (analysis.company?.manufactured_products) {
+    blocks.push("Что производит: " + analysis.company.manufactured_products);
+  }
 
   if (analysis.classification_reason) {
     blocks.push("Почему: " + cleanReason(analysis.classification_reason));
@@ -1377,6 +1417,12 @@ function analysisTextFormat() {
               region: { type: "string" },
               city: { type: "string" },
               address: { type: "string" },
+              is_manufacturer: {
+                type: "string",
+                enum: ["Да", "Нет", "Не определено"]
+              },
+              manufactured_products: { type: "string" },
+              manufacturer_reason: { type: "string" },
             },
             required: [
               "name",
@@ -1387,6 +1433,9 @@ function analysisTextFormat() {
               "region",
               "city",
               "address",
+              "is_manufacturer",
+              "manufactured_products",
+              "manufacturer_reason",
             ],
           },
           contact: {
@@ -1434,6 +1483,13 @@ function analysisInstructions() {
     "Сначала определи тип компании по данным сделки. Не выдумывай факты.",
     "Допустимые типы: " + Object.keys(QUESTION_RULES).concat(["Не определено"]).join(", ") + ".",
     "СНГ — это география, а тендер — способ закупки, не тип компании.",
+    "Сначала отдельно определи, является ли компания производителем. Это независимый признак от client_type.",
+    "company.is_manufacturer: Да, если официальный сайт или надёжный источник явно говорит о собственном производстве/разработке продукции; Нет, если подтверждена только торговля/услуги; Не определено, если доказательств недостаточно.",
+    "company.manufactured_products — коротко перечисли, что именно компания производит. Если не установлено — пустая строка.",
+    "company.manufacturer_reason — коротко укажи, на каком факте основан вывод о производстве.",
+    "Наличие каталога, интернет-магазина или слов «поставляем/продаём» само по себе не означает производство.",
+    "Если компания реально производит продукцию, это должно быть явно отражено даже если она одновременно продаёт, комплектует, интегрирует или оказывает сервис.",
+    "Если собственное производство — основная деятельность, не классифицируй компанию как чистую Торговую компанию / комплектатора. Обычно выбирай Завод / промышленное предприятие, а для производителя газоаналитического оборудования — Производитель газоаналитического оборудования / конкурент.",
     "Тип компании определяй по основной деятельности компании, а не только по товару в текущем запросе и не по должности отправителя.",
     "Если официальный сайт прямо говорит о собственной разработке или производстве газоанализаторов, газоаналитического оборудования, датчиков газа или близкой продукции, классифицируй как Производитель газоаналитического оборудования / конкурент. Не относить такого клиента к торговой компании только потому, что на сайте есть каталог или продажи.",
     "Если есть sender_domain, используй его сразу как один из главных идентификаторов компании. Название из подписи сверяй с этим доменом.",
@@ -1446,7 +1502,7 @@ function analysisInstructions() {
     "Обычно выбери 3–6 вопросов. Из них 1–2 могут быть продающими, если базовая потребность уже понятна.",
     "Не требуй имя конечного заказчика.",
     "Извлеки из сделки данные компании и контактного лица. Для входящих email-заявок обязательно анализируй recent_activities: там может находиться тема, текст письма, подпись отправителя и коммуникации.",
-    "company должен содержать: name, inn, website, phone, email, region, city, address. Неизвестные значения оставляй пустой строкой.",
+    "company должен содержать: name, inn, website, phone, email, region, city, address, is_manufacturer, manufactured_products, manufacturer_reason. Неизвестные текстовые значения оставляй пустой строкой.",
     "contact должен содержать: name, first_name, last_name, second_name, position, email, phone. Неизвестные значения оставляй пустой строкой.",
     "Для contact используй персональные данные только если они явно есть в самой заявке/подписи. Не ищи персональные контакты людей в интернете.",
     "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
