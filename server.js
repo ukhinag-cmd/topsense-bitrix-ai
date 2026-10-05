@@ -566,7 +566,28 @@ async function upsertCompany(deal, analysis) {
       }
     }
 
-    addMultifieldPatch(patch, company, "PHONE", companyData.phone, normalizePhone);
+    const sitePhone = String(companyData.phone || "").trim();
+    const personPhone = String(analysis.contact?.phone || "").trim();
+    const existingPhones = Array.isArray(company.PHONE) ? company.PHONE : [];
+
+    const hasPersonPhone = personPhone && multifieldHas(existingPhones, personPhone, normalizePhone);
+    const siteDiffersFromPerson =
+      sitePhone &&
+      personPhone &&
+      normalizePhone(sitePhone) !== normalizePhone(personPhone);
+
+    if (hasPersonPhone && siteDiffersFromPerson) {
+      const preserved = existingPhones
+        .filter(item => normalizePhone(item.VALUE) !== normalizePhone(personPhone))
+        .map(item => ({
+          VALUE: item.VALUE,
+          VALUE_TYPE: item.VALUE_TYPE || "WORK",
+        }));
+      preserved.push({ VALUE: sitePhone, VALUE_TYPE: "WORK" });
+      patch.PHONE = preserved;
+    } else {
+      addMultifieldPatch(patch, company, "PHONE", companyData.phone, normalizePhone);
+    }
     addMultifieldPatch(patch, company, "EMAIL", companyData.email, normalizeEmail);
     addMultifieldPatch(patch, company, "WEB", companyData.website, value => String(value || "").trim().toLowerCase());
 
@@ -629,6 +650,25 @@ async function upsertContact(deal, analysis, company) {
     if (isEmpty(contact.NAME) && (contactData.first_name || contactData.name)) {
       patch.NAME = contactData.first_name || contactData.name;
     }
+
+    const targetFirst = String(contactData.first_name || "").trim();
+    const targetLast = String(contactData.last_name || contact.LAST_NAME || "").trim();
+    const currentName = String(contact.NAME || "").trim();
+
+    if (targetFirst && targetLast && currentName) {
+      const normalizedCurrent = currentName.replace(/\s+/g, " ").toLowerCase();
+      const normalizedFull = (targetFirst + " " + targetLast).toLowerCase();
+      if (
+        normalizedCurrent === normalizedFull ||
+        (
+          normalizedCurrent.startsWith(targetFirst.toLowerCase() + " ") &&
+          normalizedCurrent.endsWith(" " + targetLast.toLowerCase())
+        )
+      ) {
+        patch.NAME = targetFirst;
+      }
+    }
+
     if (isEmpty(contact.LAST_NAME) && contactData.last_name) patch.LAST_NAME = contactData.last_name;
     if (isEmpty(contact.SECOND_NAME) && contactData.second_name) patch.SECOND_NAME = contactData.second_name;
     if (isEmpty(contact.POST) && contactData.position) patch.POST = contactData.position;
@@ -1271,6 +1311,40 @@ async function fetchPinnedUrl(url, redirectsLeft = 3) {
   };
 }
 
+function uniqueNonEmpty(values) {
+  return [...new Set((values || []).map(v => String(v || "").trim()).filter(Boolean))];
+}
+
+function extractWebsiteContactDetails(text, domain) {
+  const source = String(text || "");
+  const phoneMatches = source.match(/(?:\+7|8)[\s\-().]*\d{3}[\s\-().]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}/g) || [];
+  const phones = uniqueNonEmpty(
+    phoneMatches.filter(value => {
+      const digits = normalizePhone(value);
+      return digits.length === 11;
+    })
+  );
+
+  const emailMatches = source.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  const emails = uniqueNonEmpty(
+    emailMatches.filter(value => {
+      const d = emailDomain(value);
+      return !domain || d === String(domain).toLowerCase();
+    })
+  );
+
+  return { phones, emails };
+}
+
+function preferredCompanyEmail(emails) {
+  const list = Array.isArray(emails) ? emails : [];
+  return (
+    list.find(v => /^(info|office|sales|mail|hello|zakaz|order)@/i.test(v)) ||
+    list[0] ||
+    ""
+  );
+}
+
 function websiteTextFromHtml(html) {
   const source = String(html || "");
   const title = (source.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
@@ -1317,12 +1391,26 @@ async function fetchDomainWebsite(domain) {
         textLength: text.body.length,
       }));
 
+      const contacts = extractWebsiteContactDetails(text.body, host);
+
+      console.log(JSON.stringify({
+        source: "website",
+        action: "domain-site-contacts",
+        domain: host,
+        phoneCount: contacts.phones.length,
+        emailCount: contacts.emails.length,
+        phones: contacts.phones,
+        emails: contacts.emails,
+      }));
+
       return {
         domain: host,
         url: page.url,
         title: text.title,
         description: text.meta,
         text: text.body,
+        phones: contacts.phones,
+        emails: contacts.emails,
       };
     } catch (error) {
       console.warn(JSON.stringify({
@@ -1559,6 +1647,8 @@ function analysisInstructions() {
     "Если официальный сайт прямо говорит о собственной разработке или производстве газоанализаторов, газоаналитического оборудования, датчиков газа или близкой продукции, классифицируй как Производитель газоаналитического оборудования / конкурент. Не относить такого клиента к торговой компании только потому, что на сайте есть каталог или продажи.",
     "Если есть sender_domain, используй его сразу как один из главных идентификаторов компании. Название из подписи сверяй с этим доменом.",
     "Если есть domain_website, это содержимое сайта домена отправителя. Используй его как первичный источник для определения деятельности компании, её названия и типа.",
+    "Для company.phone и company.email приоритет имеют контакты с официального сайта domain_website. Не копируй персональный телефон отправителя в карточку компании, если на сайте есть отдельный общий телефон.",
+    "Для contact.phone и contact.email используй только данные самого письма/подписи/контакта Bitrix, не контакты с сайта компании.",
     "Если тип нельзя определить уверенно, используй Не определено.",
     "classification_reason — одно короткое предложение, почему выбран этот тип.",
     "После определения типа выбери question_keys только из правил соответствующего типа.",
@@ -1711,6 +1801,26 @@ async function analyzeDeal(deal, allowWebSearch = false) {
     }
   }
 
+  if (input.domain_website) {
+    const sitePhones = Array.isArray(input.domain_website.phones)
+      ? input.domain_website.phones
+      : [];
+    const siteEmails = Array.isArray(input.domain_website.emails)
+      ? input.domain_website.emails
+      : [];
+
+    if (sitePhones[0]) {
+      analysis.company = analysis.company || {};
+      analysis.company.phone = sitePhones[0];
+    }
+
+    const siteCompanyEmail = preferredCompanyEmail(siteEmails);
+    if (siteCompanyEmail) {
+      analysis.company = analysis.company || {};
+      analysis.company.email = siteCompanyEmail;
+    }
+  }
+
   console.log(JSON.stringify({
     source: "openai",
     action: "ai-first-pass",
@@ -1771,6 +1881,7 @@ async function reconcileRecentTestDeals() {
       if (!haystack.includes("AI WEBHOOK TEST")) return false;
 
       const questions = String(deal.UF_CRM_1790850696723 || "");
+      if (haystack.includes("AI WEBHOOK TEST 15")) return true;
       if (!questions.includes("Тип:")) return true;
       if (questions.includes("Тип: Не определено")) return true;
       if (
