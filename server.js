@@ -1144,6 +1144,13 @@ async function getRecentDealActivities(dealId) {
 
     if (!Array.isArray(activities)) return [];
 
+    const fileObjects = activities.flatMap(item =>
+      Array.isArray(item.FILES) ? item.FILES : []
+    );
+    const storageIds = activities.flatMap(item =>
+      Array.isArray(item.STORAGE_ELEMENT_IDS) ? item.STORAGE_ELEMENT_IDS : []
+    );
+
     console.log(JSON.stringify({
       source: "bitrix24",
       action: "activities-read-ok",
@@ -1154,6 +1161,12 @@ async function getRecentDealActivities(dealId) {
         const storage = Array.isArray(item.STORAGE_ELEMENT_IDS) ? item.STORAGE_ELEMENT_IDS.length : 0;
         return sum + Math.max(files, storage);
       }, 0),
+      attachmentFileNames: fileObjects
+        .map(file => file.NAME || file.name || "")
+        .filter(Boolean)
+        .slice(0, 10),
+      attachmentFileKeys: fileObjects[0] ? Object.keys(fileObjects[0]).sort() : [],
+      storageElementIds: storageIds.map(String).slice(0, 10),
     }));
 
     return activities.slice(0, 8).map(item => ({
