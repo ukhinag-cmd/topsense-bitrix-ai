@@ -1,4 +1,7 @@
 const http = require("http");
+const https = require("https");
+const dns = require("dns").promises;
+const net = require("net");
 
 const PORT = process.env.PORT || 10000;
 const MAX_BODY = 1024 * 1024;
@@ -1050,6 +1053,189 @@ async function getRecentDealActivities(dealId) {
   }
 }
 
+
+function isPrivateAddress(address) {
+  const ip = String(address || "").toLowerCase();
+  const version = net.isIP(ip);
+  if (!version) return true;
+
+  if (version === 4) {
+    const parts = ip.split(".").map(Number);
+    const [a, b] = parts;
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 198 && (b === 18 || b === 19)) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+
+  if (ip === "::" || ip === "::1") return true;
+  if (ip.startsWith("fc") || ip.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(ip)) return true;
+  if (ip.startsWith("ff")) return true;
+  if (ip.startsWith("::ffff:")) {
+    return isPrivateAddress(ip.slice(7));
+  }
+  return false;
+}
+
+async function resolvePublicAddress(hostname) {
+  const host = String(hostname || "").trim().toLowerCase();
+  if (
+    !host ||
+    host === "localhost" ||
+    host.endsWith(".local") ||
+    net.isIP(host)
+  ) {
+    throw new Error("unsafe website host");
+  }
+
+  const records = await dns.lookup(host, { all: true, verbatim: true });
+  const publicRecord = records.find(item => !isPrivateAddress(item.address));
+  if (!publicRecord) throw new Error("website host has no public address");
+  return publicRecord;
+}
+
+async function fetchPinnedUrl(url, redirectsLeft = 3) {
+  const parsed = new URL(url);
+  if (!["https:", "http:"].includes(parsed.protocol)) {
+    throw new Error("unsupported website protocol");
+  }
+
+  const resolved = await resolvePublicAddress(parsed.hostname);
+  const transport = parsed.protocol === "https:" ? https : http;
+  const port = parsed.port || (parsed.protocol === "https:" ? 443 : 80);
+
+  const response = await new Promise((resolve, reject) => {
+    const req = transport.request({
+      hostname: resolved.address,
+      port,
+      family: resolved.family,
+      servername: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers: {
+        Host: parsed.host,
+        "User-Agent": "TOP-SENSE CRM enrichment/1.0",
+        Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+        "Accept-Encoding": "identity",
+      },
+      timeout: 8000,
+      rejectUnauthorized: true,
+    }, res => {
+      const chunks = [];
+      let size = 0;
+
+      res.on("data", chunk => {
+        size += chunk.length;
+        if (size <= 512 * 1024) chunks.push(chunk);
+      });
+
+      res.on("end", () => {
+        resolve({
+          status: Number(res.statusCode || 0),
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+      });
+    });
+
+    req.on("timeout", () => req.destroy(new Error("website request timeout")));
+    req.on("error", reject);
+    req.end();
+  });
+
+  if (
+    response.status >= 300 &&
+    response.status < 400 &&
+    response.headers.location &&
+    redirectsLeft > 0
+  ) {
+    const next = new URL(response.headers.location, parsed);
+    return fetchPinnedUrl(next.toString(), redirectsLeft - 1);
+  }
+
+  if (response.status < 200 || response.status >= 400) {
+    throw new Error("website HTTP " + response.status);
+  }
+
+  return {
+    url: parsed.toString(),
+    contentType: String(response.headers["content-type"] || ""),
+    body: response.body,
+  };
+}
+
+function websiteTextFromHtml(html) {
+  const source = String(html || "");
+  const title = (source.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const meta = (
+    source.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i)?.[1] ||
+    source.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i)?.[1] ||
+    ""
+  ).replace(/\s+/g, " ").trim();
+
+  const body = stripHtml(
+    source
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
+  ).slice(0, 18000);
+
+  return { title, meta, body };
+}
+
+async function fetchDomainWebsite(domain) {
+  const host = String(domain || "").trim().toLowerCase();
+  if (!isCorporateDomain(host)) return null;
+
+  const attempts = [
+    "https://" + host + "/",
+    "https://www." + host + "/",
+    "http://" + host + "/",
+  ];
+
+  for (const url of attempts) {
+    try {
+      const page = await fetchPinnedUrl(url);
+      const text = websiteTextFromHtml(page.body);
+      if (!text.body && !text.title && !text.meta) continue;
+
+      console.log(JSON.stringify({
+        source: "website",
+        action: "domain-site-read-ok",
+        domain: host,
+        url: page.url,
+        textLength: text.body.length,
+      }));
+
+      return {
+        domain: host,
+        url: page.url,
+        title: text.title,
+        description: text.meta,
+        text: text.body,
+      };
+    } catch (error) {
+      console.warn(JSON.stringify({
+        source: "website",
+        action: "domain-site-read-attempt-failed",
+        domain: host,
+        url,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+
+  return null;
+}
+
 async function buildDealContext(deal) {
   let linkedContact = null;
 
@@ -1059,7 +1245,7 @@ async function buildDealContext(deal) {
 
   const activities = await getRecentDealActivities(deal.ID);
 
-  return {
+  const baseContext = {
     linked_contact: linkedContact
       ? {
           name: linkedContact.NAME || "",
@@ -1075,6 +1261,17 @@ async function buildDealContext(deal) {
         }
       : null,
     recent_activities: activities,
+  };
+
+  const senderDomain = corporateDomainFromContext(baseContext);
+  const domainWebsite = senderDomain
+    ? await fetchDomainWebsite(senderDomain)
+    : null;
+
+  return {
+    ...baseContext,
+    sender_domain: senderDomain,
+    domain_website: domainWebsite,
   };
 }
 
@@ -1100,7 +1297,8 @@ function dealForAI(deal, context = {}) {
     competitor_prices: deal.UF_CRM_1728208500678 || "",
     manager_questions_and_answers: deal.UF_CRM_1790850696723 || "",
     qualification_answer_history: deal[AI_FIELDS.dealAnswers] || "",
-    sender_domain: corporateDomainFromContext(context),
+    sender_domain: context.sender_domain || corporateDomainFromContext(context),
+    domain_website: context.domain_website || null,
     linked_contact: context.linked_contact || null,
     recent_activities: context.recent_activities || [],
   };
@@ -1143,6 +1341,7 @@ function analysisInstructions() {
     "СНГ — это география, а тендер — способ закупки, не тип компании.",
     "Тип компании определяй по основной деятельности компании, а не только по товару в текущем запросе и не по должности отправителя.",
     "Если есть sender_domain, используй его сразу как один из главных идентификаторов компании. Название из подписи сверяй с этим доменом.",
+    "Если есть domain_website, это содержимое сайта домена отправителя. Используй его как первичный источник для определения деятельности компании, её названия и типа.",
     "Если тип нельзя определить уверенно, используй Не определено.",
     "classification_reason — одно короткое предложение, почему выбран этот тип.",
     "После определения типа выбери question_keys только из правил соответствующего типа.",
@@ -1183,7 +1382,8 @@ async function analyzeDeal(deal, allowWebSearch = false) {
         analysisInstructions(),
         "Перед квалификацией обязательно выполни веб-поиск.",
         "Начни идентификацию компании с sender_domain: " + senderDomain + ".",
-        "Сначала установи, какой организации принадлежит этот домен, затем сверяй название компании из письма, подписи, ИНН и сайт.",
+        "Сначала изучи domain_website, если он доступен: это сайт домена отправителя. Затем при необходимости используй веб-поиск для подтверждения и поиска реквизитов.",
+        "Установи, какой организации принадлежит этот домен, затем сверяй название компании из письма, подписи, ИНН и сайт.",
         "Если название компании распространённое, домен имеет больший вес, чем одно только название.",
         "Приоритет источников: официальный сайт этого домена, затем надёжные бизнес-реестры.",
         "Заполни company только подтверждёнными данными: официальное название, ИНН, сайт, общий телефон, общий email, регион, город, адрес.",
