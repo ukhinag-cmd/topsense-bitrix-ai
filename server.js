@@ -272,6 +272,12 @@ function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function emailDomain(value) {
+  const email = normalizeEmail(value);
+  const at = email.lastIndexOf("@");
+  return at > 0 ? email.slice(at + 1) : "";
+}
+
 function cleanReason(value) {
   return String(value || "")
     .replace(/\(\[[^\]]+\]\([^)]+\)\)/g, "")
