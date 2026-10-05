@@ -1140,6 +1140,17 @@ async function analyzeDeal(deal, allowWebSearch = false) {
   }
 
   let analysis = parseJsonText(firstText);
+
+  console.log(JSON.stringify({
+    source: "openai",
+    action: "ai-first-pass",
+    dealId: String(deal.ID),
+    clientType: analysis.client_type || null,
+    confidence: analysis.confidence ?? null,
+    companyName: analysis.company?.name || null,
+    questionCount: Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0,
+  }));
+
   let finalPayload = firstPayload;
   let webUsed = false;
   let webSources = [];
@@ -1191,14 +1202,20 @@ async function analyzeDeal(deal, allowWebSearch = false) {
     });
 
     const researchText = extractResponseText(researchPayload);
-    if (!researchText) {
-      throw new Error("OpenAI web research returned no text output");
-    }
-
-    analysis = parseJsonText(researchText);
-    finalPayload = researchPayload;
     webUsed = true;
     webSources = extractWebSources(researchPayload);
+
+    if (researchText) {
+      analysis = parseJsonText(researchText);
+      finalPayload = researchPayload;
+    } else {
+      console.warn(JSON.stringify({
+        source: "openai",
+        action: "web-research-no-text-fallback",
+        dealId: String(deal.ID),
+        at: new Date().toISOString(),
+      }));
+    }
   }
 
   return {
