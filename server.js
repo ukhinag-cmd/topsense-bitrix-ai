@@ -2,6 +2,7 @@ const http = require("http");
 const https = require("https");
 const dns = require("dns").promises;
 const net = require("net");
+const pdfParse = require("pdf-parse");
 
 const PORT = process.env.PORT || 10000;
 const MAX_BODY = 1024 * 1024;
@@ -1598,6 +1599,73 @@ async function downloadRecentAttachments(activities) {
   return result;
 }
 
+
+async function extractAttachmentDocument(downloaded) {
+  if (!downloaded) return null;
+
+  const fileName = String(downloaded.fileName || "");
+  const contentType = String(downloaded.contentType || "").toLowerCase();
+  const isPdf =
+    contentType.includes("application/pdf") ||
+    fileName.toLowerCase().endsWith(".pdf");
+
+  if (isPdf) {
+    try {
+      const parsed = await pdfParse(downloaded.buffer);
+      const text = String(parsed?.text || "").replace(/\u0000/g, "").trim();
+
+      console.log(JSON.stringify({
+        source: "attachment",
+        action: "pdf-text-extracted",
+        attachmentId: String(downloaded.id || ""),
+        fileName,
+        textLength: text.length,
+        pages: Number(parsed?.numpages || 0),
+      }));
+
+      return {
+        id: downloaded.id || null,
+        file_name: fileName,
+        content_type: contentType,
+        text: text.slice(0, 30000),
+      };
+    } catch (error) {
+      console.warn(JSON.stringify({
+        source: "attachment",
+        action: "pdf-text-extract-failed",
+        attachmentId: String(downloaded.id || ""),
+        fileName,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      return null;
+    }
+  }
+
+  if (
+    contentType.startsWith("text/") ||
+    /\.(txt|csv)$/i.test(fileName)
+  ) {
+    const text = downloaded.buffer.toString("utf8").trim();
+    return {
+      id: downloaded.id || null,
+      file_name: fileName,
+      content_type: contentType,
+      text: text.slice(0, 30000),
+    };
+  }
+
+  return null;
+}
+
+async function extractAttachmentDocuments(attachments) {
+  const documents = [];
+  for (const item of attachments || []) {
+    const doc = await extractAttachmentDocument(item);
+    if (doc?.text) documents.push(doc);
+  }
+  return documents;
+}
+
 async function buildDealContext(deal) {
   let linkedContact = null;
 
@@ -1607,6 +1675,7 @@ async function buildDealContext(deal) {
 
   const activities = await getRecentDealActivities(deal.ID);
   const attachments = await downloadRecentAttachments(activities);
+  const attachmentDocuments = await extractAttachmentDocuments(attachments);
 
   const baseContext = {
     linked_contact: linkedContact
@@ -1630,6 +1699,7 @@ async function buildDealContext(deal) {
       content_type: item.contentType,
       bytes: item.buffer.length,
     })),
+    attachment_documents: attachmentDocuments,
   };
 
   const senderDomain = corporateDomainFromContext(baseContext);
@@ -1670,6 +1740,7 @@ function dealForAI(deal, context = {}) {
     domain_website: context.domain_website || null,
     linked_contact: context.linked_contact || null,
     recent_activities: context.recent_activities || [],
+    attachment_documents: context.attachment_documents || [],
   };
 }
 
@@ -1826,6 +1897,8 @@ function analysisInstructions() {
     "Если официальный сайт прямо говорит о собственной разработке или производстве газоанализаторов, газоаналитического оборудования, датчиков газа или близкой продукции, классифицируй как Производитель газоаналитического оборудования / конкурент. Не относить такого клиента к торговой компании только потому, что на сайте есть каталог или продажи.",
     "Если есть sender_domain, используй его сразу как один из главных идентификаторов компании. Название из подписи сверяй с этим доменом.",
     "Если есть domain_website, это содержимое сайта домена отправителя. Используй его как первичный источник для определения деятельности компании, её названия и типа.",
+    "Если есть attachment_documents, это текст вложенных документов из письма. Для юридических реквизитов компании (официальное название, ИНН, КПП, ОГРН, юридический адрес) такие документы имеют приоритет над сайтом и свободным веб-поиском.",
+    "Если во вложенном официальном документе найден ИНН, обязательно заполни company.inn. Не подменяй ИНН похожей компании из интернета.",
     "Для company.phone и company.email приоритет имеют контакты с официального сайта domain_website. Не копируй персональный телефон отправителя в карточку компании, если на сайте есть отдельный общий телефон.",
     "Для contact.phone и contact.email используй только данные самого письма/подписи/контакта Bitrix, не контакты с сайта компании.",
     "Если тип нельзя определить уверенно, используй Не определено.",
