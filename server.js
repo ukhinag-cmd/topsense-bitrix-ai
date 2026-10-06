@@ -1983,6 +1983,20 @@ function analysisTextFormat() {
         additionalProperties: false,
         properties: {
           deal_title: { type: "string" },
+          title_components: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              quantity: { type: "string" },
+              device_type: { type: "string" },
+              gases: {
+                type: "array",
+                items: { type: "string" }
+              },
+              end_customer: { type: "string" }
+            },
+            required: ["quantity", "device_type", "gases", "end_customer"]
+          },
           client_type: { type: "string" },
           classification_reason: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -2066,6 +2080,7 @@ function analysisTextFormat() {
         },
         required: [
           "deal_title",
+          "title_components",
           "client_type",
           "classification_reason",
           "confidence",
@@ -2108,7 +2123,12 @@ function analysisInstructions() {
     "Для company.phone и company.email приоритет имеют контакты с официального сайта domain_website. Не копируй персональный телефон отправителя в карточку компании, если на сайте есть отдельный общий телефон.",
     "Для contact.phone и contact.email используй только данные самого письма/подписи/контакта Bitrix, не контакты с сайта компании.",
     "Если тип нельзя определить уверенно, используй Не определено.",
-    "deal_title — короткое название сделки по текущей коммерческой потребности, а не по теме письма. Используй товар/тип оборудования, количество, газ, объект или задачу, если они известны. Не используй AI WEBHOOK TEST, «Запрос КП», «Новое обращение» и другие технические/общие названия.",
+    "Для названия сделки выдели title_components: quantity, device_type, gases, end_customer.",
+    "title_components.quantity — только количество приборов цифрами, без «шт.». Если количество не указано — пустая строка.",
+    "title_components.device_type — тип прибора: стационарный, переносной, персональный и т.п. Не добавляй слово «газоанализатор», если тип уже понятен. Если тип не установлен — пустая строка.",
+    "title_components.gases — только химические формулы газов: CO, CO2, H2S, CH4, O2, NH3, Cl2 и т.п. Никогда не пиши названия газов словами. Если газ не указан — пустой массив.",
+    "title_components.end_customer — конечный заказчик только если он прямо указан в заявке/переписке. Не угадывай его.",
+    "deal_title можешь дать как черновик, но итоговое название CRM формирует код в формате: «12 шт. стац. на CO для Газаналитика (Моск. НПЗ)».",
     "classification_reason — одно короткое предложение, почему выбран этот тип.",
     "question_keys используй только для стандартных CRM-полей и только если такой вопрос действительно нужен в текущей сделке.",
     "context_questions — 3–5 конкретных вопросов менеджеру, которые логически вытекают именно из ТЕКУЩЕЙ потребности.",
@@ -2124,7 +2144,7 @@ function analysisInstructions() {
     "Для contact используй персональные данные только если они явно есть в самой заявке/подписи. Не ищи персональные контакты людей в интернете.",
     "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
     "Ответь только валидным JSON без markdown.",
-    "JSON должен содержать: deal_title, client_type, classification_reason, confidence, purchase_format, delivery_deadline, question_keys, context_questions, known_facts, company, contact."
+    "JSON должен содержать: deal_title, title_components, client_type, classification_reason, confidence, purchase_format, delivery_deadline, question_keys, context_questions, known_facts, company, contact."
   ].join("\n");
 }
 
@@ -2515,7 +2535,7 @@ async function classifyEmailNeed(deal, activity) {
           "Продолжение — уточнение количества, цены, сроков, характеристик, документов, оплаты или доставки по уже существующему запросу.",
           "Одна только смена темы письма недостаточна для новой сделки; сравни смысл.",
           "Если явно новая потребность — is_new_need=true.",
-          "suggested_title: короткое CRM-название новой сделки по сути потребности, 4–12 слов. Укажи оборудование/товар, количество, газ, объект или задачу, если они известны. Не используй тему письма как есть, не пиши AI WEBHOOK TEST, «Запрос КП» или «Новое обращение». Если это продолжение, оставь пустую строку.",
+          "suggested_title: если это новая потребность, дай короткое временное название в стиле «12 шт. стац. на CO для Компания». Количество — цифрами, газы — только химическими формулами, стационарные сокращай «стац.», переносные — «перен.». Не используй AI WEBHOOK TEST/Запрос КП. Если это продолжение, оставь пустую строку.",
         ].join("\n"),
       },
       {
@@ -2865,20 +2885,19 @@ async function reconcileTestEmailRouting() {
   }
 }
 
-async function reprocessTest16ForContextQuestions() {
+async function reprocessCurrentTitleFormatTest() {
   try {
-    const deals = await bitrixCall("crm.deal.list", {
-      order: { ID: "DESC" },
-      filter: { TITLE: "AI WEBHOOK TEST 16" },
-      select: ["ID", "TITLE", "COMMENTS"],
-      start: 0,
-    });
+    const deal = await fetchDeal(39710);
+    const comments = String(deal.COMMENTS || "");
+    const guard =
+      String(deal.COMPANY_ID || "") === "3974" &&
+      String(deal.CONTACT_ID || "") === "39448" &&
+      (
+        comments.includes("[AI-ROUTED-ACTIVITY:323688]") ||
+        String(deal.TITLE || "").includes("12")
+      );
 
-    const deal = Array.isArray(deals)
-      ? deals.find(item => String(item.TITLE || "").trim() === "AI WEBHOOK TEST 16")
-      : null;
-
-    if (!deal) return;
+    if (!guard) return;
 
     await processDeal({
       event: "ONCRMDEALADD",
@@ -2888,7 +2907,7 @@ async function reprocessTest16ForContextQuestions() {
   } catch (error) {
     console.warn(JSON.stringify({
       source: "pipeline",
-      action: "test16-context-reprocess-skipped",
+      action: "title-format-test-reprocess-skipped",
       error: error instanceof Error ? error.message : String(error),
     }));
   }
@@ -3037,6 +3056,166 @@ async function cleanupDuplicateRoutingTestDeals() {
   }
 }
 
+
+function shortCompanyName(value) {
+  let name = String(value || "").trim();
+  if (!name) return "";
+
+  name = name
+    .replace(/^Общество с ограниченной ответственностью\s*/i, "")
+    .replace(/^Публичное акционерное общество\s*/i, "")
+    .replace(/^Акционерное общество\s*/i, "")
+    .replace(/^Закрытое акционерное общество\s*/i, "")
+    .replace(/^Открытое акционерное общество\s*/i, "")
+    .replace(/^ООО\s*/i, "")
+    .replace(/^ПАО\s*/i, "")
+    .replace(/^АО\s*/i, "")
+    .replace(/^ЗАО\s*/i, "")
+    .replace(/^ОАО\s*/i, "")
+    .replace(/^ИП\s*/i, "")
+    .replace(/[«»"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return name;
+}
+
+function shortenCommonCompanyWords(value) {
+  return shortCompanyName(value)
+    .replace(/\bМосковский\b/gi, "Моск.")
+    .replace(/\bМосковская\b/gi, "Моск.")
+    .replace(/\bМосковское\b/gi, "Моск.")
+    .replace(/\bнефтеперерабатывающий завод\b/gi, "НПЗ")
+    .replace(/\bгазоперерабатывающий завод\b/gi, "ГПЗ")
+    .replace(/\bметаллургический завод\b/gi, "МЗ")
+    .replace(/\bнаучно-производственное предприятие\b/gi, "НПП")
+    .replace(/\bнаучно-производственное объединение\b/gi, "НПО")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function shortDeviceType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+
+  if (/стационар/.test(raw)) return "стац.";
+  if (/перенос|портатив/.test(raw)) return "перен.";
+  if (/персонал|индивидуал/.test(raw)) return "персон.";
+  if (/многоканал/.test(raw)) return "многокан.";
+  if (/газоанализ/.test(raw)) return "газоан.";
+
+  return String(value || "")
+    .trim()
+    .replace(/газоанализатор\w*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 24);
+}
+
+function gasFormula(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const compact = raw.replace(/\s+/g, "");
+  if (/^[A-Z][A-Za-z]?\d*(?:[A-Z][A-Za-z]?\d*)*$/.test(compact)) {
+    return compact;
+  }
+
+  const lower = raw.toLowerCase().replace(/ё/g, "е");
+  const aliases = [
+    [/угарн|монооксид углерод|оксид углерод\b/, "CO"],
+    [/углекисл|диоксид углерод/, "CO2"],
+    [/сероводород/, "H2S"],
+    [/\bметан\b/, "CH4"],
+    [/\bпропан\b/, "C3H8"],
+    [/\bбутан\b/, "C4H10"],
+    [/\bкислород\b/, "O2"],
+    [/\bаммиак\b/, "NH3"],
+    [/\bхлор\b/, "Cl2"],
+    [/\bводород\b/, "H2"],
+    [/\bозон\b/, "O3"],
+    [/диоксид серы|сернистый газ/, "SO2"],
+    [/диоксид азота/, "NO2"],
+    [/оксид азота/, "NO"],
+    [/\bацетилен\b/, "C2H2"],
+    [/\bэтилен\b/, "C2H4"],
+    [/\bэтан\b/, "C2H6"],
+    [/\bпропилен\b/, "C3H6"],
+    [/\bфосфин\b/, "PH3"],
+    [/циановодород|синильн/, "HCN"],
+    [/фтороводород|фтористый водород/, "HF"],
+    [/хлороводород|соляная кислота/, "HCl"],
+    [/диоксид хлора/, "ClO2"],
+    [/формальдегид/, "CH2O"],
+  ];
+
+  for (const [pattern, formula] of aliases) {
+    if (pattern.test(lower)) return formula;
+  }
+
+  return raw.toUpperCase();
+}
+
+function normalizeQuantity(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/\d+(?:[.,]\d+)?/);
+  return match ? match[0].replace(",", ".") : "";
+}
+
+function isDealerForTitle(analysis) {
+  const type = String(analysis?.client_type || "").toLowerCase();
+  if (type.includes("дилер")) return true;
+
+  return Array.isArray(analysis?.company?.roles) &&
+    analysis.company.roles.some(role =>
+      String(role || "").toLowerCase().includes("дилер")
+    );
+}
+
+async function formattedDealTitle(deal, analysis) {
+  const parts = analysis?.title_components || {};
+  const quantity = normalizeQuantity(parts.quantity);
+  const device = shortDeviceType(parts.device_type);
+
+  const gases = Array.from(new Set(
+    (Array.isArray(parts.gases) ? parts.gases : [])
+      .map(gasFormula)
+      .filter(Boolean)
+  ));
+
+  let companyName = String(analysis?.company?.name || "").trim();
+
+  if (deal.COMPANY_ID && String(deal.COMPANY_ID) !== "0") {
+    try {
+      const linkedCompany = await getCompany(deal.COMPANY_ID);
+      if (linkedCompany?.TITLE) companyName = linkedCompany.TITLE;
+    } catch {}
+  }
+
+  const companyShort = shortenCommonCompanyWords(companyName) || "компании";
+  const endCustomerRaw =
+    String(parts.end_customer || "").trim() ||
+    String(deal.UF_CRM_1728208529434 || "").trim();
+
+  const endCustomer = isDealerForTitle(analysis) && endCustomerRaw
+    ? shortenCommonCompanyWords(endCustomerRaw)
+    : "";
+
+  const chunks = [];
+  if (quantity) chunks.push(quantity + " шт.");
+  if (device) chunks.push(device);
+  if (gases.length) chunks.push("на " + gases.join("/"));
+
+  let title = chunks.join(" ").trim();
+  if (!title) title = "Приборы";
+
+  title += " для " + companyShort;
+  if (endCustomer) title += " (" + endCustomer + ")";
+
+  return title.replace(/\s+/g, " ").trim();
+}
+
 async function processDeal(evt) {
   const eventName = String(evt.event || "").toUpperCase();
   const isAdd = eventName === "ONCRMDEALADD";
@@ -3180,7 +3359,7 @@ async function processDeal(evt) {
       })
     );
 
-    const analyzedTitle = String(result.analysis?.deal_title || "").trim();
+    const analyzedTitle = await formattedDealTitle(deal, result.analysis);
     if (
       analyzedTitle &&
       analyzedTitle !== String(deal.TITLE || "").trim()
@@ -3328,8 +3507,8 @@ server.listen(PORT, "0.0.0.0", () => {
     rollbackMistakenTest16Target().catch(error => {
       console.error("Unexpected TEST16 rollback error", error);
     });
-    reprocessTest16ForContextQuestions().catch(error => {
-      console.error("Unexpected TEST16 context reprocess error", error);
+    reprocessCurrentTitleFormatTest().catch(error => {
+      console.error("Unexpected title-format test reprocess error", error);
     });
   }, 4000);
 
