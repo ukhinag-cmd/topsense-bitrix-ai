@@ -2358,10 +2358,9 @@ async function processDeal(evt) {
     await ensureAIFields();
     await ensureMultilineDealField("UF_CRM_1790850696723");
 
-    // Keep the deal card aligned with the newest inbound email.
-    await syncInboundEmailsToDeal(deal);
-
-    // Re-read after possible custom-field creation/email sync so new fields are present.
+    // Re-read after possible custom-field creation so new fields are present.
+    // Do not merge later inbound emails into an existing deal here:
+    // a separate commercial need must first be routed as same-deal vs new-deal.
     deal = await fetchDeal(evt.dealId);
 
     const answers = parseQuestionAnswers(deal.UF_CRM_1790850696723);
