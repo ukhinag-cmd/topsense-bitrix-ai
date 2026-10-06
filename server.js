@@ -2583,6 +2583,13 @@ async function reconcileTest15Activity() {
     });
 
     if (candidate) {
+      console.log(JSON.stringify({
+        source: "routing",
+        action: "test15-activity-diagnostic",
+        activityId: String(candidate.id || ""),
+        subject: candidate.subject || "",
+        descriptionSnippet: String(candidate.description || "").slice(0, 1800),
+      }));
       await routeInboundActivity(candidate.id);
     }
   } catch (error) {
