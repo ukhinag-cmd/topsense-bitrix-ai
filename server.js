@@ -1666,6 +1666,89 @@ async function extractAttachmentDocuments(attachments) {
   return documents;
 }
 
+
+function isInboundEmailActivity(activity) {
+  const direction = String(activity?.direction || "");
+  const provider = String(activity?.provider_id || "").toUpperCase();
+  const typeId = String(activity?.type_id || "");
+
+  return direction === "1" && (provider.includes("EMAIL") || typeId === "4");
+}
+
+function normalizeInboundEmailBody(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 12000);
+}
+
+async function syncInboundEmailsToDeal(deal) {
+  const activities = await getRecentDealActivities(deal.ID);
+  const inbound = activities.filter(isInboundEmailActivity);
+  if (!inbound.length) return false;
+
+  const latest = inbound[0];
+  const patch = {};
+
+  const latestSubject = String(latest.subject || "").trim();
+  const currentTitle = String(deal.TITLE || "").trim();
+
+  // In the test contour, reflect the newest inbound request in the deal title.
+  if (
+    latestSubject &&
+    latestSubject !== currentTitle &&
+    (
+      currentTitle.toUpperCase().startsWith("AI WEBHOOK TEST") ||
+      latestSubject.toUpperCase().startsWith("AI WEBHOOK TEST")
+    )
+  ) {
+    patch.TITLE = latestSubject;
+  }
+
+  let comments = String(deal.COMMENTS || "").trim();
+
+  // Persist each inbound email once in COMMENTS so a new requirement is visible
+  // in the deal card and available to managers without opening the activity.
+  for (const activity of inbound.slice().reverse()) {
+    const marker = `[AI-INBOUND:${activity.id}]`;
+    if (comments.includes(marker)) continue;
+
+    const subject = String(activity.subject || "").trim();
+    const body = normalizeInboundEmailBody(activity.description);
+    if (!subject && !body) continue;
+
+    const block = [
+      marker,
+      activity.created ? "Дата: " + activity.created : "",
+      subject ? "Тема: " + subject : "",
+      body ? "Письмо: " + body : "",
+    ].filter(Boolean).join("\r\n");
+
+    comments = comments ? comments + "\r\n\r\n" + block : block;
+  }
+
+  if (comments !== String(deal.COMMENTS || "").trim()) {
+    patch.COMMENTS = comments;
+  }
+
+  if (!Object.keys(patch).length) return false;
+
+  await updateDealFields(deal.ID, patch);
+
+  console.log(JSON.stringify({
+    source: "bitrix24",
+    action: "inbound-email-synced-to-deal",
+    dealId: String(deal.ID),
+    latestActivityId: String(latest.id || ""),
+    latestSubject: latestSubject || null,
+    inboundCount: inbound.length,
+    titleUpdated: Boolean(patch.TITLE),
+    commentsUpdated: Boolean(patch.COMMENTS),
+  }));
+
+  return true;
+}
+
 async function buildDealContext(deal) {
   let linkedContact = null;
 
@@ -2133,7 +2216,10 @@ async function reconcileRecentTestDeals() {
       if (!haystack.includes("AI WEBHOOK TEST")) return false;
 
       const questions = String(deal.UF_CRM_1790850696723 || "");
-      if (haystack.includes("AI WEBHOOK TEST 15")) return true;
+      if (
+        haystack.includes("AI WEBHOOK TEST 15") &&
+        !String(deal.COMMENTS || "").includes("[AI-INBOUND:")
+      ) return true;
       if (!questions.includes("Тип:")) return true;
       if (questions.includes("Тип: Не определено")) return true;
       if (
@@ -2272,7 +2358,10 @@ async function processDeal(evt) {
     await ensureAIFields();
     await ensureMultilineDealField("UF_CRM_1790850696723");
 
-    // Re-read after possible custom-field creation so new fields are present.
+    // Keep the deal card aligned with the newest inbound email.
+    await syncInboundEmailsToDeal(deal);
+
+    // Re-read after possible custom-field creation/email sync so new fields are present.
     deal = await fetchDeal(evt.dealId);
 
     const answers = parseQuestionAnswers(deal.UF_CRM_1790850696723);
