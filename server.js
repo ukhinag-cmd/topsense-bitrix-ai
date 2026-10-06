@@ -4075,9 +4075,6 @@ server.listen(PORT, "0.0.0.0", () => {
     migrateKnownTestDealTitles().catch(error => {
       console.error("Unexpected test title migration error", error);
     });
-    runSmallDealerAudit().catch(error => {
-      console.error("Unexpected dealer audit error", error);
-    });
   }, 4000);
 
   // While the free instance is awake, re-check periodically.
