@@ -824,7 +824,9 @@ function qualificationStatus(analysis) {
     return "Нужно определить тип компании";
   }
 
-  const count = Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0;
+  const count = Array.isArray(analysis.context_questions) && analysis.context_questions.length
+    ? analysis.context_questions.length
+    : (Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0);
   return count ? `Нужно уточнить: ${count}` : "Квалифицировано";
 }
 
@@ -881,7 +883,9 @@ async function linkDealEntities(deal, company, contact) {
 
 async function createQualificationActivity(deal, analysis) {
   if (process.env.AUTO_QUAL_ACTIVITY !== "1") return null;
-  const count = Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0;
+  const count = Array.isArray(analysis.context_questions) && analysis.context_questions.length
+    ? analysis.context_questions.length
+    : (Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0);
   if (!count) return null;
 
   const deadline = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
@@ -1090,13 +1094,24 @@ function formatManagerQuestions(analysis) {
     blocks.push("Почему: " + cleanReason(analysis.classification_reason));
   }
 
+  const contextQuestions = Array.isArray(analysis.context_questions)
+    ? analysis.context_questions
+        .map(value => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 6)
+    : [];
+
   const keys = Array.isArray(analysis.question_keys)
     ? analysis.question_keys.slice(0, 6)
     : [];
 
-  const questions = keys
+  const fallbackQuestions = keys
     .map(key => questionText(analysis.client_type, key))
     .filter(Boolean);
+
+  const questions = contextQuestions.length
+    ? contextQuestions
+    : fallbackQuestions;
 
   questions.forEach((q, i) => {
     blocks.push(`${i + 1}. ${q}\r\nОтвет:`);
@@ -1795,6 +1810,57 @@ async function syncInboundEmailsToDeal(deal) {
   return true;
 }
 
+async function getPreviousDealContext(deal) {
+  const filters = [];
+  if (deal.CONTACT_ID && String(deal.CONTACT_ID) !== "0") {
+    filters.push({ CONTACT_ID: Number(deal.CONTACT_ID) });
+  }
+  if (deal.COMPANY_ID && String(deal.COMPANY_ID) !== "0") {
+    filters.push({ COMPANY_ID: Number(deal.COMPANY_ID) });
+  }
+
+  const seen = new Set();
+  const previous = [];
+
+  for (const filter of filters) {
+    try {
+      const deals = await bitrixCall("crm.deal.list", {
+        order: { DATE_CREATE: "DESC" },
+        filter,
+        select: [
+          "ID",
+          "TITLE",
+          "COMMENTS",
+          "DATE_CREATE",
+          "UF_CRM_1790850696723",
+          AI_FIELDS.dealAnswers,
+          AI_FIELDS.dealType,
+        ],
+        start: 0,
+      });
+
+      for (const item of Array.isArray(deals) ? deals : []) {
+        const id = String(item.ID || "");
+        if (!id || id === String(deal.ID) || seen.has(id)) continue;
+        seen.add(id);
+        previous.push({
+          title: item.TITLE || "",
+          comments: String(item.COMMENTS || "").slice(0, 5000),
+          questions_and_answers: String(item.UF_CRM_1790850696723 || "").slice(0, 8000),
+          answer_history: String(item[AI_FIELDS.dealAnswers] || "").slice(0, 8000),
+          client_type: item[AI_FIELDS.dealType] || "",
+          created: item.DATE_CREATE || null,
+        });
+        if (previous.length >= 6) break;
+      }
+    } catch {}
+
+    if (previous.length >= 6) break;
+  }
+
+  return previous.slice(0, 6);
+}
+
 async function buildDealContext(deal) {
   let linkedContact = null;
 
@@ -1805,6 +1871,7 @@ async function buildDealContext(deal) {
   const activities = await getRecentDealActivities(deal.ID);
   const attachments = await downloadRecentAttachments(activities);
   const attachmentDocuments = await extractAttachmentDocuments(attachments);
+  const previousDeals = await getPreviousDealContext(deal);
 
   const baseContext = {
     linked_contact: linkedContact
@@ -1829,6 +1896,7 @@ async function buildDealContext(deal) {
       bytes: item.buffer.length,
     })),
     attachment_documents: attachmentDocuments,
+    previous_deals: previousDeals,
   };
 
   const senderDomain = corporateDomainFromContext(baseContext);
@@ -1870,6 +1938,7 @@ function dealForAI(deal, context = {}) {
     linked_contact: context.linked_contact || null,
     recent_activities: context.recent_activities || [],
     attachment_documents: context.attachment_documents || [],
+    previous_deals: context.previous_deals || [],
   };
 }
 
@@ -1913,6 +1982,7 @@ function analysisTextFormat() {
         type: "object",
         additionalProperties: false,
         properties: {
+          deal_title: { type: "string" },
           client_type: { type: "string" },
           classification_reason: { type: "string" },
           confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -1921,6 +1991,11 @@ function analysisTextFormat() {
           question_keys: {
             type: "array",
             items: { type: "string" },
+          },
+          context_questions: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: 6
           },
           known_facts: {
             type: "array",
@@ -1990,12 +2065,14 @@ function analysisTextFormat() {
           },
         },
         required: [
+          "deal_title",
           "client_type",
           "classification_reason",
           "confidence",
           "purchase_format",
           "delivery_deadline",
           "question_keys",
+          "context_questions",
           "known_facts",
           "company",
           "contact",
@@ -2031,11 +2108,15 @@ function analysisInstructions() {
     "Для company.phone и company.email приоритет имеют контакты с официального сайта domain_website. Не копируй персональный телефон отправителя в карточку компании, если на сайте есть отдельный общий телефон.",
     "Для contact.phone и contact.email используй только данные самого письма/подписи/контакта Bitrix, не контакты с сайта компании.",
     "Если тип нельзя определить уверенно, используй Не определено.",
+    "deal_title — короткое название сделки по текущей коммерческой потребности, а не по теме письма. Используй товар/тип оборудования, количество, газ, объект или задачу, если они известны. Не используй AI WEBHOOK TEST, «Запрос КП», «Новое обращение» и другие технические/общие названия.",
     "classification_reason — одно короткое предложение, почему выбран этот тип.",
-    "После определения типа выбери question_keys только из правил соответствующего типа.",
-    "Не придумывай новые вопросы и не меняй формулировки: текст вопросов хранится в коде.",
-    "Не выбирай вопрос, если ответ уже явно есть в названии, комментарии или полях сделки.",
-    "Обычно выбери 3–6 вопросов. Из них 1–2 могут быть продающими, если базовая потребность уже понятна.",
+    "question_keys используй только для стандартных CRM-полей и только если такой вопрос действительно нужен в текущей сделке.",
+    "context_questions — 3–5 конкретных вопросов менеджеру, которые логически вытекают именно из ТЕКУЩЕЙ потребности.",
+    "context_questions можно формулировать свободно: они должны учитывать конкретное оборудование, количество, газ, объект, сроки и уже известные факты.",
+    "Если есть previous_deals, это история предыдущих потребностей этого же контакта/компании. Не повторяй вопросы, которые уже задавались раньше, если ответ применим к новой потребности.",
+    "Если параметр может измениться от закупки к закупке и его надо подтвердить заново, формулируй вопрос как уточнение именно по новой потребности, а не повторяй старую формулировку.",
+    "Не спрашивай то, что уже прямо сказано в новом письме. Вопросы должны закрывать пробелы нового контекста и помогать продаже.",
+    "Из 3–5 context_questions 1–2 могут быть продающими, если базовая техническая потребность уже понятна.",
     "Не требуй имя конечного заказчика.",
     "Извлеки из сделки данные компании и контактного лица. Для входящих email-заявок обязательно анализируй recent_activities: там может находиться тема, текст письма, подпись отправителя и коммуникации.",
     "company должен содержать: name, inn, website, phone, email, region, city, address, is_manufacturer, manufactured_products, manufacturer_reason, services, roles. Неизвестные текстовые значения оставляй пустой строкой.",
@@ -2043,7 +2124,7 @@ function analysisInstructions() {
     "Для contact используй персональные данные только если они явно есть в самой заявке/подписи. Не ищи персональные контакты людей в интернете.",
     "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
     "Ответь только валидным JSON без markdown.",
-    "JSON должен содержать: client_type, classification_reason, confidence, purchase_format, delivery_deadline, question_keys, known_facts, company, contact."
+    "JSON должен содержать: deal_title, client_type, classification_reason, confidence, purchase_format, delivery_deadline, question_keys, context_questions, known_facts, company, contact."
   ].join("\n");
 }
 
@@ -2434,7 +2515,7 @@ async function classifyEmailNeed(deal, activity) {
           "Продолжение — уточнение количества, цены, сроков, характеристик, документов, оплаты или доставки по уже существующему запросу.",
           "Одна только смена темы письма недостаточна для новой сделки; сравни смысл.",
           "Если явно новая потребность — is_new_need=true.",
-          "suggested_title: короткое название новой сделки по сути запроса; если это продолжение, оставь пустую строку.",
+          "suggested_title: короткое CRM-название новой сделки по сути потребности, 4–12 слов. Укажи оборудование/товар, количество, газ, объект или задачу, если они известны. Не используй тему письма как есть, не пиши AI WEBHOOK TEST, «Запрос КП» или «Новое обращение». Если это продолжение, оставь пустую строку.",
         ].join("\n"),
       },
       {
@@ -2602,45 +2683,8 @@ async function routeInboundActivity(activityId, options = {}) {
   const quotedSubject = quotedEmailSubject(activity.thread_description);
   const currentBody = currentEmailBody(activity.description);
 
-  if (quotedSubject) {
-    const quotedDeal = await findDealByTitleExact(quotedSubject);
-    if (quotedDeal && String(quotedDeal.ID) !== String(sourceDeal.ID)) {
-      const marker = "[AI-ROUTED-ACTIVITY:" + id + "]";
-      const existingComments = String(quotedDeal.COMMENTS || "").trim();
-      const append = [
-        marker,
-        "Продолжение переписки: " + (activity.subject || "входящее письмо"),
-        currentBody ? "Письмо: " + currentBody : "",
-      ].filter(Boolean).join("\r\n");
-
-      if (!existingComments.includes(marker)) {
-        await updateDealFields(quotedDeal.ID, {
-          COMMENTS: existingComments
-            ? existingComments + "\r\n\r\n" + append
-            : append,
-        });
-      }
-
-      await moveActivityToDeal(id, sourceDeal.ID, quotedDeal.ID);
-      ROUTED_ACTIVITIES.add(id);
-
-      console.log(JSON.stringify({
-        source: "routing",
-        action: "followup-moved-to-quoted-deal",
-        activityId: id,
-        sourceDealId: String(sourceDeal.ID),
-        targetDealId: String(quotedDeal.ID),
-        quotedSubject,
-      }));
-
-      if (!options.skipProcessDeal) {
-        await processDeal({ event: "ONCRMDEALADD", dealId: String(quotedDeal.ID) });
-      }
-
-      return fetchDeal(quotedDeal.ID);
-    }
-  }
-
+  // A reply in the same email thread can still contain a completely new need.
+  // Always classify the CURRENT message first; quoted subject is only a routing hint.
   const routing = await classifyEmailNeed(sourceDeal, activity);
 
   console.log(JSON.stringify({
@@ -2651,16 +2695,53 @@ async function routeInboundActivity(activityId, options = {}) {
     isNewNeed: Boolean(routing.is_new_need),
     confidence: routing.confidence,
     reason: routing.reason,
+    suggestedTitle: routing.suggested_title || "",
   }));
 
   if (!routing.is_new_need || Number(routing.confidence || 0) < 0.65) {
+    if (quotedSubject) {
+      const quotedDeal = await findDealByTitleExact(quotedSubject);
+      if (quotedDeal && String(quotedDeal.ID) !== String(sourceDeal.ID)) {
+        const marker = "[AI-ROUTED-ACTIVITY:" + id + "]";
+        const existingComments = String(quotedDeal.COMMENTS || "").trim();
+        const append = [
+          marker,
+          "Продолжение переписки: " + (activity.subject || "входящее письмо"),
+          currentBody ? "Письмо: " + currentBody : "",
+        ].filter(Boolean).join("\r\n");
+
+        if (!existingComments.includes(marker)) {
+          await updateDealFields(quotedDeal.ID, {
+            COMMENTS: existingComments
+              ? existingComments + "\r\n\r\n" + append
+              : append,
+          });
+        }
+
+        await moveActivityToDeal(id, sourceDeal.ID, quotedDeal.ID);
+
+        console.log(JSON.stringify({
+          source: "routing",
+          action: "followup-moved-to-quoted-deal",
+          activityId: id,
+          sourceDealId: String(sourceDeal.ID),
+          targetDealId: String(quotedDeal.ID),
+          quotedSubject,
+        }));
+
+        if (!options.skipProcessDeal) {
+          await processDeal({ event: "ONCRMDEALADD", dealId: String(quotedDeal.ID) });
+        }
+      }
+    }
+
     ROUTED_ACTIVITIES.add(id);
     return null;
   }
 
   const title =
-    String(activity.subject || "").trim() ||
     String(routing.suggested_title || "").trim() ||
+    String(activity.subject || "").trim() ||
     "Новая потребность";
 
   const marker = "[AI-ROUTED-ACTIVITY:" + id + "]";
@@ -2779,6 +2860,35 @@ async function reconcileTestEmailRouting() {
     console.warn(JSON.stringify({
       source: "routing",
       action: "test-email-routing-reconcile-skipped",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
+async function reprocessTest16ForContextQuestions() {
+  try {
+    const deals = await bitrixCall("crm.deal.list", {
+      order: { ID: "DESC" },
+      filter: { TITLE: "AI WEBHOOK TEST 16" },
+      select: ["ID", "TITLE", "COMMENTS"],
+      start: 0,
+    });
+
+    const deal = Array.isArray(deals)
+      ? deals.find(item => String(item.TITLE || "").trim() === "AI WEBHOOK TEST 16")
+      : null;
+
+    if (!deal) return;
+
+    await processDeal({
+      event: "ONCRMDEALADD",
+      dealId: String(deal.ID),
+      forceTest: true,
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "pipeline",
+      action: "test16-context-reprocess-skipped",
       error: error instanceof Error ? error.message : String(error),
     }));
   }
@@ -3059,14 +3169,30 @@ async function processDeal(evt) {
         responseId: result.responseId,
         clientType: result.analysis?.client_type || null,
         confidence: result.analysis?.confidence ?? null,
-        questionCount: Array.isArray(result.analysis?.question_keys)
-          ? result.analysis.question_keys.length
-          : 0,
+        questionCount: Array.isArray(result.analysis?.context_questions) && result.analysis.context_questions.length
+          ? result.analysis.context_questions.length
+          : (Array.isArray(result.analysis?.question_keys)
+              ? result.analysis.question_keys.length
+              : 0),
         webUsed: result.webUsed,
         webSourceCount: result.webSources.length,
         analyzedAt: new Date().toISOString(),
       })
     );
+
+    const analyzedTitle = String(result.analysis?.deal_title || "").trim();
+    if (
+      analyzedTitle &&
+      analyzedTitle !== String(deal.TITLE || "").trim()
+    ) {
+      await updateDealFields(deal.ID, { TITLE: analyzedTitle });
+      deal = await fetchDeal(deal.ID);
+      console.log(JSON.stringify({
+        source: "bitrix24",
+        action: "deal-title-updated-from-need",
+        dealTitle: analyzedTitle,
+      }));
+    }
 
     const company = await upsertCompany(deal, result.analysis);
     const contact = await upsertContact(deal, result.analysis, company);
@@ -3201,6 +3327,9 @@ server.listen(PORT, "0.0.0.0", () => {
     });
     rollbackMistakenTest16Target().catch(error => {
       console.error("Unexpected TEST16 rollback error", error);
+    });
+    reprocessTest16ForContextQuestions().catch(error => {
+      console.error("Unexpected TEST16 context reprocess error", error);
     });
   }, 4000);
 
