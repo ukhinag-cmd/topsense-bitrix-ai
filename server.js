@@ -3522,6 +3522,196 @@ async function migrateKnownTestDealTitles() {
   }
 }
 
+function dealerAuditTextFormat() {
+  return {
+    format: {
+      type: "json_schema",
+      name: "dealer_audit",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          companies: {
+            type: "array",
+            minItems: 1,
+            maxItems: 10,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                company_name: { type: "string" },
+                verdict: {
+                  type: "string",
+                  enum: [
+                    "Дилер",
+                    "Вероятный дилер",
+                    "Не похоже на дилера",
+                    "Недостаточно данных"
+                  ]
+                },
+                confidence: { type: "number", minimum: 0, maximum: 1 },
+                rationale: { type: "string" },
+                evidence: {
+                  type: "array",
+                  maxItems: 5,
+                  items: { type: "string" }
+                },
+                mentioned_end_customers: {
+                  type: "array",
+                  maxItems: 8,
+                  items: { type: "string" }
+                }
+              },
+              required: [
+                "company_name",
+                "verdict",
+                "confidence",
+                "rationale",
+                "evidence",
+                "mentioned_end_customers"
+              ]
+            }
+          }
+        },
+        required: ["companies"]
+      }
+    }
+  };
+}
+
+async function runSmallDealerAudit() {
+  try {
+    const pages = [];
+    for (const start of [0, 50]) {
+      const batch = await bitrixCall("crm.deal.list", {
+        order: { DATE_CREATE: "DESC" },
+        filter: {},
+        select: [
+          "ID",
+          "TITLE",
+          "COMMENTS",
+          "ADDITIONAL_INFO",
+          "DATE_CREATE",
+          "COMPANY_ID",
+          "CONTACT_ID",
+          "UF_CRM_1739950675115",
+          "UF_CRM_1728208529434",
+          AI_FIELDS.dealType,
+          AI_FIELDS.dealReason
+        ],
+        start
+      });
+      if (Array.isArray(batch)) pages.push(...batch);
+      if (!Array.isArray(batch) || batch.length < 50) break;
+    }
+
+    const byCompany = new Map();
+
+    for (const deal of pages) {
+      const companyId = String(deal.COMPANY_ID || "");
+      if (!companyId || companyId === "0") continue;
+
+      if (!byCompany.has(companyId)) {
+        byCompany.set(companyId, []);
+      }
+
+      byCompany.get(companyId).push({
+        title: String(deal.TITLE || "").slice(0, 500),
+        comments: String(deal.COMMENTS || "").slice(0, 2500),
+        additional_info: String(deal.ADDITIONAL_INFO || "").slice(0, 1500),
+        end_customer: String(deal.UF_CRM_1728208529434 || "").slice(0, 500),
+        legacy_type: String(deal.UF_CRM_1739950675115 || ""),
+        ai_type: String(deal[AI_FIELDS.dealType] || ""),
+        ai_reason: String(deal[AI_FIELDS.dealReason] || "").slice(0, 800),
+        created: deal.DATE_CREATE || null
+      });
+    }
+
+    const ranked = [...byCompany.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 18);
+
+    const candidates = [];
+
+    for (const [companyId, deals] of ranked) {
+      try {
+        const company = await getCompany(companyId);
+        if (!company) continue;
+
+        const aiType = String(company[AI_FIELDS.companyType] || "").trim();
+        const roles = String(company[AI_FIELDS.companyRoles] || "").trim();
+        const legacyDealerSeen = deals.some(d => d.legacy_type === "172");
+        const alreadyDealer =
+          aiType.toLowerCase() === "дилер" ||
+          roles.toLowerCase().includes("дилер") ||
+          legacyDealerSeen;
+
+        if (alreadyDealer) continue;
+
+        candidates.push({
+          company_name: company.TITLE || "",
+          existing_ai_type: aiType,
+          existing_roles: roles,
+          website: Array.isArray(company.WEB)
+            ? company.WEB.map(x => x.VALUE).filter(Boolean).slice(0, 3)
+            : [],
+          recent_deal_count: deals.length,
+          recent_deals: deals.slice(0, 8)
+        });
+
+        if (candidates.length >= 8) break;
+      } catch {}
+    }
+
+    if (candidates.length < 4) {
+      console.warn(JSON.stringify({
+        source: "dealer-audit",
+        action: "small-sample-insufficient",
+        candidateCount: candidates.length
+      }));
+      return;
+    }
+
+    const payload = await callOpenAI({
+      model: process.env.OPENAI_MODEL || "gpt-6-luna",
+      store: false,
+      max_output_tokens: 3000,
+      text: dealerAuditTextFormat(),
+      instructions: [
+        "Проведи аудит небольшой выборки компаний из CRM производителя промышленных газоанализаторов.",
+        "Цель — выявить существующих дилеров, которые исторически не были помечены как дилеры.",
+        "Используй только предоставленную историю CRM. Не делай веб-поиск и не выдумывай факты.",
+        "Сильные признаки дилера: разные конечные заказчики в разных сделках, запросы 'для заказчика/клиента', регулярные запросы на разное оборудование под разные предприятия, перепродажа, дилерские/партнерские цены, запрос аналога для чужого объекта.",
+        "Не считай дилером компанию только потому, что она много раз покупала оборудование или является подрядчиком/интегратором.",
+        "Дилер = уверенное подтверждение по истории; Вероятный дилер = несколько косвенных признаков; Недостаточно данных = история не позволяет решить.",
+        "В evidence укажи конкретные признаки из названий/комментариев/полей сделок, коротко.",
+        "Не меняй CRM. Это только аналитическая выборка для последующей сверки с менеджерами."
+      ].join("\n"),
+      input: [{
+        role: "user",
+        content: JSON.stringify({ companies: candidates })
+      }]
+    });
+
+    const text = extractResponseText(payload);
+    const audit = parseJsonText(text);
+
+    console.log(JSON.stringify({
+      source: "dealer-audit",
+      action: "small-sample-result",
+      sampleBasis: "recent linked-company deals, CRM history only",
+      companies: audit.companies || []
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      source: "dealer-audit",
+      action: "small-sample-error",
+      error: error instanceof Error ? error.message : String(error)
+    }));
+  }
+}
+
 async function handleQualificationAnswersUpdate(deal) {
   const fieldText = String(deal.UF_CRM_1790850696723 || "");
   const blocks = parseQuestionBlocks(fieldText);
@@ -3884,6 +4074,9 @@ server.listen(PORT, "0.0.0.0", () => {
     });
     migrateKnownTestDealTitles().catch(error => {
       console.error("Unexpected test title migration error", error);
+    });
+    runSmallDealerAudit().catch(error => {
+      console.error("Unexpected dealer audit error", error);
     });
   }, 4000);
 
