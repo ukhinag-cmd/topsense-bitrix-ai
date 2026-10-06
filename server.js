@@ -740,19 +740,53 @@ async function upsertContact(deal, analysis, company) {
   return contact;
 }
 
-function parseQuestionAnswers(text) {
+function parseQuestionBlocks(text) {
   const source = String(text || "");
   const re = /(\d+)\.\s*([^\r\n]+)\r?\nОтвет:\s*([\s\S]*?)(?=(?:\r?\n){2,}\d+\.|$)/g;
-  const answers = [];
+  const blocks = [];
   let match;
 
   while ((match = re.exec(source)) !== null) {
     const question = String(match[2] || "").trim();
     const answer = String(match[3] || "").trim();
-    if (question && answer) answers.push({ question, answer });
+    if (question) {
+      blocks.push({
+        number: Number(match[1] || 0),
+        question,
+        answer,
+      });
+    }
   }
 
-  return answers;
+  return blocks;
+}
+
+function isMeaningfulManagerAnswer(value) {
+  const answer = String(value || "").trim();
+  if (!answer) return false;
+
+  const normalized = answer
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+  return ![
+    "-",
+    "—",
+    "нет ответа",
+    "не заполнено",
+    "не заполнен",
+    "не выяснено",
+    "не уточнено",
+  ].includes(normalized);
+}
+
+function parseQuestionAnswers(text) {
+  return parseQuestionBlocks(text)
+    .filter(item => isMeaningfulManagerAnswer(item.answer))
+    .map(item => ({
+      question: item.question,
+      answer: item.answer,
+    }));
 }
 
 function answerHistoryText(existing, newAnswers) {
@@ -3216,6 +3250,66 @@ async function formattedDealTitle(deal, analysis) {
   return title.replace(/\s+/g, " ").trim();
 }
 
+async function handleQualificationAnswersUpdate(deal) {
+  const fieldText = String(deal.UF_CRM_1790850696723 || "");
+  const blocks = parseQuestionBlocks(fieldText);
+
+  // Only take over deals that already contain the AI manager-question structure.
+  if (!blocks.length || !fieldText.includes("Ответ:")) return false;
+
+  const answeredBlocks = blocks.filter(item =>
+    isMeaningfulManagerAnswer(item.answer)
+  );
+
+  const total = blocks.length;
+  const answered = answeredBlocks.length;
+  const remaining = Math.max(0, total - answered);
+  const status = remaining === 0
+    ? "Квалифицировано"
+    : "Нужно уточнить: " + remaining;
+
+  const answers = answeredBlocks.map(item => ({
+    question: item.question,
+    answer: item.answer,
+  }));
+
+  const patch = {};
+
+  if (String(deal[AI_FIELDS.dealStatus] || "") !== status) {
+    patch[AI_FIELDS.dealStatus] = status;
+  }
+
+  const history = answerHistoryText(
+    deal[AI_FIELDS.dealAnswers],
+    answers
+  );
+
+  if (
+    history &&
+    String(deal[AI_FIELDS.dealAnswers] || "") !== history
+  ) {
+    patch[AI_FIELDS.dealAnswers] = history;
+  }
+
+  Object.assign(patch, answerFieldPatch(answers));
+
+  if (Object.keys(patch).length) {
+    await updateDealFields(deal.ID, patch);
+  }
+
+  console.log(JSON.stringify({
+    source: "qualification-control",
+    action: "manager-answers-checked",
+    dealTitle: deal.TITLE || "",
+    answered,
+    total,
+    remaining,
+    status,
+  }));
+
+  return true;
+}
+
 async function processDeal(evt) {
   const eventName = String(evt.event || "").toUpperCase();
   const isAdd = eventName === "ONCRMDEALADD";
@@ -3232,7 +3326,7 @@ async function processDeal(evt) {
 
   if (isUpdate) {
     const selfUpdatedAt = SELF_UPDATES.get(dealId) || 0;
-    if (Date.now() - selfUpdatedAt < 15000) {
+    if (Date.now() - selfUpdatedAt < 30000) {
       console.log(JSON.stringify({
         source: "bitrix24",
         action: "self-update-skipped",
@@ -3261,6 +3355,12 @@ async function processDeal(evt) {
         readAt: new Date().toISOString(),
       })
     );
+
+    if (isUpdate) {
+      const handled = await handleQualificationAnswersUpdate(deal);
+      if (handled) return;
+    }
+
 
     const testHaystack = [
       deal.TITLE,
