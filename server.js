@@ -574,10 +574,17 @@ async function upsertCompany(deal, analysis) {
     if (isEmpty(company.ADDRESS_REGION) && companyData.region) patch.ADDRESS_REGION = companyData.region;
     if (isEmpty(company[AI_FIELDS.companyInn]) && companyData.inn) patch[AI_FIELDS.companyInn] = String(companyData.inn);
     // AI-owned fields can be corrected by later research; human-owned fields above are only filled when empty.
+    const existingCompanyType = String(company[AI_FIELDS.companyType] || "").trim();
+    const existingCompanyRoles = String(company[AI_FIELDS.companyRoles] || "");
+    const confirmedDealer =
+      existingCompanyType.toLowerCase() === "дилер" ||
+      existingCompanyRoles.toLowerCase().includes("дилер");
+
     if (
       analysis.client_type &&
       analysis.client_type !== "Не определено" &&
-      String(company[AI_FIELDS.companyType] || "") !== analysis.client_type
+      !confirmedDealer &&
+      existingCompanyType !== analysis.client_type
     ) {
       patch[AI_FIELDS.companyType] = analysis.client_type;
     }
@@ -607,7 +614,14 @@ async function upsertCompany(deal, analysis) {
       patch[AI_FIELDS.companyServices] = analysis.company.services;
     }
     if (Array.isArray(analysis.company?.roles) && analysis.company.roles.length) {
-      const rolesText = analysis.company.roles.join(", ");
+      const existingRoles = String(company[AI_FIELDS.companyRoles] || "")
+        .split(",")
+        .map(x => x.trim())
+        .filter(Boolean);
+      const mergedRoles = Array.from(new Set(
+        existingRoles.concat(analysis.company.roles.map(x => String(x || "").trim()).filter(Boolean))
+      ));
+      const rolesText = mergedRoles.join(", ");
       if (String(company[AI_FIELDS.companyRoles] || "") !== rolesText) {
         patch[AI_FIELDS.companyRoles] = rolesText;
       }
@@ -858,9 +872,13 @@ function qualificationStatus(analysis) {
     return "Нужно определить тип компании";
   }
 
-  const count = Array.isArray(analysis.context_questions) && analysis.context_questions.length
-    ? analysis.context_questions.length
-    : (Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0);
+  const count = analysis?._known_dealer
+    ? (Array.isArray(analysis.context_questions) ? analysis.context_questions.length : 0)
+    : (
+        Array.isArray(analysis.context_questions) && analysis.context_questions.length
+          ? analysis.context_questions.length
+          : (Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0)
+      );
   return count ? `Нужно уточнить: ${count}` : "Квалифицировано";
 }
 
@@ -917,9 +935,13 @@ async function linkDealEntities(deal, company, contact) {
 
 async function createQualificationActivity(deal, analysis) {
   if (process.env.AUTO_QUAL_ACTIVITY !== "1") return null;
-  const count = Array.isArray(analysis.context_questions) && analysis.context_questions.length
-    ? analysis.context_questions.length
-    : (Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0);
+  const count = analysis?._known_dealer
+    ? (Array.isArray(analysis.context_questions) ? analysis.context_questions.length : 0)
+    : (
+        Array.isArray(analysis.context_questions) && analysis.context_questions.length
+          ? analysis.context_questions.length
+          : (Array.isArray(analysis.question_keys) ? analysis.question_keys.length : 0)
+      );
   if (!count) return null;
 
   const deadline = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
@@ -1145,7 +1167,7 @@ function formatManagerQuestions(analysis) {
 
   const questions = contextQuestions.length
     ? contextQuestions
-    : fallbackQuestions;
+    : (analysis._known_dealer ? [] : fallbackQuestions);
 
   questions.forEach((q, i) => {
     blocks.push(`${i + 1}. ${q}\r\nОтвет:`);
@@ -1869,6 +1891,7 @@ async function getPreviousDealContext(deal) {
           "UF_CRM_1790850696723",
           AI_FIELDS.dealAnswers,
           AI_FIELDS.dealType,
+          "UF_CRM_1739950675115",
         ],
         start: 0,
       });
@@ -1883,6 +1906,7 @@ async function getPreviousDealContext(deal) {
           questions_and_answers: String(item.UF_CRM_1790850696723 || "").slice(0, 8000),
           answer_history: String(item[AI_FIELDS.dealAnswers] || "").slice(0, 8000),
           client_type: item[AI_FIELDS.dealType] || "",
+          legacy_client_type: item.UF_CRM_1739950675115 || "",
           created: item.DATE_CREATE || null,
         });
         if (previous.length >= 6) break;
@@ -1895,19 +1919,101 @@ async function getPreviousDealContext(deal) {
   return previous.slice(0, 6);
 }
 
+function isConfirmedDealerProfile(company, previousDeals = []) {
+  const companyType = String(company?.[AI_FIELDS.companyType] || "").trim().toLowerCase();
+  const roles = String(company?.[AI_FIELDS.companyRoles] || "").toLowerCase();
+
+  if (companyType === "дилер" || /(^|,|\s)дилер($|,|\s)/i.test(roles)) {
+    return true;
+  }
+
+  return (previousDeals || []).some(item => {
+    const aiType = String(item.client_type || "").trim().toLowerCase();
+    const legacy = String(item.legacy_client_type || "").trim();
+    return aiType === "дилер" || legacy === "172";
+  });
+}
+
+function dealerEvidence(company, previousDeals = []) {
+  if (String(company?.[AI_FIELDS.companyType] || "").trim().toLowerCase() === "дилер") {
+    return "Карточка компании: ИИ тип = Дилер";
+  }
+
+  if (String(company?.[AI_FIELDS.companyRoles] || "").toLowerCase().includes("дилер")) {
+    return "Карточка компании: роль Дилер";
+  }
+
+  if ((previousDeals || []).some(item =>
+    String(item.client_type || "").trim().toLowerCase() === "дилер" ||
+    String(item.legacy_client_type || "").trim() === "172"
+  )) {
+    return "История сделок: подтвержден тип Дилер";
+  }
+
+  return "";
+}
+
+function filterDealerContextQuestions(questions) {
+  const banned = [
+    /какие\s+регионы/i,
+    /в каких\s+регионах/i,
+    /регион(ы|ах)?\s+(работ|продаж)/i,
+    /как\s+часто/i,
+    /частот[аы]\s+закуп/i,
+    /об[ъь]ем\s+закуп/i,
+    /дилерск(ое|ий|ого|ому)/i,
+    /соглашени[ея]\s+о\s+дилер/i,
+    /на\s+склад/i,
+    /под\s+заказ/i,
+    /канал(ы)?\s+продаж/i,
+    /клиентск(ая|ую|ой)\s+баз/i,
+    /для\s+себя\s+или\s+на\s+перепродаж/i,
+    /собственн(ые|ая|ого)\s+нужд/i,
+  ];
+
+  return (Array.isArray(questions) ? questions : [])
+    .map(q => String(q || "").trim())
+    .filter(Boolean)
+    .filter(q => !banned.some(re => re.test(q)))
+    .slice(0, 5);
+}
+
 async function buildDealContext(deal) {
   let linkedContact = null;
+  let linkedCompany = null;
 
   try {
     linkedContact = await getContact(deal.CONTACT_ID);
+  } catch {}
+
+  try {
+    const companyId =
+      (deal.COMPANY_ID && String(deal.COMPANY_ID) !== "0")
+        ? deal.COMPANY_ID
+        : linkedContact?.COMPANY_ID;
+    linkedCompany = await getCompany(companyId);
   } catch {}
 
   const activities = await getRecentDealActivities(deal.ID);
   const attachments = await downloadRecentAttachments(activities);
   const attachmentDocuments = await extractAttachmentDocuments(attachments);
   const previousDeals = await getPreviousDealContext(deal);
+  const knownDealer = isConfirmedDealerProfile(linkedCompany, previousDeals);
 
   const baseContext = {
+    linked_company: linkedCompany
+      ? {
+          id: String(linkedCompany.ID || ""),
+          title: linkedCompany.TITLE || "",
+          ai_type: linkedCompany[AI_FIELDS.companyType] || "",
+          ai_roles: linkedCompany[AI_FIELDS.companyRoles] || "",
+          ai_reason: linkedCompany[AI_FIELDS.companyReason] || "",
+        }
+      : null,
+    known_dealer: knownDealer,
+    dealer_evidence: knownDealer
+      ? dealerEvidence(linkedCompany, previousDeals)
+      : "",
     linked_contact: linkedContact
       ? {
           name: linkedContact.NAME || "",
@@ -1969,6 +2075,9 @@ function dealForAI(deal, context = {}) {
     qualification_answer_history: deal[AI_FIELDS.dealAnswers] || "",
     sender_domain: context.sender_domain || corporateDomainFromContext(context),
     domain_website: context.domain_website || null,
+    linked_company: context.linked_company || null,
+    known_dealer: Boolean(context.known_dealer),
+    dealer_evidence: context.dealer_evidence || "",
     linked_contact: context.linked_contact || null,
     recent_activities: context.recent_activities || [],
     attachment_documents: context.attachment_documents || [],
@@ -2164,6 +2273,9 @@ function analysisInstructions() {
     "title_components.end_customer — конечный заказчик только если он прямо указан в заявке/переписке. Не угадывай его.",
     "deal_title можешь дать как черновик, но итоговое название CRM формирует код в формате: «12 шт. стац. на CO для Газаналитика (Моск. НПЗ)».",
     "classification_reason — одно короткое предложение, почему выбран этот тип.",
+    "Если known_dealer=true, компания уже подтверждена как дилер по CRM/истории. В этом случае client_type должен быть Дилер, не проводи повторную квалификацию компании и не задавай вопросы про регионы работы, частоту закупок, объем закупок, работу под заказ/на склад, дилерское соглашение, клиентскую базу или является ли закупка перепродажей.",
+    "Если known_dealer=true, question_keys должен быть пустым массивом. Все вопросы менеджеру формируй только в context_questions и только по конкретной текущей заявке: недостающие характеристики прибора, газ/диапазон, количество, конечный заказчик если не указан, допустимость аналога, сроки, формат закупки, требования ТЗ, целевая цена/конкурент при наличии контекста.",
+    "Для известного дилера не спрашивай повторно сведения о самой компании, если они уже известны.",
     "question_keys используй только для стандартных CRM-полей и только если такой вопрос действительно нужен в текущей сделке.",
     "context_questions — 3–5 конкретных вопросов менеджеру, которые логически вытекают именно из ТЕКУЩЕЙ потребности.",
     "context_questions можно формулировать свободно: они должны учитывать конкретное оборудование, количество, газ, объект, сроки и уже известные факты.",
@@ -2355,6 +2467,23 @@ async function analyzeDeal(deal, allowWebSearch = false) {
       analysis.company = analysis.company || {};
       analysis.company.email = siteCompanyEmail;
     }
+  }
+
+  if (input.known_dealer) {
+    analysis.client_type = "Дилер";
+    analysis.question_keys = [];
+    analysis.context_questions = filterDealerContextQuestions(
+      analysis.context_questions
+    );
+    analysis.company = analysis.company || {};
+    const roles = Array.isArray(analysis.company.roles)
+      ? analysis.company.roles
+      : [];
+    if (!roles.some(role => String(role || "").toLowerCase() === "дилер")) {
+      analysis.company.roles = roles.concat(["Дилер"]);
+    }
+    analysis._known_dealer = true;
+    analysis._dealer_evidence = input.dealer_evidence || "";
   }
 
   console.log(JSON.stringify({
