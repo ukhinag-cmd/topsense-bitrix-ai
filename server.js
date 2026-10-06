@@ -3250,6 +3250,149 @@ async function formattedDealTitle(deal, analysis) {
   return title.replace(/\s+/g, " ").trim();
 }
 
+function titleComponentsTextFormat() {
+  return {
+    format: {
+      type: "json_schema",
+      name: "deal_title_components",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          quantity: { type: "string" },
+          device_type: { type: "string" },
+          gases: {
+            type: "array",
+            items: { type: "string" }
+          },
+          end_customer: { type: "string" }
+        },
+        required: ["quantity", "device_type", "gases", "end_customer"]
+      }
+    }
+  };
+}
+
+async function extractTitleComponentsOnly(deal) {
+  const activities = await getRecentDealActivities(deal.ID);
+  const inbound = activities
+    .filter(isInboundEmailActivity)
+    .sort((a, b) => {
+      const ta = Date.parse(a.created || "") || 0;
+      const tb = Date.parse(b.created || "") || 0;
+      return ta - tb;
+    })
+    .map(item => ({
+      subject: item.subject,
+      body: currentEmailBody(item.description),
+      created: item.created,
+    }));
+
+  let companyName = "";
+  if (deal.COMPANY_ID && String(deal.COMPANY_ID) !== "0") {
+    try {
+      const company = await getCompany(deal.COMPANY_ID);
+      companyName = company?.TITLE || "";
+    } catch {}
+  }
+
+  const payload = await callOpenAI({
+    model: process.env.OPENAI_MODEL || "gpt-6-luna",
+    store: false,
+    max_output_tokens: 700,
+    text: titleComponentsTextFormat(),
+    instructions: [
+      "Извлеки компоненты названия CRM-сделки из текущей коммерческой потребности.",
+      "Игнорируй технические метки AI WEBHOOK TEST.",
+      "Если последнее письмо лишь досылает документы/реквизиты, используй содержательную потребность из предыдущего письма этой же сделки.",
+      "quantity: только количество приборов цифрами, без шт.",
+      "device_type: стационарный, портативный, персональный и т.п.; слово переносной нормализуй в портативный.",
+      "gases: только химические формулы, например CO, CO2, H2S, CH4, O2, NH3. Не пиши названия газов словами.",
+      "end_customer: только явно названный конечный заказчик, иначе пустая строка.",
+      "Ничего не выдумывай."
+    ].join("\n"),
+    input: [{
+      role: "user",
+      content: JSON.stringify({
+        current_title: deal.TITLE || "",
+        company: companyName,
+        inbound_emails: inbound,
+      }),
+    }],
+  });
+
+  const text = extractResponseText(payload);
+  return parseJsonText(text);
+}
+
+async function migrateKnownTestDealTitles() {
+  const knownTestDeals = [39626, 39702, 39710];
+
+  for (const id of knownTestDeals) {
+    try {
+      const deal = await fetchDeal(id);
+      const activities = await getRecentDealActivities(id);
+      const haystack = [
+        deal.TITLE,
+        deal.COMMENTS,
+        ...activities.flatMap(item => [item.subject, item.description]),
+      ].filter(Boolean).join("\n").toUpperCase();
+
+      if (!haystack.includes("AI WEBHOOK TEST")) continue;
+
+      const currentTitle = String(deal.TITLE || "").trim();
+
+      // Already in the business naming convention: do not spend another model call.
+      if (
+        /\bшт\.\b/i.test(currentTitle) &&
+        /\sдля\s/i.test(currentTitle) &&
+        !currentTitle.toUpperCase().includes("AI WEBHOOK TEST")
+      ) {
+        continue;
+      }
+
+      const titleComponents = await extractTitleComponentsOnly(deal);
+      const analysisForTitle = {
+        title_components: titleComponents,
+        client_type: deal[AI_FIELDS.dealType] || "",
+        company: {
+          name: "",
+          roles: [],
+        },
+      };
+
+      if (deal.COMPANY_ID && String(deal.COMPANY_ID) !== "0") {
+        try {
+          const company = await getCompany(deal.COMPANY_ID);
+          analysisForTitle.company.name = company?.TITLE || "";
+          analysisForTitle.company.roles = String(company?.[AI_FIELDS.companyRoles] || "")
+            .split(",")
+            .map(x => x.trim())
+            .filter(Boolean);
+        } catch {}
+      }
+
+      const title = await formattedDealTitle(deal, analysisForTitle);
+      if (title && title !== currentTitle) {
+        await updateDealFields(deal.ID, { TITLE: title });
+        console.log(JSON.stringify({
+          source: "migration",
+          action: "test-deal-title-migrated",
+          oldTitle: currentTitle,
+          newTitle: title,
+        }));
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        source: "migration",
+        action: "test-deal-title-migration-skipped",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+}
+
 async function handleQualificationAnswersUpdate(deal) {
   const fieldText = String(deal.UF_CRM_1790850696723 || "");
   const blocks = parseQuestionBlocks(fieldText);
@@ -3609,6 +3752,9 @@ server.listen(PORT, "0.0.0.0", () => {
     });
     reprocessCurrentTitleFormatTest().catch(error => {
       console.error("Unexpected title-format test reprocess error", error);
+    });
+    migrateKnownTestDealTitles().catch(error => {
+      console.error("Unexpected test title migration error", error);
     });
   }, 4000);
 
