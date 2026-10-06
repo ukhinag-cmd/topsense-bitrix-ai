@@ -2710,6 +2710,53 @@ async function reconcileTestEmailRouting() {
   }
 }
 
+async function cleanupDuplicateRoutingTestDeals() {
+  const keepId = "39702";
+  const candidates = ["39700", "39704"];
+
+  for (const id of candidates) {
+    try {
+      const deal = await fetchDeal(id);
+      const titleOk = String(deal.TITLE || "").trim() === "AI WEBHOOK TEST 14";
+      const comments = String(deal.COMMENTS || "");
+      const markerOk =
+        comments.includes("[AI-ROUTED-ACTIVITY:323134]") ||
+        comments.includes("[AI-ROUTED-ACTIVITY:323552]");
+      const companyOk = String(deal.COMPANY_ID || "") === "3974";
+      const contactOk = String(deal.CONTACT_ID || "") === "39448";
+
+      if (!titleOk || !markerOk || !companyOk || !contactOk) {
+        console.warn(JSON.stringify({
+          source: "routing",
+          action: "duplicate-test-deal-not-deleted",
+          dealId: id,
+          titleOk,
+          markerOk,
+          companyOk,
+          contactOk,
+        }));
+        continue;
+      }
+
+      await bitrixCall("crm.deal.delete", { id: Number(id) });
+
+      console.log(JSON.stringify({
+        source: "routing",
+        action: "duplicate-test-deal-deleted",
+        dealId: id,
+        keptDealId: keepId,
+      }));
+    } catch (error) {
+      console.warn(JSON.stringify({
+        source: "routing",
+        action: "duplicate-test-cleanup-skipped",
+        dealId: id,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+}
+
 async function processDeal(evt) {
   const eventName = String(evt.event || "").toUpperCase();
   const isAdd = eventName === "ONCRMDEALADD";
@@ -2935,8 +2982,8 @@ server.listen(PORT, "0.0.0.0", () => {
     reconcileRecentTestDeals().catch(error => {
       console.error("Unexpected reconciliation error", error);
     });
-    reconcileTestEmailRouting().catch(error => {
-      console.error("Unexpected test email routing reconciliation error", error);
+    cleanupDuplicateRoutingTestDeals().catch(error => {
+      console.error("Unexpected test routing cleanup error", error);
     });
   }, 4000);
 
