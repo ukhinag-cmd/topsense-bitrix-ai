@@ -2091,8 +2091,19 @@ async function analyzeDeal(deal, allowWebSearch = false) {
     webSources = extractWebSources(domainPayload);
 
     if (domainText) {
-      analysis = parseJsonText(domainText);
-      finalPayload = domainPayload;
+      try {
+        analysis = parseJsonText(domainText);
+        finalPayload = domainPayload;
+      } catch (error) {
+        console.warn(JSON.stringify({
+          source: "openai",
+          action: "domain-research-json-fallback",
+          dealId: String(deal.ID),
+          senderDomain,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        analysis = null;
+      }
     } else {
       console.warn(JSON.stringify({
         source: "openai",
@@ -2176,8 +2187,17 @@ async function analyzeDeal(deal, allowWebSearch = false) {
       webSources = extractWebSources(researchPayload);
 
       if (researchText) {
-        analysis = parseJsonText(researchText);
-        finalPayload = researchPayload;
+        try {
+          analysis = parseJsonText(researchText);
+          finalPayload = researchPayload;
+        } catch (error) {
+          console.warn(JSON.stringify({
+            source: "openai",
+            action: "research-json-kept-first-pass",
+            dealId: String(deal.ID),
+            error: error instanceof Error ? error.message : String(error),
+          }));
+        }
       }
     }
   }
