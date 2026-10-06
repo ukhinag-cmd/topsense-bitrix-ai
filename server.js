@@ -260,6 +260,13 @@ const AI_FIELDS = {
   companyManufacturedProducts: "UF_CRM_AI_MANUFACTURED_PRODUCTS",
   companyServices: "UF_CRM_AI_SERVICES",
   companyRoles: "UF_CRM_AI_COMPANY_ROLES",
+  companyRevenue: "UF_CRM_AI_REVENUE",
+  companyRevenueYear: "UF_CRM_AI_REVENUE_YEAR",
+  companyRevenuePrevious: "UF_CRM_AI_REVENUE_PREV",
+  companyRevenuePreviousYear: "UF_CRM_AI_REVENUE_PREV_YEAR",
+  companyRevenueGrowth: "UF_CRM_AI_REVENUE_GROWTH",
+  companyNetProfit: "UF_CRM_AI_NET_PROFIT",
+  companyFinancialSource: "UF_CRM_AI_FIN_SOURCE",
 };
 
 const LEGACY_TYPE_ENUM = {
@@ -431,6 +438,13 @@ async function ensureAIFields() {
   await ensureUserField("company", "AI_MANUFACTURED_PRODUCTS", "ИИ: Что производит", 3);
   await ensureUserField("company", "AI_SERVICES", "ИИ: Какие услуги оказывает", 3);
   await ensureUserField("company", "AI_COMPANY_ROLES", "ИИ: Роли компании", 3);
+  await ensureUserField("company", "AI_REVENUE", "ИИ: Выручка, руб.", 1);
+  await ensureUserField("company", "AI_REVENUE_YEAR", "ИИ: Год выручки", 1);
+  await ensureUserField("company", "AI_REVENUE_PREV", "ИИ: Выручка пред. год, руб.", 1);
+  await ensureUserField("company", "AI_REVENUE_PREV_YEAR", "ИИ: Предыдущий год", 1);
+  await ensureUserField("company", "AI_REVENUE_GROWTH", "ИИ: Динамика выручки, %", 1);
+  await ensureUserField("company", "AI_NET_PROFIT", "ИИ: Чистая прибыль, руб.", 1);
+  await ensureUserField("company", "AI_FIN_SOURCE", "ИИ: Источник финансов", 2);
 }
 
 async function getCompany(id) {
@@ -555,6 +569,13 @@ async function upsertCompany(deal, analysis) {
     fields[AI_FIELDS.companyRoles] = Array.isArray(analysis.company?.roles)
       ? analysis.company.roles.join(", ")
       : "";
+    if (companyData.revenue) fields[AI_FIELDS.companyRevenue] = String(companyData.revenue);
+    if (companyData.revenue_year) fields[AI_FIELDS.companyRevenueYear] = String(companyData.revenue_year);
+    if (companyData.revenue_previous) fields[AI_FIELDS.companyRevenuePrevious] = String(companyData.revenue_previous);
+    if (companyData.revenue_previous_year) fields[AI_FIELDS.companyRevenuePreviousYear] = String(companyData.revenue_previous_year);
+    if (companyData.revenue_growth_percent) fields[AI_FIELDS.companyRevenueGrowth] = String(companyData.revenue_growth_percent);
+    if (companyData.net_profit) fields[AI_FIELDS.companyNetProfit] = String(companyData.net_profit);
+    if (companyData.financial_source) fields[AI_FIELDS.companyFinancialSource] = String(companyData.financial_source);
 
     const id = await bitrixCall("crm.company.add", { fields });
     company = await getCompany(id);
@@ -624,6 +645,24 @@ async function upsertCompany(deal, analysis) {
       const rolesText = mergedRoles.join(", ");
       if (String(company[AI_FIELDS.companyRoles] || "") !== rolesText) {
         patch[AI_FIELDS.companyRoles] = rolesText;
+      }
+    }
+
+    const financialFields = [
+      [AI_FIELDS.companyRevenue, companyData.revenue],
+      [AI_FIELDS.companyRevenueYear, companyData.revenue_year],
+      [AI_FIELDS.companyRevenuePrevious, companyData.revenue_previous],
+      [AI_FIELDS.companyRevenuePreviousYear, companyData.revenue_previous_year],
+      [AI_FIELDS.companyRevenueGrowth, companyData.revenue_growth_percent],
+      [AI_FIELDS.companyNetProfit, companyData.net_profit],
+      [AI_FIELDS.companyFinancialSource, companyData.financial_source],
+    ];
+    for (const [field, value] of financialFields) {
+      if (value !== null && value !== undefined && String(value).trim() !== "") {
+        const normalized = String(value).trim();
+        if (String(company[field] || "").trim() !== normalized) {
+          patch[field] = normalized;
+        }
       }
     }
 
@@ -2181,6 +2220,13 @@ function analysisTextFormat() {
                 type: "array",
                 items: { type: "string" }
               },
+              revenue: { type: "string" },
+              revenue_year: { type: "string" },
+              revenue_previous: { type: "string" },
+              revenue_previous_year: { type: "string" },
+              revenue_growth_percent: { type: "string" },
+              net_profit: { type: "string" },
+              financial_source: { type: "string" },
             },
             required: [
               "name",
@@ -2196,6 +2242,13 @@ function analysisTextFormat() {
               "manufacturer_reason",
               "services",
               "roles",
+              "revenue",
+              "revenue_year",
+              "revenue_previous",
+              "revenue_previous_year",
+              "revenue_growth_percent",
+              "net_profit",
+              "financial_source",
             ],
           },
           contact: {
@@ -2254,6 +2307,14 @@ function analysisInstructions() {
     "Компания может одновременно производить продукцию, продавать чужое оборудование, комплектовать проекты, интегрировать системы и оказывать услуги. Эти признаки не взаимоисключающие.",
     "company.services — коротко перечисли подтверждённые услуги компании: сервис, ремонт, поверка, монтаж, пусконаладка, проектирование, интеграция, промышленная безопасность и т.п. Если не установлено — пустая строка.",
     "company.roles — массив всех подтверждённых коммерческих ролей компании, например: Производитель, Сервисная компания, Интегратор, Подрядчик, Дилер, Дистрибьютор, Комплектатор, Проектная организация. Можно указывать несколько ролей одновременно.",
+    "Финансовый профиль собирай ДЛЯ ЛЮБОЙ точно идентифицированной компании, а не только для дилеров.",
+    "Если удалось точно определить российское юрлицо по ИНН, при веб-поиске найди последнюю доступную годовую бухгалтерскую выручку и предыдущий год. Приоритет финансовых источников: ГИР БО/ФНС, затем надёжные бизнес-реестры, которые явно указывают год и показатель.",
+    "company.revenue и company.revenue_previous — выручка в рублях, только цифрами без пробелов и валютных символов. Если достоверного значения нет — пустая строка.",
+    "company.revenue_year и company.revenue_previous_year — соответствующие годы четырьмя цифрами.",
+    "company.revenue_growth_percent — изменение выручки год к году в процентах, например 17.4 или -8.2. Если нельзя корректно посчитать — пустая строка.",
+    "company.net_profit — чистая прибыль за тот же последний доступный год в рублях, только цифрами; отрицательное значение допускается. Если данных нет — пустая строка.",
+    "company.financial_source — коротко укажи источник и год, например «ГИР БО ФНС, 2025» или «РБК Компании, отчетность 2025». Не угадывай финансовые показатели.",
+    "Для ИП и организаций без доступной публичной отчётности оставляй финансовые поля пустыми; не оценивай оборот косвенно.",
     "client_type — это основной тип компании именно для текущей продажи и выбора вопросов, но он не должен скрывать другие роли компании.",
     "Если компания реально производит продукцию, это должно быть явно отражено даже если она одновременно продаёт, комплектует, интегрирует или оказывает сервис.",
     "Если собственное производство — основная деятельность, не классифицируй компанию как чистую Торговую компанию / комплектатора. Обычно выбирай Завод / промышленное предприятие, а для производителя газоаналитического оборудования — Производитель газоаналитического оборудования / конкурент.",
@@ -2285,7 +2346,7 @@ function analysisInstructions() {
     "Из 3–5 context_questions 1–2 могут быть продающими, если базовая техническая потребность уже понятна.",
     "Не требуй имя конечного заказчика.",
     "Извлеки из сделки данные компании и контактного лица. Для входящих email-заявок обязательно анализируй recent_activities: там может находиться тема, текст письма, подпись отправителя и коммуникации.",
-    "company должен содержать: name, inn, website, phone, email, region, city, address, is_manufacturer, manufactured_products, manufacturer_reason, services, roles. Неизвестные текстовые значения оставляй пустой строкой.",
+    "company должен содержать: name, inn, website, phone, email, region, city, address, is_manufacturer, manufactured_products, manufacturer_reason, services, roles, revenue, revenue_year, revenue_previous, revenue_previous_year, revenue_growth_percent, net_profit, financial_source. Неизвестные текстовые значения оставляй пустой строкой.",
     "contact должен содержать: name, first_name, last_name, second_name, position, email, phone. Неизвестные значения оставляй пустой строкой.",
     "Для contact используй персональные данные только если они явно есть в самой заявке/подписи. Не ищи персональные контакты людей в интернете.",
     "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
@@ -2323,6 +2384,7 @@ async function analyzeDeal(deal, allowWebSearch = false) {
         "Если название компании распространённое, домен имеет больший вес, чем одно только название.",
         "Приоритет источников: официальный сайт этого домена, затем надёжные бизнес-реестры.",
         "Заполни company только подтверждёнными данными: официальное название, ИНН, сайт, общий телефон, общий email, регион, город, адрес.",
+        "Независимо от типа компании, если это точно идентифицированное российское юрлицо, найди последнюю доступную годовую выручку, выручку предыдущего года, чистую прибыль и источник финансовых данных.",
         "Не ищи в интернете персональные данные контактного лица."
       ].join("\n"),
       input: [{
@@ -2416,6 +2478,7 @@ async function analyzeDeal(deal, allowWebSearch = false) {
           "Приоритет: официальный сайт компании, затем надёжные бизнес-реестры.",
           "Определи тип по фактической основной деятельности компании.",
           "Найди и заполни по открытым источникам компанию: официальное название, ИНН, сайт, общий телефон, общий email, регион, город и адрес.",
+          "Для точно идентифицированного российского юрлица независимо от типа компании найди последнюю доступную годовую выручку, выручку предыдущего года, чистую прибыль и источник финансовых данных.",
           "Не ищи в интернете персональные данные контактного лица."
         ].join("\n"),
         input: [{
@@ -2496,6 +2559,8 @@ async function analyzeDeal(deal, allowWebSearch = false) {
     companyName: analysis.company?.name || null,
     companyInn: analysis.company?.inn || null,
     companyWebsite: analysis.company?.website || null,
+    revenue: analysis.company?.revenue || null,
+    revenueYear: analysis.company?.revenue_year || null,
     questionCount: Array.isArray(analysis.question_keys)
       ? analysis.question_keys.length
       : 0,
