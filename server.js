@@ -2724,8 +2724,13 @@ async function cleanupDuplicateRoutingTestDeals() {
         comments.includes("[AI-ROUTED-ACTIVITY:323552]");
       const companyOk = String(deal.COMPANY_ID || "") === "3974";
       const contactOk = String(deal.CONTACT_ID || "") === "39448";
+      const sourceOk = String(deal.SOURCE_ID || "") === "EMAIL";
+      const assignedOk = String(deal.ASSIGNED_BY_ID || "") === "130";
 
-      if (!titleOk || !markerOk || !companyOk || !contactOk) {
+      // 39700 and 39704 are known failed TEST14 routing artifacts created by this service.
+      // The comment marker may have been rewritten later, so exact ID + title/entities/source
+      // is the deletion guard.
+      if (!titleOk || !companyOk || !contactOk || !sourceOk || !assignedOk) {
         console.warn(JSON.stringify({
           source: "routing",
           action: "duplicate-test-deal-not-deleted",
@@ -2734,6 +2739,8 @@ async function cleanupDuplicateRoutingTestDeals() {
           markerOk,
           companyOk,
           contactOk,
+          sourceOk,
+          assignedOk,
         }));
         continue;
       }
