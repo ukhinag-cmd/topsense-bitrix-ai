@@ -39,13 +39,18 @@ function parseBody(raw, contentType) {
 function extractEvent(parsed) {
   if (parsed.kind === "json") {
     const body = parsed.value || {};
+    const event = body.event || body.EVENT || null;
+    const entityId =
+      getNested(body, ["data", "FIELDS", "ID"]) ||
+      getNested(body, ["data", "ID"]) ||
+      body.dealId ||
+      body.activityId ||
+      null;
+    const upperEvent = String(event || "").toUpperCase();
     return {
-      event: body.event || body.EVENT || null,
-      dealId:
-        getNested(body, ["data", "FIELDS", "ID"]) ||
-        getNested(body, ["data", "ID"]) ||
-        body.dealId ||
-        null,
+      event,
+      dealId: upperEvent.includes("CRMACTIVITY") ? null : entityId,
+      activityId: upperEvent.includes("CRMACTIVITY") ? entityId : null,
       applicationToken:
         getNested(body, ["auth", "application_token"]) ||
         body.application_token ||
@@ -54,12 +59,17 @@ function extractEvent(parsed) {
   }
 
   const p = parsed.value;
+  const event = p.get("event") || p.get("EVENT");
+  const entityId =
+    p.get("data[FIELDS][ID]") ||
+    p.get("data[ID]") ||
+    p.get("dealId") ||
+    p.get("activityId");
+  const upperEvent = String(event || "").toUpperCase();
   return {
-    event: p.get("event") || p.get("EVENT"),
-    dealId:
-      p.get("data[FIELDS][ID]") ||
-      p.get("data[ID]") ||
-      p.get("dealId"),
+    event,
+    dealId: upperEvent.includes("CRMACTIVITY") ? null : entityId,
+    activityId: upperEvent.includes("CRMACTIVITY") ? entityId : null,
     applicationToken:
       p.get("auth[application_token]") ||
       p.get("application_token"),
@@ -2288,6 +2298,302 @@ async function reconcileRecentTestDeals() {
   }
 }
 
+
+const ROUTED_ACTIVITIES = new Set();
+
+async function getActivity(id) {
+  if (!id) return null;
+  return bitrixCall("crm.activity.get", { id: Number(id) });
+}
+
+function normalizedActivity(item) {
+  if (!item) return null;
+  return {
+    id: String(item.ID || item.id || ""),
+    owner_type_id: Number(item.OWNER_TYPE_ID || item.ownerTypeId || 0),
+    owner_id: String(item.OWNER_ID || item.ownerId || ""),
+    type_id: String(item.TYPE_ID || item.typeId || ""),
+    direction: String(item.DIRECTION || item.direction || ""),
+    provider_id: String(item.PROVIDER_ID || item.providerId || ""),
+    subject: String(item.SUBJECT || item.subject || "").trim(),
+    description: stripHtml(item.DESCRIPTION || item.description || "").slice(0, 12000),
+    created: item.CREATED || item.created || null,
+  };
+}
+
+function needRoutingTextFormat() {
+  return {
+    format: {
+      type: "json_schema",
+      name: "email_need_routing",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          is_new_need: { type: "boolean" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          reason: { type: "string" },
+          suggested_title: { type: "string" },
+        },
+        required: ["is_new_need", "confidence", "reason", "suggested_title"],
+      },
+    },
+  };
+}
+
+async function classifyEmailNeed(deal, activity) {
+  const activities = await getRecentDealActivities(deal.ID);
+  const previous = activities
+    .filter(item => String(item.id) !== String(activity.id))
+    .filter(isInboundEmailActivity)
+    .slice(0, 4)
+    .map(item => ({
+      subject: item.subject,
+      description: item.description,
+      created: item.created,
+    }));
+
+  const payload = {
+    model: process.env.OPENAI_MODEL || "gpt-6-luna",
+    input: [
+      {
+        role: "system",
+        content: [
+          "Ты маршрутизатор входящих B2B-писем в CRM.",
+          "Определи, относится ли новое письмо к уже существующей коммерческой потребности в сделке или создаёт новую самостоятельную потребность.",
+          "Новая потребность — другой товар/оборудование, другое ТЗ, другой объект, другая закупка или независимый коммерческий запрос.",
+          "Продолжение — уточнение количества, цены, сроков, характеристик, документов, оплаты или доставки по уже существующему запросу.",
+          "Одна только смена темы письма недостаточна для новой сделки; сравни смысл.",
+          "Если явно новая потребность — is_new_need=true.",
+          "suggested_title: короткое название новой сделки по сути запроса; если это продолжение, оставь пустую строку.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          existing_deal: {
+            id: String(deal.ID),
+            title: deal.TITLE || "",
+            comments: String(deal.COMMENTS || "").slice(0, 10000),
+            additional_info: String(deal.ADDITIONAL_INFO || "").slice(0, 5000),
+            manager_questions: String(deal.UF_CRM_1790850696723 || "").slice(0, 8000),
+            previous_inbound_emails: previous,
+          },
+          new_email: {
+            id: activity.id,
+            subject: activity.subject,
+            description: activity.description,
+            created: activity.created,
+          },
+        }),
+      },
+    ],
+    text: needRoutingTextFormat(),
+    max_output_tokens: 1200,
+  };
+
+  const response = await callOpenAI(payload);
+  const text = extractResponseText(response);
+  return parseJsonText(text);
+}
+
+async function findDealByRoutedActivityMarker(activityId) {
+  try {
+    const deals = await bitrixCall("crm.deal.list", {
+      order: { ID: "DESC" },
+      filter: {},
+      select: ["ID", "TITLE", "COMMENTS", "DATE_CREATE"],
+      start: 0,
+    });
+
+    const marker = "[AI-ROUTED-ACTIVITY:" + String(activityId) + "]";
+    return Array.isArray(deals)
+      ? deals.slice(0, 100).find(item => String(item.COMMENTS || "").includes(marker)) || null
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function moveActivityToDeal(activityId, dealId) {
+  await bitrixCall("crm.activity.update", {
+    id: Number(activityId),
+    fields: {
+      OWNER_TYPE_ID: 2,
+      OWNER_ID: Number(dealId),
+    },
+  });
+}
+
+async function routeInboundActivity(activityId, options = {}) {
+  const id = String(activityId || "");
+  if (!id || ROUTED_ACTIVITIES.has(id)) return null;
+
+  const raw = await getActivity(id);
+  const activity = normalizedActivity(raw);
+  if (!activity) return null;
+
+  const isEmail =
+    activity.provider_id.toUpperCase().includes("EMAIL") ||
+    activity.type_id === "4";
+
+  if (!isEmail || activity.direction !== "1" || activity.owner_type_id !== 2 || !activity.owner_id) {
+    console.log(JSON.stringify({
+      source: "routing",
+      action: "activity-ignored",
+      activityId: id,
+      providerId: activity.provider_id,
+      direction: activity.direction,
+      ownerTypeId: activity.owner_type_id,
+    }));
+    return null;
+  }
+
+  const sourceDeal = await fetchDeal(activity.owner_id);
+  const testHaystack = [
+    sourceDeal.TITLE,
+    sourceDeal.COMMENTS,
+    sourceDeal.ADDITIONAL_INFO,
+    activity.subject,
+    activity.description,
+  ].filter(Boolean).join("\n").toUpperCase();
+
+  if (!testHaystack.includes("AI WEBHOOK TEST")) {
+    console.log(JSON.stringify({
+      source: "routing",
+      action: "non-test-activity-skipped",
+      activityId: id,
+      dealId: String(sourceDeal.ID),
+    }));
+    return null;
+  }
+
+  const alreadyRouted = await findDealByRoutedActivityMarker(id);
+  if (alreadyRouted) {
+    ROUTED_ACTIVITIES.add(id);
+    console.log(JSON.stringify({
+      source: "routing",
+      action: "activity-already-routed",
+      activityId: id,
+      dealId: String(alreadyRouted.ID),
+    }));
+    return alreadyRouted;
+  }
+
+  const routing = await classifyEmailNeed(sourceDeal, activity);
+
+  console.log(JSON.stringify({
+    source: "routing",
+    action: "need-classified",
+    activityId: id,
+    sourceDealId: String(sourceDeal.ID),
+    isNewNeed: Boolean(routing.is_new_need),
+    confidence: routing.confidence,
+    reason: routing.reason,
+  }));
+
+  if (!routing.is_new_need || Number(routing.confidence || 0) < 0.65) {
+    ROUTED_ACTIVITIES.add(id);
+    return null;
+  }
+
+  const title =
+    String(activity.subject || "").trim() ||
+    String(routing.suggested_title || "").trim() ||
+    "Новая потребность";
+
+  const marker = "[AI-ROUTED-ACTIVITY:" + id + "]";
+  const comments = [
+    marker,
+    "Новая потребность из входящего письма.",
+    routing.reason ? "Причина выделения в новую сделку: " + routing.reason : "",
+    activity.description ? "Письмо: " + activity.description : "",
+  ].filter(Boolean).join("\r\n\r\n");
+
+  const fields = {
+    TITLE: title,
+    CATEGORY_ID: Number(sourceDeal.CATEGORY_ID || 0),
+    STAGE_ID: "NEW",
+    ASSIGNED_BY_ID: Number(sourceDeal.ASSIGNED_BY_ID || 1),
+    SOURCE_ID: "EMAIL",
+    COMMENTS: comments,
+  };
+
+  if (sourceDeal.COMPANY_ID && String(sourceDeal.COMPANY_ID) !== "0") {
+    fields.COMPANY_ID = Number(sourceDeal.COMPANY_ID);
+  }
+  if (sourceDeal.CONTACT_ID && String(sourceDeal.CONTACT_ID) !== "0") {
+    fields.CONTACT_ID = Number(sourceDeal.CONTACT_ID);
+  }
+
+  const newDealId = await bitrixCall("crm.deal.add", { fields });
+
+  await moveActivityToDeal(id, newDealId);
+  ROUTED_ACTIVITIES.add(id);
+
+  console.log(JSON.stringify({
+    source: "routing",
+    action: "new-deal-created-from-email",
+    activityId: id,
+    sourceDealId: String(sourceDeal.ID),
+    newDealId: String(newDealId),
+    title,
+    confidence: routing.confidence,
+  }));
+
+  if (!options.skipProcessDeal) {
+    await processDeal({ event: "ONCRMDEALADD", dealId: String(newDealId) });
+  }
+
+  return fetchDeal(newDealId);
+}
+
+async function processActivityEvent(evt) {
+  const eventName = String(evt.event || "").toUpperCase();
+  if (eventName !== "ONCRMACTIVITYADD") return;
+  if (!evt.activityId) {
+    console.warn("Bitrix activity event has no activity ID");
+    return;
+  }
+
+  try {
+    await routeInboundActivity(evt.activityId);
+  } catch (error) {
+    console.error(JSON.stringify({
+      source: "routing",
+      action: "activity-routing-error",
+      activityId: String(evt.activityId),
+      error: error instanceof Error ? error.message : String(error),
+      at: new Date().toISOString(),
+    }));
+  }
+}
+
+async function reconcileTest15Activity() {
+  try {
+    const deal = await fetchDeal(39626);
+    const activities = await getRecentDealActivities(deal.ID);
+    const candidate = activities.find(item => {
+      const haystack = [item.subject, item.description]
+        .filter(Boolean)
+        .join("\n")
+        .toUpperCase();
+      return isInboundEmailActivity(item) && haystack.includes("AI WEBHOOK TEST 15");
+    });
+
+    if (candidate) {
+      await routeInboundActivity(candidate.id);
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "routing",
+      action: "test15-reconcile-skipped",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
 async function processDeal(evt) {
   const eventName = String(evt.event || "").toUpperCase();
   const isAdd = eventName === "ONCRMDEALADD";
@@ -2474,6 +2780,7 @@ const server = http.createServer((req, res) => {
           action: "event-received",
           event: evt.event,
           dealId: evt.dealId,
+          activityId: evt.activityId || null,
           receivedAt: new Date().toISOString(),
         })
       );
@@ -2482,10 +2789,16 @@ const server = http.createServer((req, res) => {
         ok: true,
         event: evt.event,
         dealId: evt.dealId,
+        activityId: evt.activityId || null,
       });
 
-      processDeal(evt).catch(error => {
-        console.error("Unexpected deal processing error", error);
+      const upperEvent = String(evt.event || "").toUpperCase();
+      const work = upperEvent === "ONCRMACTIVITYADD"
+        ? processActivityEvent(evt)
+        : processDeal(evt);
+
+      work.catch(error => {
+        console.error("Unexpected Bitrix event processing error", error);
       });
     });
 
@@ -2502,6 +2815,9 @@ server.listen(PORT, "0.0.0.0", () => {
   setTimeout(() => {
     reconcileRecentTestDeals().catch(error => {
       console.error("Unexpected reconciliation error", error);
+    });
+    reconcileTest15Activity().catch(error => {
+      console.error("Unexpected TEST 15 routing reconciliation error", error);
     });
   }, 4000);
 
