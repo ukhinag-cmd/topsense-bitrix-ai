@@ -511,6 +511,24 @@ async function upsertCompany(deal, analysis) {
   const companyData = analysis.company || {};
   let company = await getCompany(deal.COMPANY_ID);
 
+  if (!company && deal.CONTACT_ID && String(deal.CONTACT_ID) !== "0") {
+    try {
+      const linkedContact = await getContact(deal.CONTACT_ID);
+      if (linkedContact?.COMPANY_ID && String(linkedContact.COMPANY_ID) !== "0") {
+        company = await getCompany(linkedContact.COMPANY_ID);
+        if (company) {
+          console.log(JSON.stringify({
+            source: "bitrix24",
+            action: "company-reused-from-contact",
+            dealId: String(deal.ID),
+            companyId: String(company.ID),
+            contactId: String(deal.CONTACT_ID),
+          }));
+        }
+      }
+    } catch {}
+  }
+
   if (!company) {
     company = await findCompanyByAnalysis(companyData);
   }
@@ -2481,6 +2499,42 @@ async function routeInboundActivity(activityId, options = {}) {
   }
 
   const sourceDeal = await fetchDeal(activity.owner_id);
+
+  // Bitrix may already create a brand-new deal for a standalone incoming email.
+  // In that case this activity is the seed of the new deal, not a reason to create one more.
+  try {
+    const sourceActivities = await getRecentDealActivities(sourceDeal.ID);
+    const inboundActivities = sourceActivities.filter(isInboundEmailActivity);
+    const sourceCreated = Date.parse(sourceDeal.DATE_CREATE || "") || 0;
+    const activityCreated = Date.parse(activity.created || "") || 0;
+    const createdTogether =
+      sourceCreated &&
+      activityCreated &&
+      Math.abs(activityCreated - sourceCreated) <= 5 * 60 * 1000;
+
+    if (
+      String(sourceDeal.SOURCE_ID || "").toUpperCase() === "EMAIL" &&
+      inboundActivities.length <= 1 &&
+      createdTogether
+    ) {
+      ROUTED_ACTIVITIES.add(id);
+
+      console.log(JSON.stringify({
+        source: "routing",
+        action: "fresh-email-deal-kept",
+        activityId: id,
+        dealId: String(sourceDeal.ID),
+        subject: activity.subject || "",
+      }));
+
+      if (!options.skipProcessDeal) {
+        await processDeal({ event: "ONCRMDEALADD", dealId: String(sourceDeal.ID) });
+      }
+
+      return sourceDeal;
+    }
+  } catch {}
+
   const testHaystack = [
     sourceDeal.TITLE,
     sourceDeal.COMMENTS,
@@ -2710,6 +2764,30 @@ async function reconcileTestEmailRouting() {
   }
 }
 
+async function reconcileTest16Deal() {
+  try {
+    const deal = await fetchDeal(39706);
+    const activities = await getRecentDealActivities(deal.ID);
+    const hasTest16 = activities.some(item => {
+      const haystack = [item.subject, item.description]
+        .filter(Boolean)
+        .join("\n")
+        .toUpperCase();
+      return isInboundEmailActivity(item) && haystack.includes("AI WEBHOOK TEST 16");
+    });
+
+    if (hasTest16) {
+      await processDeal({ event: "ONCRMDEALADD", dealId: String(deal.ID) });
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "pipeline",
+      action: "test16-reconcile-skipped",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
 async function cleanupDuplicateRoutingTestDeals() {
   const keepId = "39702";
   const candidates = ["39700", "39704"];
@@ -2819,7 +2897,22 @@ async function processDeal(evt) {
       .join("\n")
       .toUpperCase();
 
-    const isTestDeal = testHaystack.includes("AI WEBHOOK TEST");
+    let testActivity = null;
+    let isTestDeal = testHaystack.includes("AI WEBHOOK TEST");
+
+    if (!isTestDeal && String(deal.SOURCE_ID || "").toUpperCase() === "EMAIL") {
+      const recentActivities = await getRecentDealActivities(deal.ID);
+      testActivity = recentActivities.find(item => {
+        if (!isInboundEmailActivity(item)) return false;
+        const haystack = [item.subject, item.description]
+          .filter(Boolean)
+          .join("\n")
+          .toUpperCase();
+        return haystack.includes("AI WEBHOOK TEST");
+      }) || null;
+
+      isTestDeal = Boolean(testActivity);
+    }
 
     // Until the test contour is approved, do not enrich or modify real deals.
     if (!isTestDeal) {
@@ -2829,6 +2922,35 @@ async function processDeal(evt) {
         dealId: String(deal.ID),
       }));
       return;
+    }
+
+    if (testActivity) {
+      const emailBody = currentEmailBody(testActivity.description);
+      const patch = {};
+
+      if (testActivity.subject && String(deal.TITLE || "").trim() !== String(testActivity.subject).trim()) {
+        patch.TITLE = String(testActivity.subject).trim();
+      }
+
+      const currentComments = String(deal.COMMENTS || "").trim();
+      if (emailBody && !currentComments.includes(emailBody)) {
+        patch.COMMENTS = currentComments
+          ? currentComments + "\r\n\r\n" + emailBody
+          : emailBody;
+      }
+
+      if (Object.keys(patch).length) {
+        await updateDealFields(deal.ID, patch);
+        deal = await fetchDeal(deal.ID);
+
+        console.log(JSON.stringify({
+          source: "bitrix24",
+          action: "fresh-email-deal-synced",
+          dealId: String(deal.ID),
+          title: deal.TITLE || "",
+          commentsUpdated: Boolean(patch.COMMENTS),
+        }));
+      }
     }
 
     await ensureAIFields();
@@ -2991,6 +3113,9 @@ server.listen(PORT, "0.0.0.0", () => {
     });
     cleanupDuplicateRoutingTestDeals().catch(error => {
       console.error("Unexpected test routing cleanup error", error);
+    });
+    reconcileTest16Deal().catch(error => {
+      console.error("Unexpected TEST16 reconciliation error", error);
     });
   }, 4000);
 
