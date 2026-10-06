@@ -51,6 +51,15 @@ function extractEvent(parsed) {
       event,
       dealId: upperEvent.includes("CRMACTIVITY") ? null : entityId,
       activityId: upperEvent.includes("CRMACTIVITY") ? entityId : null,
+      activityProviderId: upperEvent.includes("CRMACTIVITY")
+        ? getNested(body, ["data", "FIELDS", "PROVIDER_ID"]) || null
+        : null,
+      activityDirection: upperEvent.includes("CRMACTIVITY")
+        ? getNested(body, ["data", "FIELDS", "DIRECTION"]) || null
+        : null,
+      activityOwnerTypeId: upperEvent.includes("CRMACTIVITY")
+        ? getNested(body, ["data", "FIELDS", "OWNER_TYPE_ID"]) || null
+        : null,
       applicationToken:
         getNested(body, ["auth", "application_token"]) ||
         body.application_token ||
@@ -70,6 +79,15 @@ function extractEvent(parsed) {
     event,
     dealId: upperEvent.includes("CRMACTIVITY") ? null : entityId,
     activityId: upperEvent.includes("CRMACTIVITY") ? entityId : null,
+    activityProviderId: upperEvent.includes("CRMACTIVITY")
+      ? p.get("data[FIELDS][PROVIDER_ID]")
+      : null,
+    activityDirection: upperEvent.includes("CRMACTIVITY")
+      ? p.get("data[FIELDS][DIRECTION]")
+      : null,
+    activityOwnerTypeId: upperEvent.includes("CRMACTIVITY")
+      ? p.get("data[FIELDS][OWNER_TYPE_ID]")
+      : null,
     applicationToken:
       p.get("auth[application_token]") ||
       p.get("application_token"),
@@ -2226,54 +2244,10 @@ async function reconcileRecentTestDeals() {
       if (!haystack.includes("AI WEBHOOK TEST")) return false;
 
       const questions = String(deal.UF_CRM_1790850696723 || "");
-      if (
-        haystack.includes("AI WEBHOOK TEST 15") &&
-        !String(deal.COMMENTS || "").includes("[AI-INBOUND:")
-      ) return true;
       if (!questions.includes("Тип:")) return true;
       if (questions.includes("Тип: Не определено")) return true;
-      if (
-        String(deal.ID) === "39626" &&
-        !questions.includes("Роли:")
-      ) return true;
       return false;
     });
-
-    // Some email-created deals don't keep the original subject in TITLE/COMMENTS.
-    // If no direct match is found, inspect recent email activities for the test marker.
-    if (!candidates.length) {
-      const recent = deals.slice(0, 12).filter(deal => {
-        const createdAt = Date.parse(deal.DATE_CREATE || "");
-        return createdAt && createdAt >= cutoff;
-      });
-
-      for (const deal of recent) {
-        try {
-          const activities = await bitrixCall("crm.activity.list", {
-            order: { ID: "DESC" },
-            filter: {
-              OWNER_TYPE_ID: 2,
-              OWNER_ID: Number(deal.ID),
-            },
-            select: ["ID", "SUBJECT", "DESCRIPTION"],
-          });
-
-          const activityHaystack = Array.isArray(activities)
-            ? activities
-                .slice(0, 5)
-                .flatMap(item => [item.SUBJECT, stripHtml(item.DESCRIPTION)])
-                .filter(Boolean)
-                .join("\n")
-                .toUpperCase()
-            : "";
-
-          if (activityHaystack.includes("AI WEBHOOK TEST 15")) {
-            candidates = [deal];
-            break;
-          }
-        } catch {}
-      }
-    }
 
     // Reconcile only the newest missed test deal per pass.
     for (const deal of candidates.slice(0, 1)) {
@@ -2470,13 +2444,15 @@ async function findDealByRoutedActivityMarker(activityId) {
   }
 }
 
-async function moveActivityToDeal(activityId, dealId) {
-  await bitrixCall("crm.activity.update", {
-    id: Number(activityId),
-    fields: {
-      OWNER_TYPE_ID: 2,
-      OWNER_ID: Number(dealId),
-    },
+async function moveActivityToDeal(activityId, sourceDealId, targetDealId) {
+  if (String(sourceDealId) === String(targetDealId)) return true;
+
+  return bitrixCall("crm.activity.binding.move", {
+    activityId: Number(activityId),
+    sourceEntityTypeId: 2,
+    sourceEntityId: Number(sourceDealId),
+    targetEntityTypeId: 2,
+    targetEntityId: Number(targetDealId),
   });
 }
 
@@ -2525,6 +2501,20 @@ async function routeInboundActivity(activityId, options = {}) {
 
   const alreadyRouted = await findDealByRoutedActivityMarker(id);
   if (alreadyRouted) {
+    if (String(activity.owner_id) !== String(alreadyRouted.ID)) {
+      await moveActivityToDeal(id, activity.owner_id, alreadyRouted.ID);
+      console.log(JSON.stringify({
+        source: "routing",
+        action: "existing-route-move-completed",
+        activityId: id,
+        sourceDealId: String(activity.owner_id),
+        targetDealId: String(alreadyRouted.ID),
+      }));
+      if (!options.skipProcessDeal) {
+        await processDeal({ event: "ONCRMDEALADD", dealId: String(alreadyRouted.ID) });
+      }
+    }
+
     ROUTED_ACTIVITIES.add(id);
     console.log(JSON.stringify({
       source: "routing",
@@ -2532,7 +2522,7 @@ async function routeInboundActivity(activityId, options = {}) {
       activityId: id,
       dealId: String(alreadyRouted.ID),
     }));
-    return alreadyRouted;
+    return fetchDeal(alreadyRouted.ID);
   }
 
   const quotedSubject = quotedEmailSubject(activity.thread_description);
@@ -2557,7 +2547,7 @@ async function routeInboundActivity(activityId, options = {}) {
         });
       }
 
-      await moveActivityToDeal(id, quotedDeal.ID);
+      await moveActivityToDeal(id, sourceDeal.ID, quotedDeal.ID);
       ROUTED_ACTIVITIES.add(id);
 
       console.log(JSON.stringify({
@@ -2625,7 +2615,7 @@ async function routeInboundActivity(activityId, options = {}) {
 
   const newDealId = await bitrixCall("crm.deal.add", { fields });
 
-  await moveActivityToDeal(id, newDealId);
+  await moveActivityToDeal(id, sourceDeal.ID, newDealId);
   ROUTED_ACTIVITIES.add(id);
 
   console.log(JSON.stringify({
@@ -2650,6 +2640,25 @@ async function processActivityEvent(evt) {
   if (eventName !== "ONCRMACTIVITYADD") return;
   if (!evt.activityId) {
     console.warn("Bitrix activity event has no activity ID");
+    return;
+  }
+
+  const hintedProvider = String(evt.activityProviderId || "").toUpperCase();
+  const hintedDirection = String(evt.activityDirection || "");
+  const hintedOwnerType = String(evt.activityOwnerTypeId || "");
+
+  if (
+    hintedProvider &&
+    !hintedProvider.includes("EMAIL")
+  ) {
+    return;
+  }
+
+  if (hintedDirection && hintedDirection !== "1") {
+    return;
+  }
+
+  if (hintedOwnerType && hintedOwnerType !== "2") {
     return;
   }
 
@@ -2888,6 +2897,9 @@ const server = http.createServer((req, res) => {
           event: evt.event,
           dealId: evt.dealId,
           activityId: evt.activityId || null,
+          activityProviderId: evt.activityProviderId || null,
+          activityDirection: evt.activityDirection || null,
+          activityOwnerTypeId: evt.activityOwnerTypeId || null,
           receivedAt: new Date().toISOString(),
         })
       );
