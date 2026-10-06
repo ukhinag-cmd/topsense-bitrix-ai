@@ -2390,9 +2390,19 @@ function needRoutingTextFormat() {
 
 async function classifyEmailNeed(deal, activity) {
   const activities = await getRecentDealActivities(deal.ID);
+  const currentCreated = Date.parse(activity.created || "") || Number.MAX_SAFE_INTEGER;
   const previous = activities
     .filter(item => String(item.id) !== String(activity.id))
     .filter(isInboundEmailActivity)
+    .filter(item => {
+      const created = Date.parse(item.created || "") || 0;
+      return created <= currentCreated;
+    })
+    .sort((a, b) => {
+      const ta = Date.parse(a.created || "") || 0;
+      const tb = Date.parse(b.created || "") || 0;
+      return tb - ta;
+    })
     .slice(0, 4)
     .map(item => ({
       subject: item.subject,
@@ -2421,9 +2431,6 @@ async function classifyEmailNeed(deal, activity) {
           existing_deal: {
             id: String(deal.ID),
             title: deal.TITLE || "",
-            comments: String(deal.COMMENTS || "").slice(0, 10000),
-            additional_info: String(deal.ADDITIONAL_INFO || "").slice(0, 5000),
-            manager_questions: String(deal.UF_CRM_1790850696723 || "").slice(0, 8000),
             previous_inbound_emails: previous,
           },
           new_email: {
