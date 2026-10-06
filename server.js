@@ -2766,18 +2766,43 @@ async function reconcileTestEmailRouting() {
 
 async function reconcileTest16Deal() {
   try {
-    const deal = await fetchDeal(39706);
+    let deal = await fetchDeal(39706);
     const activities = await getRecentDealActivities(deal.ID);
-    const hasTest16 = activities.some(item => {
-      const haystack = [item.subject, item.description]
-        .filter(Boolean)
-        .join("\n")
-        .toUpperCase();
-      return isInboundEmailActivity(item) && haystack.includes("AI WEBHOOK TEST 16");
-    });
+    const inbound = activities.find(isInboundEmailActivity) || null;
 
-    if (hasTest16) {
-      await processDeal({ event: "ONCRMDEALADD", dealId: String(deal.ID) });
+    if (inbound) {
+      const body = currentEmailBody(inbound.description);
+      const patch = {};
+
+      if (String(deal.TITLE || "").trim() !== "AI WEBHOOK TEST 16") {
+        patch.TITLE = "AI WEBHOOK TEST 16";
+      }
+
+      const currentComments = String(deal.COMMENTS || "").trim();
+      if (body && !currentComments.includes(body)) {
+        patch.COMMENTS = currentComments
+          ? currentComments + "\r\n\r\n" + body
+          : body;
+      }
+
+      if (Object.keys(patch).length) {
+        await updateDealFields(deal.ID, patch);
+        deal = await fetchDeal(deal.ID);
+      }
+
+      console.log(JSON.stringify({
+        source: "pipeline",
+        action: "test16-reconcile",
+        dealTitle: deal.TITLE || "",
+        activitySubject: inbound.subject || "",
+        bodyLength: body.length,
+      }));
+
+      await processDeal({
+        event: "ONCRMDEALADD",
+        dealId: String(deal.ID),
+        forceTest: true,
+      });
     }
   } catch (error) {
     console.warn(JSON.stringify({
@@ -2898,7 +2923,7 @@ async function processDeal(evt) {
       .toUpperCase();
 
     let testActivity = null;
-    let isTestDeal = testHaystack.includes("AI WEBHOOK TEST");
+    let isTestDeal = Boolean(evt.forceTest) || testHaystack.includes("AI WEBHOOK TEST");
 
     if (!isTestDeal && String(deal.SOURCE_ID || "").toUpperCase() === "EMAIL") {
       const recentActivities = await getRecentDealActivities(deal.ID);
