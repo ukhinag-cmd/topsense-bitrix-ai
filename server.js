@@ -2306,6 +2306,49 @@ async function getActivity(id) {
   return bitrixCall("crm.activity.get", { id: Number(id) });
 }
 
+function currentEmailBody(value) {
+  const text = String(value || "").trim();
+  const separators = [
+    /\s*-{5,}\s*Кому:/i,
+    /\s*От:\s+[^\n]{0,300}\s+Кому:/i,
+    /\s*From:\s+[^\n]{0,300}\s+To:/i,
+  ];
+
+  let cut = text.length;
+  for (const re of separators) {
+    const match = re.exec(text);
+    if (match && match.index < cut) cut = match.index;
+  }
+
+  return text.slice(0, cut).replace(/\s+/g, " ").trim();
+}
+
+function quotedEmailSubject(value) {
+  const text = String(value || "");
+  const match =
+    text.match(/Тема:\s*([^;\n]{1,300})\s*;/i) ||
+    text.match(/Subject:\s*([^;\n]{1,300})/i);
+  return String(match?.[1] || "").trim();
+}
+
+async function findDealByTitleExact(title) {
+  const value = String(title || "").trim();
+  if (!value) return null;
+  try {
+    const deals = await bitrixCall("crm.deal.list", {
+      order: { ID: "DESC" },
+      filter: { TITLE: value },
+      select: ["ID", "TITLE", "COMMENTS", "COMPANY_ID", "CONTACT_ID", "CATEGORY_ID", "ASSIGNED_BY_ID"],
+      start: 0,
+    });
+    return Array.isArray(deals)
+      ? deals.find(item => String(item.TITLE || "").trim() === value) || null
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizedActivity(item) {
   if (!item) return null;
   return {
@@ -2316,7 +2359,10 @@ function normalizedActivity(item) {
     direction: String(item.DIRECTION || item.direction || ""),
     provider_id: String(item.PROVIDER_ID || item.providerId || ""),
     subject: String(item.SUBJECT || item.subject || "").trim(),
-    description: stripHtml(item.DESCRIPTION || item.description || "").slice(0, 12000),
+    description: currentEmailBody(
+      stripHtml(item.DESCRIPTION || item.description || "").slice(0, 12000)
+    ),
+    thread_description: stripHtml(item.DESCRIPTION || item.description || "").slice(0, 12000),
     created: item.CREATED || item.created || null,
   };
 }
@@ -2350,7 +2396,7 @@ async function classifyEmailNeed(deal, activity) {
     .slice(0, 4)
     .map(item => ({
       subject: item.subject,
-      description: item.description,
+      description: currentEmailBody(item.description),
       created: item.created,
     }));
 
@@ -2384,6 +2430,7 @@ async function classifyEmailNeed(deal, activity) {
             id: activity.id,
             subject: activity.subject,
             description: activity.description,
+            quoted_subject: quotedEmailSubject(activity.thread_description),
             created: activity.created,
           },
         }),
@@ -2481,6 +2528,48 @@ async function routeInboundActivity(activityId, options = {}) {
     return alreadyRouted;
   }
 
+  const quotedSubject = quotedEmailSubject(activity.thread_description);
+  const currentBody = currentEmailBody(activity.description);
+
+  if (quotedSubject) {
+    const quotedDeal = await findDealByTitleExact(quotedSubject);
+    if (quotedDeal && String(quotedDeal.ID) !== String(sourceDeal.ID)) {
+      const marker = "[AI-ROUTED-ACTIVITY:" + id + "]";
+      const existingComments = String(quotedDeal.COMMENTS || "").trim();
+      const append = [
+        marker,
+        "Продолжение переписки: " + (activity.subject || "входящее письмо"),
+        currentBody ? "Письмо: " + currentBody : "",
+      ].filter(Boolean).join("\r\n");
+
+      if (!existingComments.includes(marker)) {
+        await updateDealFields(quotedDeal.ID, {
+          COMMENTS: existingComments
+            ? existingComments + "\r\n\r\n" + append
+            : append,
+        });
+      }
+
+      await moveActivityToDeal(id, quotedDeal.ID);
+      ROUTED_ACTIVITIES.add(id);
+
+      console.log(JSON.stringify({
+        source: "routing",
+        action: "followup-moved-to-quoted-deal",
+        activityId: id,
+        sourceDealId: String(sourceDeal.ID),
+        targetDealId: String(quotedDeal.ID),
+        quotedSubject,
+      }));
+
+      if (!options.skipProcessDeal) {
+        await processDeal({ event: "ONCRMDEALADD", dealId: String(quotedDeal.ID) });
+      }
+
+      return fetchDeal(quotedDeal.ID);
+    }
+  }
+
   const routing = await classifyEmailNeed(sourceDeal, activity);
 
   console.log(JSON.stringify({
@@ -2508,7 +2597,7 @@ async function routeInboundActivity(activityId, options = {}) {
     marker,
     "Новая потребность из входящего письма.",
     routing.reason ? "Причина выделения в новую сделку: " + routing.reason : "",
-    activity.description ? "Письмо: " + activity.description : "",
+    activity.description ? "Письмо: " + currentEmailBody(activity.description) : "",
   ].filter(Boolean).join("\r\n\r\n");
 
   const fields = {
@@ -2570,32 +2659,36 @@ async function processActivityEvent(evt) {
   }
 }
 
-async function reconcileTest15Activity() {
+async function reconcileTestEmailRouting() {
   try {
     const deal = await fetchDeal(39626);
     const activities = await getRecentDealActivities(deal.ID);
-    const candidate = activities.find(item => {
-      const haystack = [item.subject, item.description]
-        .filter(Boolean)
-        .join("\n")
-        .toUpperCase();
-      return isInboundEmailActivity(item) && haystack.includes("AI WEBHOOK TEST 15");
-    });
 
-    if (candidate) {
-      console.log(JSON.stringify({
-        source: "routing",
-        action: "test15-activity-diagnostic",
-        activityId: String(candidate.id || ""),
-        subject: candidate.subject || "",
-        descriptionSnippet: String(candidate.description || "").slice(0, 1800),
-      }));
+    const candidates = activities
+      .filter(isInboundEmailActivity)
+      .filter(item => {
+        const haystack = [item.subject, item.description]
+          .filter(Boolean)
+          .join("\n")
+          .toUpperCase();
+        return (
+          haystack.includes("AI WEBHOOK TEST 14") ||
+          haystack.includes("AI WEBHOOK TEST 15")
+        );
+      })
+      .sort((a, b) => {
+        const ta = Date.parse(a.created || "") || 0;
+        const tb = Date.parse(b.created || "") || 0;
+        return ta - tb;
+      });
+
+    for (const candidate of candidates) {
       await routeInboundActivity(candidate.id);
     }
   } catch (error) {
     console.warn(JSON.stringify({
       source: "routing",
-      action: "test15-reconcile-skipped",
+      action: "test-email-routing-reconcile-skipped",
       error: error instanceof Error ? error.message : String(error),
     }));
   }
@@ -2823,8 +2916,8 @@ server.listen(PORT, "0.0.0.0", () => {
     reconcileRecentTestDeals().catch(error => {
       console.error("Unexpected reconciliation error", error);
     });
-    reconcileTest15Activity().catch(error => {
-      console.error("Unexpected TEST 15 routing reconciliation error", error);
+    reconcileTestEmailRouting().catch(error => {
+      console.error("Unexpected test email routing reconciliation error", error);
     });
   }, 4000);
 
