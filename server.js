@@ -2784,50 +2784,90 @@ async function reconcileTestEmailRouting() {
   }
 }
 
-async function reconcileTest16Deal() {
+async function rollbackMistakenTest16Target() {
+  const mistakenDealId = 39706;
+  const mistakenCompanyId = 3986;
+  const mistakenContactId = 39518;
+  const expectedRealSubject = "Запрос коммерческого предложения (Газоанализатор)";
+
   try {
-    let deal = await fetchDeal(39706);
-    const activities = await getRecentDealActivities(deal.ID);
+    const deal = await fetchDeal(mistakenDealId);
+    const activities = await getRecentDealActivities(mistakenDealId);
     const inbound = activities.find(isInboundEmailActivity) || null;
 
-    if (inbound) {
-      const body = currentEmailBody(inbound.description);
-      const patch = {};
+    const guard =
+      String(deal.TITLE || "").trim() === "AI WEBHOOK TEST 16" &&
+      String(deal.COMPANY_ID || "") === String(mistakenCompanyId) &&
+      String(deal.CONTACT_ID || "") === String(mistakenContactId) &&
+      String(inbound?.subject || "").trim() === expectedRealSubject;
 
-      if (String(deal.TITLE || "").trim() !== "AI WEBHOOK TEST 16") {
-        patch.TITLE = "AI WEBHOOK TEST 16";
-      }
-
-      const currentComments = String(deal.COMMENTS || "").trim();
-      if (body && !currentComments.includes(body)) {
-        patch.COMMENTS = currentComments
-          ? currentComments + "\r\n\r\n" + body
-          : body;
-      }
-
-      if (Object.keys(patch).length) {
-        await updateDealFields(deal.ID, patch);
-        deal = await fetchDeal(deal.ID);
-      }
-
-      console.log(JSON.stringify({
-        source: "pipeline",
-        action: "test16-reconcile",
-        dealTitle: deal.TITLE || "",
-        activitySubject: inbound.subject || "",
-        bodyLength: body.length,
+    if (!guard) {
+      console.warn(JSON.stringify({
+        source: "rollback",
+        action: "mistaken-test16-target-not-touched",
+        title: deal.TITLE || "",
+        companyId: String(deal.COMPANY_ID || ""),
+        contactId: String(deal.CONTACT_ID || ""),
+        activitySubject: inbound?.subject || "",
       }));
-
-      await processDeal({
-        event: "ONCRMDEALADD",
-        dealId: String(deal.ID),
-        forceTest: true,
-      });
+      return;
     }
+
+    const patch = {
+      TITLE: expectedRealSubject,
+      COMPANY_ID: 0,
+      [AI_FIELDS.dealType]: "",
+      [AI_FIELDS.dealReason]: "",
+      [AI_FIELDS.dealStatus]: "",
+      [AI_FIELDS.dealAnswers]: "",
+      [AI_FIELDS.dealManufacturer]: "",
+      [AI_FIELDS.dealManufacturedProducts]: "",
+      [AI_FIELDS.dealServices]: "",
+      [AI_FIELDS.dealRoles]: "",
+      UF_CRM_1790850696723: "",
+    };
+
+    if (String(deal.UF_CRM_1739950675115 || "") === "178") {
+      patch.UF_CRM_1739950675115 = "";
+    }
+
+    const inn = String(deal.UF_CRM_1789994254952 || "");
+    if (
+      inn.includes("5190306152") ||
+      inn.includes("5106090010") ||
+      inn.includes("5111002203")
+    ) {
+      patch.UF_CRM_1789994254952 = "";
+    }
+
+    await updateDealFields(mistakenDealId, patch);
+
+    try {
+      const contact = await getContact(mistakenContactId);
+      if (String(contact?.COMPANY_ID || "") === String(mistakenCompanyId)) {
+        await bitrixCall("crm.contact.update", {
+          ID: mistakenContactId,
+          fields: { COMPANY_ID: 0 },
+        });
+      }
+    } catch {}
+
+    try {
+      const company = await getCompany(mistakenCompanyId);
+      if (company) {
+        await bitrixCall("crm.company.delete", { id: mistakenCompanyId });
+      }
+    } catch {}
+
+    console.log(JSON.stringify({
+      source: "rollback",
+      action: "mistaken-test16-target-restored",
+      title: expectedRealSubject,
+    }));
   } catch (error) {
-    console.warn(JSON.stringify({
-      source: "pipeline",
-      action: "test16-reconcile-skipped",
+    console.error(JSON.stringify({
+      source: "rollback",
+      action: "mistaken-test16-target-restore-failed",
       error: error instanceof Error ? error.message : String(error),
     }));
   }
@@ -3159,8 +3199,8 @@ server.listen(PORT, "0.0.0.0", () => {
     cleanupDuplicateRoutingTestDeals().catch(error => {
       console.error("Unexpected test routing cleanup error", error);
     });
-    reconcileTest16Deal().catch(error => {
-      console.error("Unexpected TEST16 reconciliation error", error);
+    rollbackMistakenTest16Target().catch(error => {
+      console.error("Unexpected TEST16 rollback error", error);
     });
   }, 4000);
 
