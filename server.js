@@ -6351,17 +6351,23 @@ function dashboardHtml(status = dashboardStatus()) {
 <style>
 :root{color-scheme:dark;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif}
 *{box-sizing:border-box}html,body{margin:0;background:#0b1020}.wrap{max-width:none;width:100%;margin:0;padding:14px 16px}
-h1{font-size:24px;margin:0 0 4px}.sub{color:#9aa7bd;margin-bottom:10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px}
-.card{background:#131b2f;border:1px solid #25314e;border-radius:10px;padding:9px 11px}.k{color:#92a1ba;font-size:10px;text-transform:uppercase}.v{font-size:20px;font-weight:700;margin-top:3px}.small{font-size:10px;color:#aab6c9;margin-top:2px}
+h1{font-size:27px;margin:0 0 5px}.sub{color:#9aa7bd;margin-bottom:11px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:11px}
+.card{background:#131b2f;border:1px solid #25314e;border-radius:10px;padding:10px 12px}.k{color:#92a1ba;font-size:12px;text-transform:uppercase}.v{font-size:23px;font-weight:700;margin-top:3px}.small{font-size:12px;color:#aab6c9;margin-top:2px}
 .bar{height:6px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:5px}.fill{height:100%;background:#5d8cff}
-.section{margin-top:10px}.section h2{font-size:16px;margin:0 0 6px}table{width:100%;border-collapse:collapse;table-layout:fixed;background:#131b2f}
-th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:13px;line-height:1.25;vertical-align:middle}th{color:#9aa7bd;font-size:11px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
-.badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#263653;font-size:11px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
-.scroll{overflow:auto;max-height:calc(100vh - 220px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
-.productcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.statuscell{white-space:normal;overflow:visible;line-height:1.2}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:11px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.2;overflow:visible}
-.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:150px}.statuscell{max-width:300px}.managercell{white-space:normal;line-height:1.22}.qualbadge{display:inline-block;margin-top:4px;font-size:15px;font-weight:800}.qualsummary{display:block;margin-top:2px;font-size:12px;color:#d3dced}.auditbadge{display:inline-block;margin-top:5px;font-size:13px;font-weight:700}.audittags{display:block;margin-top:2px;font-size:11px;color:#aebbd0}
-@media(max-width:1400px){th,td{font-size:12px;padding:6px 7px}.mini{font-size:10px}.grid{grid-template-columns:repeat(6,1fr)}}
+.section{margin-top:10px}.section h2{font-size:19px;margin:0 0 7px}
+table{width:100%;min-width:1580px;border-collapse:collapse;table-layout:fixed;background:#131b2f}
+.col-num{width:34px}.col-company{width:180px}.col-priority{width:76px}.col-strategy{width:150px}.col-deals{width:82px}.col-contact{width:106px}.col-money{width:108px}.col-bought{width:92px}.col-manager{width:370px}.col-now{width:430px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #25314e;font-size:15px;line-height:1.28;vertical-align:middle}
+th{color:#9aa7bd;font-size:12px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
+th:first-child,td:first-child{text-align:center;padding-left:2px;padding-right:2px}
+th:nth-child(3),td:nth-child(3){text-align:center;padding-left:3px;padding-right:3px}
+th:nth-child(8),td:nth-child(8){padding-left:4px;padding-right:4px}
+.badge{display:inline-block;padding:3px 6px;border-radius:999px;background:#263653;font-size:13px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
+.scroll{overflow:auto;max-height:calc(100vh - 235px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
+.productcell{white-space:normal;overflow:visible;line-height:1.2}.statuscell{white-space:normal;overflow:visible;line-height:1.24}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:13px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.22;overflow:visible}
+.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:13px}.managercell{white-space:normal;line-height:1.25}.qualbadge{display:inline-block;margin-top:4px;font-size:18px;font-weight:800}.qualsummary{display:block;margin-top:3px;font-size:14px;color:#d3dced}.auditbadge{display:inline-block;margin-top:6px;font-size:15px;font-weight:700}.audittags{display:block;margin-top:3px;font-size:13px;color:#aebbd0}
+@media(max-width:1400px){table{min-width:1500px}th,td{font-size:14px;padding:8px}.mini{font-size:12px}.qualbadge{font-size:17px}.qualsummary{font-size:13px}.auditbadge{font-size:14px}.audittags{font-size:12px}.grid{grid-template-columns:repeat(6,1fr)}}
 </style>
 </head>
 <body><div class="wrap">
@@ -6380,6 +6386,18 @@ th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
+<colgroup>
+  <col class="col-num">
+  <col class="col-company">
+  <col class="col-priority">
+  <col class="col-strategy">
+  <col class="col-deals">
+  <col class="col-contact">
+  <col class="col-money">
+  <col class="col-bought">
+  <col class="col-manager">
+  <col class="col-now">
+</colgroup>
 <thead><tr><th>#</th><th>Компания</th><th>Приоритет</th><th>Стратегия</th><th>Сделки / откр.</th><th>Последний контакт</th><th>Деньги<br>✓ / ↗ / ×</th><th>Что купили</th><th>Менеджер / работа</th><th>Сейчас</th></tr></thead>
 <tbody>${topRows || `<tr><td colspan="10">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
