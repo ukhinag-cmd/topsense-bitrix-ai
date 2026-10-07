@@ -303,16 +303,10 @@ const CONTRACTOR_BASELINE_RESULTS = [
     reason: "В CRM компания найдена, но нет ИНН и сайта; профиль: производитель строительных лесов."
   },
   {
-    seed: "Сибирская сервисная компания",
+    seed: "Сибирская сервисная компания (ССК)",
     matched_company: "",
     status: "not-found-in-crm",
-    reason: "По полному названию в CRM не найдено точного совпадения."
-  },
-  {
-    seed: "ССК",
-    matched_company: "ООО \"ССК \"Звезда\"\"",
-    status: "needs-disambiguation",
-    reason: "Сокращение ССК неоднозначно; найденная карточка не подтверждает, что это Сибирская сервисная компания."
+    reason: "ССК — это сокращение Сибирской сервисной компании. ООО \"ССК \"Звезда\"\" исключено и не должно использоваться как совпадение."
   },
   {
     seed: "Шлюмберже",
@@ -3945,54 +3939,82 @@ function contractorBenchmarkTextFormat() {
   };
 }
 
+const CONTRACTOR_SEED_ALIASES = {
+  "Сибирская сервисная компания (ССК)": [
+    "Сибирская сервисная компания",
+    "ССК"
+  ],
+};
+
+const CONTRACTOR_SEED_EXCLUSIONS = {
+  "Сибирская сервисная компания (ССК)": [
+    "ССК Звезда",
+    "ССК \"Звезда\"",
+    "ООО \"ССК \"Звезда\"\""
+  ],
+};
+
+function benchmarkSearchTerms(term) {
+  return CONTRACTOR_SEED_ALIASES[term] || [term];
+}
+
+function benchmarkCandidateAllowed(seed, company) {
+  const title = String(company?.TITLE || "").trim().toLowerCase();
+  const exclusions = CONTRACTOR_SEED_EXCLUSIONS[seed] || [];
+  return !exclusions.some(value => title.includes(String(value).toLowerCase()));
+}
+
 async function findBenchmarkCompanyCandidates(term) {
   const seen = new Set();
   const out = [];
+  const searchTerms = benchmarkSearchTerms(term);
 
-  try {
-    const companies = await bitrixCall("crm.company.list", {
-      order: { ID: "DESC" },
-      filter: { "%TITLE": term },
-      select: [
-        "ID","TITLE","WEB","PHONE","EMAIL",
-        AI_FIELDS.companyInn,
-        AI_FIELDS.companyType,
-        AI_FIELDS.companyRoles,
-        AI_FIELDS.companyRevenue,
-        AI_FIELDS.companyRevenueYear
-      ],
-      start: 0
-    });
+  for (const searchTerm of searchTerms) {
+    try {
+      const companies = await bitrixCall("crm.company.list", {
+        order: { ID: "DESC" },
+        filter: { "%TITLE": searchTerm },
+        select: [
+          "ID","TITLE","WEB","PHONE","EMAIL",
+          AI_FIELDS.companyInn,
+          AI_FIELDS.companyType,
+          AI_FIELDS.companyRoles,
+          AI_FIELDS.companyRevenue,
+          AI_FIELDS.companyRevenueYear
+        ],
+        start: 0
+      });
 
-    for (const company of Array.isArray(companies) ? companies.slice(0, 8) : []) {
-      const id = String(company.ID || "");
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      out.push(company);
-    }
-  } catch {}
-
-  try {
-    const deals = await bitrixCall("crm.deal.list", {
-      order: { ID: "DESC" },
-      filter: { "%TITLE": term },
-      select: ["ID","TITLE","COMPANY_ID","CONTACT_ID","DATE_CREATE"],
-      start: 0
-    });
-
-    for (const deal of Array.isArray(deals) ? deals.slice(0, 12) : []) {
-      const companyId = String(deal.COMPANY_ID || "");
-      if (!companyId || companyId === "0" || seen.has(companyId)) continue;
-      try {
-        const company = await getCompany(companyId);
-        if (!company) continue;
-        seen.add(companyId);
+      for (const company of Array.isArray(companies) ? companies.slice(0, 12) : []) {
+        const id = String(company.ID || "");
+        if (!id || seen.has(id) || !benchmarkCandidateAllowed(term, company)) continue;
+        seen.add(id);
         out.push(company);
-      } catch {}
-    }
-  } catch {}
+      }
+    } catch {}
 
-  return out.slice(0, 8);
+    try {
+      const deals = await bitrixCall("crm.deal.list", {
+        order: { ID: "DESC" },
+        filter: { "%TITLE": searchTerm },
+        select: ["ID","TITLE","COMPANY_ID","CONTACT_ID","DATE_CREATE"],
+        start: 0
+      });
+
+      for (const deal of Array.isArray(deals) ? deals.slice(0, 20) : []) {
+        const companyId = String(deal.COMPANY_ID || "");
+        if (!companyId || companyId === "0" || seen.has(companyId)) continue;
+        try {
+          const company = await getCompany(companyId);
+          if (!company || !benchmarkCandidateAllowed(term, company)) continue;
+          seen.add(companyId);
+          out.push(company);
+        } catch {}
+      }
+    } catch {}
+  }
+
+  return out.slice(0, 12);
 }
 
 async function profileBenchmarkCompany(seedLabel, company) {
@@ -4031,6 +4053,9 @@ async function profileBenchmarkCompany(seedLabel, company) {
       role: "user",
       content: JSON.stringify({
         seed_label: seedLabel,
+        canonical_note: seedLabel === "Сибирская сервисная компания (ССК)"
+          ? "ССК означает Сибирская сервисная компания. Не использовать ООО ССК Звезда."
+          : "",
         crm_company_name: company?.TITLE || "",
         inn,
         website
