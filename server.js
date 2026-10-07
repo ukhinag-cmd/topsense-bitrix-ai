@@ -4635,6 +4635,10 @@ function publicCandidate(item) {
     lastActivity: item.lastActivity || "",
     purchaseMode,
     managers: [...(item.managers || new Set())].slice(0, 5),
+    managerNames: item.managerNames instanceof Map
+      ? [...item.managerNames.values()].filter(Boolean).slice(0, 8)
+      : [],
+    currentWork: Array.isArray(item.currentWork) ? item.currentWork.slice(0, 8) : [],
     evidence: verifiedEvidence.slice(0, 5),
     sampleDeals: (item.sampleDeals || []).slice(0, 4),
   };
@@ -4936,6 +4940,32 @@ function refreshContractorScanSummary() {
   };
 }
 
+
+const CONTRACTOR_USER_NAME_CACHE = new Map();
+
+async function contractorUserName(userId) {
+  const id = String(userId || "").trim();
+  if (!id) return "";
+  if (CONTRACTOR_USER_NAME_CACHE.has(id)) {
+    return CONTRACTOR_USER_NAME_CACHE.get(id);
+  }
+
+  let name = id;
+  try {
+    const rows = await bitrixCall("user.get", { ID: Number(id) });
+    const user = Array.isArray(rows) ? rows[0] : rows;
+    if (user) {
+      name = [user.NAME || "", user.LAST_NAME || ""]
+        .filter(Boolean)
+        .join(" ")
+        .trim() || id;
+    }
+  } catch {}
+
+  CONTRACTOR_USER_NAME_CACHE.set(id, name);
+  return name;
+}
+
 async function contractorScanStep() {
   if (CONTRACTOR_SCAN_RUNNING) return;
 
@@ -5000,6 +5030,8 @@ async function contractorScanStep() {
           lastActivity: "",
           maxSignalWeight: 0,
           managers: new Set(),
+          managerNames: new Map(),
+          currentWork: [],
           evidence: new Set(),
           sampleDeals: [],
           sampleDealContexts: [],
@@ -5038,13 +5070,40 @@ async function contractorScanStep() {
 
       item.maxSignalWeight = Math.max(item.maxSignalWeight, sig.weight);
       sig.reasons.forEach(x => item.evidence.add(x));
-      if (deal.ASSIGNED_BY_ID) item.managers.add(String(deal.ASSIGNED_BY_ID));
+      if (deal.ASSIGNED_BY_ID) {
+        const managerId = String(deal.ASSIGNED_BY_ID);
+        item.managers.add(managerId);
+        if (!item.managerNames.has(managerId)) {
+          item.managerNames.set(managerId, await contractorUserName(managerId));
+        }
+      }
 
       const ps = purchaseSignals(deal);
       if (ps.direct) item.directCount += 1;
       if (ps.tender) item.tenderCount += 1;
 
       const activity = deal.LAST_ACTIVITY_TIME || deal.DATE_MODIFY || deal.DATE_CREATE || "";
+
+      if (String(deal.CLOSED || "").toUpperCase() !== "Y" && deal.ID) {
+        const openRow = {
+          id: String(deal.ID),
+          title: String(deal.TITLE || "").trim(),
+          amount: opportunity,
+          stage: String(deal.STAGE_ID || ""),
+          assignedById: String(deal.ASSIGNED_BY_ID || ""),
+          responsible: deal.ASSIGNED_BY_ID
+            ? (item.managerNames.get(String(deal.ASSIGNED_BY_ID)) || String(deal.ASSIGNED_BY_ID))
+            : "",
+          lastActivity: activity,
+        };
+        const existingIndex = item.currentWork.findIndex(x => x.id === openRow.id);
+        if (existingIndex >= 0) item.currentWork[existingIndex] = openRow;
+        else item.currentWork.unshift(openRow);
+        item.currentWork = item.currentWork
+          .sort((a,b) => dateMs(b.lastActivity) - dateMs(a.lastActivity))
+          .slice(0, 8);
+      }
+
       const ms = dateMs(activity);
       if (ms > item.lastActivityMs) {
         item.lastActivityMs = ms;
@@ -5219,6 +5278,12 @@ function dashboardHtml(status = dashboardStatus()) {
       <td>${escapeHtml(money(item.wonOpportunity))}</td>
       <td>${escapeHtml(money(item.openOpportunity))}</td>
       <td>${escapeHtml(money(item.lostOpportunity))}</td>
+      <td>${escapeHtml((item.managerNames || []).join(", ") || "—")}</td>
+      <td>${escapeHtml((item.currentWork || []).slice(0,3).map(x => {
+        const amount = Number(x.amount || 0);
+        const moneyText = amount ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(amount) + " ₽" : "";
+        return [x.title, x.responsible, moneyText, x.lastActivity].filter(Boolean).join(" — ");
+      }).join(" • ") || "Нет открытых сделок")}</td>
       <td>${escapeHtml((item.evidence || []).join(", "))}</td>
       <td>${escapeHtml((item.sampleDeals || []).slice(0,2).join(" • "))}</td>
     </tr>`;
@@ -5275,8 +5340,8 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Закупка</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Почему подрядчик</th><th>Примеры сделок</th></tr></thead>
-<tbody>${topRows || `<tr><td colspan="10">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
+<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Закупка</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Кто работал</th><th>Что происходит сейчас</th><th>Почему подрядчик</th><th>Примеры сделок</th></tr></thead>
+<tbody>${topRows || `<tr><td colspan="14">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
 <div class="section"><h2>Последние результаты проверки</h2>
