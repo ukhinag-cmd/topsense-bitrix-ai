@@ -343,9 +343,28 @@ const DASHBOARD_STATE = {
     results: CONTRACTOR_BASELINE_RESULTS.slice(),
   },
   similarContractors: {
-    status: "preparing",
+    status: "scanning-bitrix",
     target: 30,
     completed: 0,
+  },
+  contractorScan: {
+    status: "starting",
+    mode: "continuous-read-only",
+    pass: 1,
+    cursor: 0,
+    totalDeals: 0,
+    scannedDealsPass: 0,
+    scannedDealsLifetime: 0,
+    candidateCompanies: 0,
+    highPotential: 0,
+    directPurchaseCompanies: 0,
+    tenderOnlyCompanies: 0,
+    unlinkedCandidateDeals: 0,
+    startedAt: null,
+    lastBatchAt: null,
+    lastCompletedPassAt: null,
+    topCandidates: [],
+    recentDiscoveries: [],
   },
 };
 
@@ -370,6 +389,26 @@ async function bitrixCall(method, params = {}) {
   }
 
   return payload.result;
+}
+
+async function bitrixCallRaw(method, params = {}) {
+  const url = new URL(method + ".json", bitrixBaseUrl());
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(params),
+    signal: AbortSignal.timeout(15000),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.error) {
+    throw new Error(
+      `${method} failed: ${payload.error_description || payload.error || "HTTP " + response.status}`
+    );
+  }
+  return payload;
 }
 
 function isEmpty(value) {
@@ -4459,9 +4498,309 @@ async function processDeal(evt) {
 }
 
 
+
+const CONTRACTOR_SCAN_CANDIDATES = new Map();
+const CONTRACTOR_SCAN_COMPANY_CACHE = new Map();
+let CONTRACTOR_SCAN_RUNNING = false;
+let CONTRACTOR_SCAN_TIMER = null;
+
+function asText(value) {
+  if (Array.isArray(value)) return value.map(asText).filter(Boolean).join(" ");
+  if (value && typeof value === "object") return Object.values(value).map(asText).filter(Boolean).join(" ");
+  return String(value || "");
+}
+
+function dealContractorSignals(deal) {
+  const reasons = [];
+  let weight = 0;
+  const legacyType = asText(deal.UF_CRM_1739950675115);
+  const legacyWho = asText(deal.UF_CRM_1728208341819);
+  const aiType = asText(deal[AI_FIELDS.dealType]);
+  const aiRoles = asText(deal[AI_FIELDS.dealRoles]);
+  const haystack = [
+    deal.TITLE, deal.COMMENTS, deal.ADDITIONAL_INFO,
+    aiType, aiRoles, deal[AI_FIELDS.dealServices]
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (/(^|\D)180(\D|$)/.test(legacyType) || /(^|\D)60(\D|$)/.test(legacyWho)) {
+    weight += 8;
+    reasons.push("тип клиента: подрядчик");
+  }
+  if (/(^|\D)182(\D|$)/.test(legacyType) || /(^|\D)196(\D|$)/.test(legacyWho)) {
+    weight += 5;
+    reasons.push("сервисная компания");
+  }
+  if (/подряд|генподряд|\bepc\b|сервисн|интегратор|кипиа|асу\s*тп/i.test(aiType + " " + aiRoles)) {
+    weight += 6;
+    reasons.push("роль компании");
+  }
+
+  const groups = [
+    [/подряд|генподряд|субподряд/i, "подрядные работы"],
+    [/нефтесервис|бурен|буров|скважин/i, "нефтесервис/бурение"],
+    [/монтаж|пусконалад|\bпнр\b|\bсмр\b/i, "монтаж/ПНР/СМР"],
+    [/капитальн.{0,12}ремонт|ремонт.{0,20}(нпз|завод|труб|резервуар|оборуд)/i, "промышленный ремонт"],
+    [/кипиа|асу\s*тп|автоматизац/i, "КИПиА/АСУ ТП"],
+    [/изоляц|строительн.{0,12}лес/i, "изоляция/леса"],
+    [/опасн.{0,12}производ|газоопас|нефтехим|нефтеперераб/i, "опасные промышленные объекты"]
+  ];
+
+  for (const [rx, label] of groups) {
+    if (rx.test(haystack)) {
+      weight += 2;
+      reasons.push(label);
+    }
+  }
+
+  return {
+    isCandidate: weight >= 4,
+    weight,
+    reasons: [...new Set(reasons)].slice(0, 5)
+  };
+}
+
+function purchaseSignals(deal) {
+  const raw = asText(deal.UF_CRM_1728208250222);
+  return {
+    direct: /(^|\D)50(\D|$)/.test(raw),
+    tender: /(^|\D)(48|52)(\D|$)/.test(raw),
+  };
+}
+
+function dateMs(value) {
+  const t = value ? Date.parse(value) : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+
+function contractorPotentialScore(item) {
+  let score = 25;
+  score += Math.min(20, Number(item.maxSignalWeight || 0) * 2);
+  score += Math.min(18, Number(item.dealCount || 0) * 3);
+  if (item.directCount > 0) score += 18;
+  if (item.directCount === 0 && item.tenderCount > 0) score -= 12;
+  if (item.openDeals > 0) score += 8;
+
+  const ageDays = item.lastActivityMs
+    ? (Date.now() - item.lastActivityMs) / 86400000
+    : 9999;
+
+  if (ageDays <= 180) score += 12;
+  else if (ageDays <= 365) score += 8;
+  else if (ageDays <= 730) score += 3;
+
+  if (Number(item.totalOpportunity || 0) > 0) score += 4;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function publicCandidate(item) {
+  const purchaseMode = item.directCount > 0 && item.tenderCount > 0
+    ? "Смешанный"
+    : item.directCount > 0
+      ? "Прямая закупка"
+      : item.tenderCount > 0
+        ? "Тендер/торги"
+        : "Неизвестно";
+
+  return {
+    companyId: item.companyId,
+    company: item.company || "",
+    score: contractorPotentialScore(item),
+    dealCount: item.dealCount || 0,
+    openDeals: item.openDeals || 0,
+    totalOpportunity: Math.round(Number(item.totalOpportunity || 0)),
+    lastActivity: item.lastActivity || "",
+    purchaseMode,
+    managers: [...(item.managers || new Set())].slice(0, 5),
+    evidence: [...(item.evidence || new Set())].slice(0, 5),
+    sampleDeals: (item.sampleDeals || []).slice(0, 4),
+  };
+}
+
+async function contractorCompanyName(companyId) {
+  if (!companyId || companyId === "0") return "";
+  if (CONTRACTOR_SCAN_COMPANY_CACHE.has(companyId)) {
+    return CONTRACTOR_SCAN_COMPANY_CACHE.get(companyId);
+  }
+
+  let title = "";
+  try {
+    const company = await getCompany(companyId);
+    title = String(company?.TITLE || "");
+  } catch {}
+
+  CONTRACTOR_SCAN_COMPANY_CACHE.set(companyId, title);
+  return title;
+}
+
+function refreshContractorScanSummary() {
+  const all = [...CONTRACTOR_SCAN_CANDIDATES.values()].map(publicCandidate);
+  all.sort((a,b) =>
+    b.score - a.score ||
+    b.dealCount - a.dealCount ||
+    dateMs(b.lastActivity) - dateMs(a.lastActivity)
+  );
+
+  const scan = DASHBOARD_STATE.contractorScan;
+  scan.candidateCompanies = all.length;
+  scan.highPotential = all.filter(x => x.score >= 70).length;
+  scan.directPurchaseCompanies = all.filter(
+    x => x.purchaseMode === "Прямая закупка" || x.purchaseMode === "Смешанный"
+  ).length;
+  scan.tenderOnlyCompanies = all.filter(x => x.purchaseMode === "Тендер/торги").length;
+  scan.topCandidates = all.slice(0, 100);
+
+  DASHBOARD_STATE.similarContractors = {
+    status: "scanning-bitrix",
+    target: Math.max(30, all.length),
+    completed: all.length,
+  };
+}
+
+async function contractorScanStep() {
+  if (CONTRACTOR_SCAN_RUNNING) return;
+
+  CONTRACTOR_SCAN_RUNNING = true;
+  const scan = DASHBOARD_STATE.contractorScan;
+  if (!scan.startedAt) scan.startedAt = new Date().toISOString();
+  scan.status = "running";
+
+  let nextDelay = 900;
+
+  try {
+    const raw = await bitrixCallRaw("crm.deal.list", {
+      order: { ID: "DESC" },
+      filter: {},
+      select: [
+        "ID","TITLE","COMPANY_ID","CONTACT_ID","STAGE_ID","CLOSED",
+        "OPPORTUNITY","CURRENCY_ID","ASSIGNED_BY_ID",
+        "DATE_CREATE","DATE_MODIFY","LAST_ACTIVITY_TIME",
+        "COMMENTS","ADDITIONAL_INFO",
+        "UF_CRM_1739950675115","UF_CRM_1728208341819",
+        "UF_CRM_1728208250222","UF_CRM_1728208292193",
+        "UF_CRM_1728208353618","UF_CRM_1728208500678",
+        "UF_CRM_1728208529434",
+        AI_FIELDS.dealType,AI_FIELDS.dealRoles,AI_FIELDS.dealServices
+      ],
+      start: Number(scan.cursor || 0)
+    });
+
+    const deals = Array.isArray(raw.result) ? raw.result : [];
+    scan.totalDeals = Number(raw.total || scan.totalDeals || 0);
+
+    for (const deal of deals) {
+      scan.scannedDealsPass += 1;
+      scan.scannedDealsLifetime += 1;
+
+      const sig = dealContractorSignals(deal);
+      if (!sig.isCandidate) continue;
+
+      const companyId = String(deal.COMPANY_ID || "");
+      if (!companyId || companyId === "0") {
+        scan.unlinkedCandidateDeals += 1;
+        continue;
+      }
+
+      let item = CONTRACTOR_SCAN_CANDIDATES.get(companyId);
+      const isNew = !item;
+
+      if (!item) {
+        item = {
+          companyId,
+          company: "",
+          dealCount: 0,
+          openDeals: 0,
+          directCount: 0,
+          tenderCount: 0,
+          totalOpportunity: 0,
+          lastActivityMs: 0,
+          lastActivity: "",
+          maxSignalWeight: 0,
+          managers: new Set(),
+          evidence: new Set(),
+          sampleDeals: [],
+        };
+        CONTRACTOR_SCAN_CANDIDATES.set(companyId, item);
+      }
+
+      if (!item.company) {
+        item.company = await contractorCompanyName(companyId);
+      }
+
+      item.dealCount += 1;
+      if (String(deal.CLOSED || "").toUpperCase() !== "Y") item.openDeals += 1;
+      item.totalOpportunity += Number(deal.OPPORTUNITY || 0) || 0;
+      item.maxSignalWeight = Math.max(item.maxSignalWeight, sig.weight);
+      sig.reasons.forEach(x => item.evidence.add(x));
+      if (deal.ASSIGNED_BY_ID) item.managers.add(String(deal.ASSIGNED_BY_ID));
+
+      const ps = purchaseSignals(deal);
+      if (ps.direct) item.directCount += 1;
+      if (ps.tender) item.tenderCount += 1;
+
+      const activity = deal.LAST_ACTIVITY_TIME || deal.DATE_MODIFY || deal.DATE_CREATE || "";
+      const ms = dateMs(activity);
+      if (ms > item.lastActivityMs) {
+        item.lastActivityMs = ms;
+        item.lastActivity = activity;
+      }
+
+      const title = String(deal.TITLE || "").trim();
+      if (title && !item.sampleDeals.includes(title)) {
+        item.sampleDeals.unshift(title);
+        item.sampleDeals = item.sampleDeals.slice(0, 6);
+      }
+
+      if (isNew) {
+        scan.lastCandidateAt = new Date().toISOString();
+        scan.recentDiscoveries.unshift({
+          at: scan.lastCandidateAt,
+          company: item.company || "Компания без названия",
+          reason: sig.reasons.join(", "),
+        });
+        scan.recentDiscoveries = scan.recentDiscoveries.slice(0, 20);
+      }
+    }
+
+    scan.lastBatchAt = new Date().toISOString();
+    refreshContractorScanSummary();
+
+    if (raw.next !== undefined && raw.next !== null && String(raw.next) !== "") {
+      scan.cursor = Number(raw.next);
+    } else {
+      scan.lastCompletedPassAt = new Date().toISOString();
+      scan.pass += 1;
+      scan.cursor = 0;
+      scan.scannedDealsPass = 0;
+      nextDelay = 15000;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    scan.status = "error";
+    DASHBOARD_STATE.lastError = {
+      at: new Date().toISOString(),
+      source: "contractor-continuous-scan",
+      message,
+    };
+    nextDelay = 10000;
+  } finally {
+    CONTRACTOR_SCAN_RUNNING = false;
+    clearTimeout(CONTRACTOR_SCAN_TIMER);
+    CONTRACTOR_SCAN_TIMER = setTimeout(contractorScanStep, nextDelay);
+  }
+}
+
+function startContractorContinuousScan() {
+  if (CONTRACTOR_SCAN_TIMER || CONTRACTOR_SCAN_RUNNING) return;
+  DASHBOARD_STATE.contractorScan.status = "running";
+  contractorScanStep().catch(error => {
+    console.error("Unexpected continuous contractor scan error", error);
+  });
+}
+
 function dashboardStatus() {
   const benchmark = DASHBOARD_STATE.contractorBenchmark || {};
   const results = Array.isArray(benchmark.results) ? benchmark.results : [];
+  const scan = DASHBOARD_STATE.contractorScan || {};
 
   const counts = results.reduce((acc, item) => {
     const status = String(item.status || "unknown");
@@ -4477,8 +4816,27 @@ function dashboardStatus() {
     lastBitrixEventAt: DASHBOARD_STATE.lastBitrixEventAt,
     lastBitrixEvent: DASHBOARD_STATE.lastBitrixEvent,
     lastError: DASHBOARD_STATE.lastError,
+    contractorScan: {
+      status: scan.status || "starting",
+      mode: scan.mode || "continuous-read-only",
+      pass: Number(scan.pass || 1),
+      cursor: Number(scan.cursor || 0),
+      totalDeals: Number(scan.totalDeals || 0),
+      scannedDealsPass: Number(scan.scannedDealsPass || 0),
+      scannedDealsLifetime: Number(scan.scannedDealsLifetime || 0),
+      candidateCompanies: Number(scan.candidateCompanies || 0),
+      highPotential: Number(scan.highPotential || 0),
+      directPurchaseCompanies: Number(scan.directPurchaseCompanies || 0),
+      tenderOnlyCompanies: Number(scan.tenderOnlyCompanies || 0),
+      unlinkedCandidateDeals: Number(scan.unlinkedCandidateDeals || 0),
+      startedAt: scan.startedAt || null,
+      lastBatchAt: scan.lastBatchAt || null,
+      lastCompletedPassAt: scan.lastCompletedPassAt || null,
+      topCandidates: Array.isArray(scan.topCandidates) ? scan.topCandidates : [],
+      recentDiscoveries: Array.isArray(scan.recentDiscoveries) ? scan.recentDiscoveries : [],
+    },
     similarContractors: DASHBOARD_STATE.similarContractors || {
-      status: "preparing",
+      status: "scanning-bitrix",
       target: 30,
       completed: 0,
     },
@@ -4496,11 +4854,7 @@ function dashboardStatus() {
         status: item.status || "",
         quick_sale_score: item.profile?.quick_sale_score ?? null,
         profile: item.profile?.profile || "",
-        reason:
-          item.reason ||
-          item.profile?.why_interesting_for_topsense ||
-          item.error ||
-          "",
+        reason: item.reason || item.profile?.why_interesting_for_topsense || item.error || "",
       })),
     },
   };
@@ -4516,27 +4870,41 @@ function escapeHtml(value) {
 }
 
 function dashboardHtml(status = dashboardStatus()) {
-  const b = status.contractorBenchmark || {};
-  const total = Number(b.total || 0);
-  const done = Number(b.completed || 0);
-  const pct = total ? Math.round(done / total * 100) : 0;
-  const serviceText = status.ok ? "Работает" : "Ошибка";
-  const currentText =
-    b.current ||
-    (b.status === "completed" ? "Завершено" : b.status === "running" ? "Анализ..." : "Ожидание");
+  const scan = status.contractorScan || {};
+  const totalDeals = Number(scan.totalDeals || 0);
+  const scanned = Number(scan.scannedDealsPass || 0);
+  const pct = totalDeals ? Math.min(100, Math.round(scanned / totalDeals * 100)) : 0;
+  const top = Array.isArray(scan.topCandidates) ? scan.topCandidates : [];
+  const recent = Array.isArray(scan.recentDiscoveries) ? scan.recentDiscoveries : [];
 
-  const rows = (b.results || []).map(item => {
-    const st = String(item.status || "");
-    const cls = st === "profiled" ? "ok" : st === "error" ? "err" : "warn";
-    const score = item.quick_sale_score == null ? "—" : String(item.quick_sale_score) + "/100";
+  const money = value => {
+    const n = Number(value || 0);
+    if (!n) return "—";
+    return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
+  };
+
+  const topRows = top.slice(0, 50).map((item, idx) => {
+    const score = Number(item.score || 0);
+    const cls = score >= 70 ? "ok" : score >= 50 ? "warn" : "";
     return `<tr>
-      <td><b>${escapeHtml(item.seed)}</b></td>
-      <td>${escapeHtml(item.matched_company || "—")}</td>
-      <td><span class="badge ${cls}">${escapeHtml(st || "—")}</span></td>
-      <td>${escapeHtml(score)}</td>
-      <td>${escapeHtml(item.reason || "")}</td>
+      <td>${idx + 1}</td>
+      <td><b>${escapeHtml(item.company || "—")}</b></td>
+      <td><span class="badge ${cls}">${score}/100</span></td>
+      <td>${Number(item.dealCount || 0)}</td>
+      <td>${Number(item.openDeals || 0)}</td>
+      <td>${escapeHtml(item.purchaseMode || "—")}</td>
+      <td>${escapeHtml(item.lastActivity || "—")}</td>
+      <td>${escapeHtml(money(item.totalOpportunity))}</td>
+      <td>${escapeHtml((item.evidence || []).join(", "))}</td>
+      <td>${escapeHtml((item.sampleDeals || []).slice(0,2).join(" • "))}</td>
     </tr>`;
   }).join("");
+
+  const recentRows = recent.slice(0, 12).map(item => `<tr>
+    <td>${escapeHtml(item.at || "")}</td>
+    <td><b>${escapeHtml(item.company || "")}</b></td>
+    <td>${escapeHtml(item.reason || "")}</td>
+  </tr>`).join("");
 
   const errorText = status.lastError
     ? `${escapeHtml(status.lastError.at || "")} — ${escapeHtml(status.lastError.source || "")}: ${escapeHtml(status.lastError.message || "")}`
@@ -4547,57 +4915,54 @@ function dashboardHtml(status = dashboardStatus()) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="12">
+<meta http-equiv="refresh" content="10">
 <title>TOP-SENSE — Подрядчики</title>
 <style>
 :root{color-scheme:dark;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif}
-*{box-sizing:border-box} body{margin:0;background:#0b1020}
-.wrap{max-width:1200px;margin:0 auto;padding:28px}
-h1{font-size:28px;margin:0 0 6px}.sub{color:#9aa7bd;margin-bottom:22px}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
-.card{background:#131b2f;border:1px solid #25314e;border-radius:14px;padding:16px}
-.k{color:#92a1ba;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
-.v{font-size:24px;font-weight:700;margin-top:6px}.small{font-size:13px;color:#aab6c9;margin-top:6px}
-.bar{height:8px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:12px}
-.fill{height:100%;background:#5d8cff}
-table{width:100%;border-collapse:collapse;background:#131b2f;border-radius:14px;overflow:hidden}
-th,td{text-align:left;padding:12px;border-bottom:1px solid #25314e;font-size:14px;vertical-align:top}
-th{color:#9aa7bd;font-size:12px;text-transform:uppercase}
-.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#263653;font-size:12px}
-.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
-.section{margin-top:18px}.section h2{font-size:18px;margin:0 0 10px}
-.note{margin-top:14px;color:#8290a7;font-size:12px}
-@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.wrap{padding:16px} table{display:block;overflow:auto}}
+*{box-sizing:border-box}body{margin:0;background:#0b1020}.wrap{max-width:1500px;margin:0 auto;padding:24px}
+h1{font-size:28px;margin:0 0 6px}.sub{color:#9aa7bd;margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px}
+.card{background:#131b2f;border:1px solid #25314e;border-radius:14px;padding:14px}.k{color:#92a1ba;font-size:11px;text-transform:uppercase;letter-spacing:.05em}.v{font-size:24px;font-weight:700;margin-top:6px}.small{font-size:12px;color:#aab6c9;margin-top:5px}
+.bar{height:9px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:8px}.fill{height:100%;background:#5d8cff}
+.section{margin-top:18px}.section h2{font-size:18px;margin:0 0 10px}table{width:100%;border-collapse:collapse;background:#131b2f;border-radius:14px;overflow:hidden}
+th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13px;vertical-align:top}th{color:#9aa7bd;font-size:11px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#263653;font-size:12px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
+.scroll{overflow:auto;max-height:680px;border-radius:14px}.note{margin-top:12px;color:#8290a7;font-size:12px}.live{color:#9ce4bd}
+@media(max-width:1100px){.grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:700px){.grid{grid-template-columns:1fr 1fr}.wrap{padding:12px}}
 </style>
 </head>
-<body>
-<div class="wrap">
+<body><div class="wrap">
 <h1>ДАШБОРД — ПОДРЯДЧИКИ</h1>
-<div class="sub">Эталонные подрядчики, идентификация в CRM и подготовка поиска похожих компаний</div>
+<div class="sub">Полный исторический read-only аудит Bitrix24. <span class="live">● Непрерывный цикл сканирования</span></div>
 
 <div class="grid">
-  <div class="card"><div class="k">Сервис</div><div class="v">${escapeHtml(serviceText)}</div><div class="small">Запущен: ${escapeHtml(status.serviceStartedAt || "—")}</div></div>
-  <div class="card"><div class="k">Эталоны подрядчиков</div><div class="v">${done} / ${total}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div></div>
-  <div class="card"><div class="k">Сейчас</div><div class="v" style="font-size:18px">${escapeHtml(currentText)}</div><div class="small">Статус: ${escapeHtml(b.status || "idle")}</div></div>
-  <div class="card"><div class="k">Поиск похожих</div><div class="v" style="font-size:18px">${Number(status.similarContractors?.completed || 0)} / ${Number(status.similarContractors?.target || 30)}</div><div class="small">Статус: ${escapeHtml(status.similarContractors?.status || "preparing")}</div></div>
+  <div class="card"><div class="k">Сделок в B24</div><div class="v">${totalDeals || "…"}</div><div class="small">проход №${Number(scan.pass || 1)}</div></div>
+  <div class="card"><div class="k">Проверено в проходе</div><div class="v">${scanned}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div><div class="small">${pct}%</div></div>
+  <div class="card"><div class="k">Подрядчиков найдено</div><div class="v">${Number(scan.candidateCompanies || 0)}</div><div class="small">по истории B24</div></div>
+  <div class="card"><div class="k">Потенциал ≥70</div><div class="v">${Number(scan.highPotential || 0)}</div><div class="small">приоритет на реактивацию</div></div>
+  <div class="card"><div class="k">Прямая закупка</div><div class="v">${Number(scan.directPurchaseCompanies || 0)}</div><div class="small">включая смешанный формат</div></div>
+  <div class="card"><div class="k">Только тендеры</div><div class="v">${Number(scan.tenderOnlyCompanies || 0)}</div><div class="small">по заполненным полям B24</div></div>
 </div>
 
-<div class="section">
-<h2>Эталонные подрядчики</h2>
-<table>
-<thead><tr><th>Компания</th><th>Найдено в CRM</th><th>Статус</th><th>Быстрый потенциал</th><th>Комментарий</th></tr></thead>
-<tbody>${rows || `<tr><td colspan="5">Сервис запущен. Результаты анализа ещё формируются — страница обновится сама.</td></tr>`}</tbody>
-</table>
+<div class="card">
+  <div class="k">Состояние фонового сканера</div>
+  <div class="v" style="font-size:18px">${escapeHtml(scan.status || "starting")} · ${escapeHtml(scan.mode || "")}</div>
+  <div class="small">Последняя пачка: ${escapeHtml(scan.lastBatchAt || "ещё не было")} · последний полный проход: ${escapeHtml(scan.lastCompletedPassAt || "ещё не завершён")} · проверено за жизнь процесса: ${Number(scan.scannedDealsLifetime || 0)}</div>
 </div>
 
-<div class="section">
-<h2>Последняя ошибка</h2>
-<div class="card small">${errorText}</div>
-</div>
+<div class="section"><h2>Топ подрядчиков из истории Bitrix24</h2>
+<div class="scroll"><table>
+<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Закупка</th><th>Последняя активность</th><th>Сумма сделок</th><th>Почему подрядчик</th><th>Примеры сделок</th></tr></thead>
+<tbody>${topRows || `<tr><td colspan="10">Идёт первый проход по истории Bitrix24. Таблица заполняется по мере чтения сделок.</td></tr>`}</tbody>
+</table></div></div>
 
-<div class="note">На этой доске всегда показывается последний сохранённый снимок эталонной выборки. Страница обновляется каждые 12 секунд.</div>
-</div>
-</body></html>`;
+<div class="section"><h2>Последние найденные компании</h2>
+<table><thead><tr><th>Время</th><th>Компания</th><th>Сигнал</th></tr></thead>
+<tbody>${recentRows || `<tr><td colspan="3">Новых находок пока нет.</td></tr>`}</tbody></table></div>
+
+<div class="section"><h2>Техническое состояние</h2>
+<div class="card small">Последняя ошибка: ${errorText}<br>Сделок-кандидатов без привязанной компании: ${Number(scan.unlinkedCandidateDeals || 0)}</div></div>
+<div class="note">Страница обновляется каждые 10 секунд. Сканер ничего не изменяет в реальных сделках и компаниях — только читает и агрегирует историю.</div>
+</div></body></html>`;
 }
 
 
@@ -4729,6 +5094,11 @@ server.listen(PORT, "0.0.0.0", () => {
       console.error("Unexpected test title migration error", error);
     });
   }, 4000);
+
+  // Start continuous read-only contractor mining from the full Bitrix24 deal history.
+  setTimeout(() => {
+    startContractorContinuousScan();
+  }, 6500);
 
   // While the free instance is awake, re-check periodically.
   setInterval(() => {
