@@ -3777,6 +3777,199 @@ async function runSmallDealerAudit() {
   }
 }
 
+
+function contractorBenchmarkTextFormat() {
+  return {
+    format: {
+      type: "json_schema",
+      name: "contractor_benchmark",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          company_name: { type: "string" },
+          inn: { type: "string" },
+          website: { type: "string" },
+          profile: { type: "string" },
+          contractor_type: { type: "string" },
+          industries: { type: "array", items: { type: "string" } },
+          regions: { type: "array", items: { type: "string" } },
+          branches: { type: "array", items: { type: "string" } },
+          employee_count: { type: "string" },
+          employee_count_year: { type: "string" },
+          revenue: { type: "string" },
+          revenue_year: { type: "string" },
+          key_customers_or_objects: { type: "array", items: { type: "string" } },
+          why_interesting_for_topsense: { type: "string" },
+          quick_sale_score: { type: "number", minimum: 0, maximum: 100 },
+          evidence: { type: "array", maxItems: 8, items: { type: "string" } }
+        },
+        required: [
+          "company_name","inn","website","profile","contractor_type","industries",
+          "regions","branches","employee_count","employee_count_year","revenue",
+          "revenue_year","key_customers_or_objects","why_interesting_for_topsense",
+          "quick_sale_score","evidence"
+        ]
+      }
+    }
+  };
+}
+
+async function findBenchmarkCompanyCandidates(term) {
+  const seen = new Set();
+  const out = [];
+
+  try {
+    const companies = await bitrixCall("crm.company.list", {
+      order: { ID: "DESC" },
+      filter: { "%TITLE": term },
+      select: [
+        "ID","TITLE","WEB","PHONE","EMAIL",
+        AI_FIELDS.companyInn,
+        AI_FIELDS.companyType,
+        AI_FIELDS.companyRoles,
+        AI_FIELDS.companyRevenue,
+        AI_FIELDS.companyRevenueYear
+      ],
+      start: 0
+    });
+
+    for (const company of Array.isArray(companies) ? companies.slice(0, 8) : []) {
+      const id = String(company.ID || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(company);
+    }
+  } catch {}
+
+  try {
+    const deals = await bitrixCall("crm.deal.list", {
+      order: { ID: "DESC" },
+      filter: { "%TITLE": term },
+      select: ["ID","TITLE","COMPANY_ID","CONTACT_ID","DATE_CREATE"],
+      start: 0
+    });
+
+    for (const deal of Array.isArray(deals) ? deals.slice(0, 12) : []) {
+      const companyId = String(deal.COMPANY_ID || "");
+      if (!companyId || companyId === "0" || seen.has(companyId)) continue;
+      try {
+        const company = await getCompany(companyId);
+        if (!company) continue;
+        seen.add(companyId);
+        out.push(company);
+      } catch {}
+    }
+  } catch {}
+
+  return out.slice(0, 8);
+}
+
+async function profileBenchmarkCompany(seedLabel, company) {
+  const inn = String(company?.[AI_FIELDS.companyInn] || "").trim();
+  const websites = Array.isArray(company?.WEB)
+    ? company.WEB.map(x => x.VALUE).filter(Boolean)
+    : [];
+  const website = websites[0] || "";
+
+  if (!inn && !website) {
+    return {
+      seed: seedLabel,
+      matched_company: company?.TITLE || "",
+      status: "needs-disambiguation",
+      reason: "В CRM нет ИНН и сайта; веб-поиск по одному названию может спутать компанию."
+    };
+  }
+
+  const payload = await callOpenAI({
+    model: process.env.OPENAI_MODEL || "gpt-6-luna",
+    store: false,
+    max_output_tokens: 2200,
+    text: contractorBenchmarkTextFormat(),
+    tools: [{ type: "web_search" }],
+    tool_choice: "required",
+    instructions: [
+      "Ты анализируешь эталонную подрядную организацию для российского производителя промышленных газоанализаторов ТОП-СЕНС.",
+      "Идентифицируй компанию строго по ИНН и/или официальному сайту из CRM. Не подменяй её одноимённой компанией.",
+      "Определи, чем она занимается как подрядчик: строительство, монтаж, бурение, нефтесервис, остановочные ремонты, леса/изоляция, промышленный сервис и т.п.",
+      "Найди отрасли и типы объектов, географию, филиалы/подразделения, численность сотрудников если есть надёжный открытый источник, последнюю выручку если доступна, а также известных заказчиков/объекты только по публичным источникам.",
+      "Оцени quick_sale_score 0-100 именно по привлекательности для ТОП-СЕНС: быстрые прямые закупки, работа на опасных объектах, мобильные бригады, потребность в переносных/стационарных газоанализаторах, отсутствие необходимости долгого тендерного цикла повышают оценку.",
+      "Если показатель не подтверждён, оставляй пустую строку/массив. Не выдумывай.",
+      "В evidence кратко укажи подтверждающие факты и источники/годы."
+    ].join("\n"),
+    input: [{
+      role: "user",
+      content: JSON.stringify({
+        seed_label: seedLabel,
+        crm_company_name: company?.TITLE || "",
+        inn,
+        website
+      })
+    }]
+  });
+
+  const text = extractResponseText(payload);
+  return {
+    seed: seedLabel,
+    matched_company: company?.TITLE || "",
+    status: "profiled",
+    profile: parseJsonText(text)
+  };
+}
+
+async function runContractorBenchmarkPilot() {
+  const seeds = [
+    "Промфинстрой",
+    "Лесовик",
+    "Сибирская сервисная компания",
+    "ССК",
+    "Шлюмберже",
+    "БКЕ",
+    "Бур-сервис"
+  ];
+
+  const results = [];
+
+  for (const seed of seeds) {
+    try {
+      const candidates = await findBenchmarkCompanyCandidates(seed);
+
+      if (!candidates.length) {
+        results.push({
+          seed,
+          status: "not-found-in-crm"
+        });
+        continue;
+      }
+
+      let chosen = candidates[0];
+
+      // Prefer candidates with exact identity fields.
+      const identified = candidates.find(company =>
+        String(company?.[AI_FIELDS.companyInn] || "").trim() ||
+        (Array.isArray(company?.WEB) && company.WEB.some(x => String(x.VALUE || "").trim()))
+      );
+      if (identified) chosen = identified;
+
+      const profiled = await profileBenchmarkCompany(seed, chosen);
+      results.push(profiled);
+    } catch (error) {
+      results.push({
+        seed,
+        status: "error",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  console.log(JSON.stringify({
+    source: "contractor-benchmark",
+    action: "pilot-result",
+    results
+  }));
+}
+
 async function handleQualificationAnswersUpdate(deal) {
   const fieldText = String(deal.UF_CRM_1790850696723 || "");
   const blocks = parseQuestionBlocks(fieldText);
@@ -4139,6 +4332,9 @@ server.listen(PORT, "0.0.0.0", () => {
     });
     migrateKnownTestDealTitles().catch(error => {
       console.error("Unexpected test title migration error", error);
+    });
+    runContractorBenchmarkPilot().catch(error => {
+      console.error("Unexpected contractor benchmark pilot error", error);
     });
   }, 4000);
 
