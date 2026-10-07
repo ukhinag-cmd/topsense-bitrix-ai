@@ -3984,7 +3984,7 @@ async function profileBenchmarkCompany(seedLabel, company) {
 async function runContractorBenchmarkPilot() {
   const seeds = [
     "Промфинстрой",
-    "Лесовик",
+    "Лесавик",
     "Сибирская сервисная компания",
     "ССК",
     "Шлюмберже",
