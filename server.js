@@ -5611,18 +5611,18 @@ function dashboardHtml(status = dashboardStatus()) {
 <title>TOP-SENSE — Подрядчики</title>
 <style>
 :root{color-scheme:dark;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif}
-*{box-sizing:border-box}html,body{margin:0;background:#0b1020}.wrap{max-width:none;width:100%;margin:0;padding:8px 10px}
-h1{font-size:18px;margin:0 0 2px}.sub{color:#9aa7bd;margin-bottom:5px;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:5px}
-.card{background:#131b2f;border:1px solid #25314e;border-radius:7px;padding:5px 7px}.k{color:#92a1ba;font-size:7px;text-transform:uppercase}.v{font-size:14px;font-weight:700;margin-top:1px}.small{font-size:8px;color:#aab6c9;margin-top:1px}
-.bar{height:4px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:3px}.fill{height:100%;background:#5d8cff}
-.section{margin-top:5px}.section h2{font-size:12px;margin:0 0 3px}table{width:100%;border-collapse:collapse;table-layout:fixed;background:#131b2f}
-th,td{text-align:left;padding:3px 4px;border-bottom:1px solid #25314e;font-size:9px;line-height:1.12;vertical-align:middle}th{color:#9aa7bd;font-size:7px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
-.badge{display:inline-block;padding:2px 4px;border-radius:999px;background:#263653;font-size:8px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
-.scroll{overflow:auto;max-height:calc(100vh - 145px);border-radius:7px}.note{margin-top:3px;color:#8290a7;font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
-.compact,.productcell,.statuscell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini{display:block;font-size:7px;color:#93a0b5;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:8px}.productcell{max-width:145px}.statuscell{max-width:180px}
-@media(max-width:1200px){th,td{font-size:8px;padding:3px}.grid{grid-template-columns:repeat(3,1fr)}}
+*{box-sizing:border-box}html,body{margin:0;background:#0b1020}.wrap{max-width:none;width:100%;margin:0;padding:14px 16px}
+h1{font-size:24px;margin:0 0 4px}.sub{color:#9aa7bd;margin-bottom:10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:10px}
+.card{background:#131b2f;border:1px solid #25314e;border-radius:10px;padding:9px 11px}.k{color:#92a1ba;font-size:10px;text-transform:uppercase}.v{font-size:20px;font-weight:700;margin-top:3px}.small{font-size:10px;color:#aab6c9;margin-top:2px}
+.bar{height:6px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:5px}.fill{height:100%;background:#5d8cff}
+.section{margin-top:10px}.section h2{font-size:16px;margin:0 0 6px}table{width:100%;border-collapse:collapse;table-layout:fixed;background:#131b2f}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #25314e;font-size:12px;line-height:1.2;vertical-align:middle}th{color:#9aa7bd;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
+.badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#263653;font-size:11px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
+.scroll{overflow:auto;max-height:calc(100vh - 220px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
+.compact,.productcell,.statuscell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini{display:block;font-size:10px;color:#93a0b5;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:180px}.statuscell{max-width:220px}
+@media(max-width:1400px){th,td{font-size:11px;padding:6px}.grid{grid-template-columns:repeat(6,1fr)}}
 </style>
 </head>
 <body><div class="wrap">
