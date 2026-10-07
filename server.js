@@ -289,19 +289,69 @@ const LEGACY_TYPE_ENUM = {
 
 const SELF_UPDATES = new Map();
 
+const CONTRACTOR_BASELINE_RESULTS = [
+  {
+    seed: "Промфинстрой",
+    matched_company: "Промфинстрой, АО",
+    status: "needs-disambiguation",
+    reason: "В CRM нет ИНН и сайта; требуется точная идентификация перед внешним профилированием."
+  },
+  {
+    seed: "Лесавик",
+    matched_company: "ООО \"ЛЕСАВИК\"",
+    status: "needs-disambiguation",
+    reason: "В CRM компания найдена, но нет ИНН и сайта; профиль: производитель строительных лесов."
+  },
+  {
+    seed: "Сибирская сервисная компания",
+    matched_company: "",
+    status: "not-found-in-crm",
+    reason: "По полному названию в CRM не найдено точного совпадения."
+  },
+  {
+    seed: "ССК",
+    matched_company: "ООО \"ССК \"Звезда\"\"",
+    status: "needs-disambiguation",
+    reason: "Сокращение ССК неоднозначно; найденная карточка не подтверждает, что это Сибирская сервисная компания."
+  },
+  {
+    seed: "Шлюмберже",
+    matched_company: "Шлюмберже Восток, ООО",
+    status: "needs-disambiguation",
+    reason: "Карточка найдена, но в CRM нет ИНН и сайта для строгой идентификации."
+  },
+  {
+    seed: "БКЕ",
+    matched_company: "БКЕ Шельф, ООО",
+    status: "needs-disambiguation",
+    reason: "Карточка найдена, но в CRM нет ИНН и сайта для строгой идентификации."
+  },
+  {
+    seed: "Бур-сервис",
+    matched_company: "",
+    status: "not-found-in-crm",
+    reason: "По этому написанию точного совпадения в CRM не найдено."
+  }
+];
+
 const DASHBOARD_STATE = {
   serviceStartedAt: new Date().toISOString(),
   lastBitrixEventAt: null,
   lastBitrixEvent: null,
   lastError: null,
   contractorBenchmark: {
-    status: "idle",
-    total: 0,
-    completed: 0,
+    status: "snapshot",
+    total: CONTRACTOR_BASELINE_RESULTS.length,
+    completed: CONTRACTOR_BASELINE_RESULTS.length,
     current: "",
     startedAt: null,
-    finishedAt: null,
-    results: [],
+    finishedAt: "2026-10-07T07:06:27Z",
+    results: CONTRACTOR_BASELINE_RESULTS.slice(),
+  },
+  similarContractors: {
+    status: "preparing",
+    target: 30,
+    completed: 0,
   },
 };
 
@@ -3998,15 +4048,7 @@ async function profileBenchmarkCompany(seedLabel, company) {
 }
 
 async function runContractorBenchmarkPilot() {
-  const seeds = [
-    "Промфинстрой",
-    "Лесавик",
-    "Сибирская сервисная компания",
-    "ССК",
-    "Шлюмберже",
-    "БКЕ",
-    "Бур-сервис"
-  ];
+  const seeds = CONTRACTOR_BASELINE_RESULTS.map(item => item.seed);
 
   const results = [];
 
@@ -4363,6 +4405,11 @@ function dashboardStatus() {
     lastBitrixEventAt: DASHBOARD_STATE.lastBitrixEventAt,
     lastBitrixEvent: DASHBOARD_STATE.lastBitrixEvent,
     lastError: DASHBOARD_STATE.lastError,
+    similarContractors: DASHBOARD_STATE.similarContractors || {
+      status: "preparing",
+      target: 30,
+      completed: 0,
+    },
     contractorBenchmark: {
       status: benchmark.status || "idle",
       total: Number(benchmark.total || 0),
@@ -4429,7 +4476,7 @@ function dashboardHtml(status = dashboardStatus()) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="12">
-<title>TOP-SENSE AI Dashboard</title>
+<title>TOP-SENSE — Подрядчики</title>
 <style>
 :root{color-scheme:dark;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif}
 *{box-sizing:border-box} body{margin:0;background:#0b1020}
@@ -4453,18 +4500,18 @@ th{color:#9aa7bd;font-size:12px;text-transform:uppercase}
 </head>
 <body>
 <div class="wrap">
-<h1>TOP-SENSE AI Monitor</h1>
-<div class="sub">Живой статус анализа CRM, подрядчиков и AI-процессов</div>
+<h1>ДАШБОРД — ПОДРЯДЧИКИ</h1>
+<div class="sub">Эталонные подрядчики, идентификация в CRM и подготовка поиска похожих компаний</div>
 
 <div class="grid">
   <div class="card"><div class="k">Сервис</div><div class="v">${escapeHtml(serviceText)}</div><div class="small">Запущен: ${escapeHtml(status.serviceStartedAt || "—")}</div></div>
   <div class="card"><div class="k">Эталоны подрядчиков</div><div class="v">${done} / ${total}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div></div>
   <div class="card"><div class="k">Сейчас</div><div class="v" style="font-size:18px">${escapeHtml(currentText)}</div><div class="small">Статус: ${escapeHtml(b.status || "idle")}</div></div>
-  <div class="card"><div class="k">Последнее событие Bitrix</div><div class="v" style="font-size:16px">${escapeHtml(status.lastBitrixEvent || "—")}</div><div class="small">${escapeHtml(status.lastBitrixEventAt || "—")}</div></div>
+  <div class="card"><div class="k">Поиск похожих</div><div class="v" style="font-size:18px">${Number(status.similarContractors?.completed || 0)} / ${Number(status.similarContractors?.target || 30)}</div><div class="small">Статус: ${escapeHtml(status.similarContractors?.status || "preparing")}</div></div>
 </div>
 
 <div class="section">
-<h2>Эталонные компании</h2>
+<h2>Эталонные подрядчики</h2>
 <table>
 <thead><tr><th>Компания</th><th>Найдено в CRM</th><th>Статус</th><th>Быстрый потенциал</th><th>Комментарий</th></tr></thead>
 <tbody>${rows || `<tr><td colspan="5">Сервис запущен. Результаты анализа ещё формируются — страница обновится сама.</td></tr>`}</tbody>
@@ -4476,7 +4523,7 @@ th{color:#9aa7bd;font-size:12px;text-transform:uppercase}
 <div class="card small">${errorText}</div>
 </div>
 
-<div class="note">Страница обновляется автоматически каждые 12 секунд. На бесплатном Render первое открытие после сна может занять до минуты.</div>
+<div class="note">На этой доске всегда показывается последний сохранённый снимок эталонной выборки. Страница обновляется каждые 12 секунд.</div>
 </div>
 </body></html>`;
 }
@@ -4486,7 +4533,14 @@ const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url || "/", "http://localhost");
   const pathname = requestUrl.pathname.replace(/\/+$/, "") || "/";
 
-  if (req.method === "GET" && pathname === "/dashboard") {
+  if (
+    req.method === "GET" &&
+    (
+      pathname === "/dashboard" ||
+      pathname === "/contractors" ||
+      pathname === "/dashboard/contractors"
+    )
+  ) {
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
@@ -4494,7 +4548,14 @@ const server = http.createServer((req, res) => {
     return res.end(dashboardHtml(dashboardStatus()));
   }
 
-  if (req.method === "GET" && pathname === "/dashboard/status") {
+  if (
+    req.method === "GET" &&
+    (
+      pathname === "/dashboard/status" ||
+      pathname === "/contractors/status" ||
+      pathname === "/dashboard/contractors/status"
+    )
+  ) {
     return json(res, 200, dashboardStatus());
   }
 
@@ -4594,9 +4655,6 @@ server.listen(PORT, "0.0.0.0", () => {
     });
     migrateKnownTestDealTitles().catch(error => {
       console.error("Unexpected test title migration error", error);
-    });
-    runContractorBenchmarkPilot().catch(error => {
-      console.error("Unexpected contractor benchmark pilot error", error);
     });
   }, 4000);
 
