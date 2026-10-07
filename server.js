@@ -5559,9 +5559,129 @@ async function refreshOneContractorRelationshipStatus() {
   } catch {}
 }
 
+
+function normalizedCompanyTitle(value) {
+  return String(value || "")
+    .replace(/&(?:#x20|#32|nbsp);?/gi, " ")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizedWebsiteHost(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = /^https?:\/\//i.test(raw) ? raw : "https://" + raw;
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function combinePurchasedProducts(a = [], b = []) {
+  const map = new Map();
+  for (const row of [...a, ...b]) {
+    const product = String(row?.product || "").trim();
+    if (!product) continue;
+    const key = product.toLowerCase();
+    const current = map.get(key) || { product, quantity: 0, sum: 0 };
+    current.quantity += Number(row?.quantity || 0);
+    current.sum += Number(row?.sum || 0);
+    map.set(key, current);
+  }
+  return [...map.values()]
+    .sort((x,y) => y.sum - x.sum || y.quantity - x.quantity)
+    .slice(0, 12);
+}
+
+function mergeConfirmedContractorRows(rows) {
+  const groups = [];
+
+  for (const row of rows || []) {
+    const inn = String(row.inn || "").replace(/\D/g, "");
+    const host = normalizedWebsiteHost(row.website);
+    const name = normalizedCompanyTitle(row.company);
+
+    let group = groups.find(g =>
+      (inn && g.inns.has(inn)) ||
+      (host && g.hosts.has(host))
+    );
+
+    if (!group) {
+      group = {
+        row: { ...row },
+        inns: new Set(inn ? [inn] : []),
+        hosts: new Set(host ? [host] : []),
+        companyIds: new Set(row.companyId ? [String(row.companyId)] : []),
+      };
+      groups.push(group);
+      continue;
+    }
+
+    const target = group.row;
+    if (inn) group.inns.add(inn);
+    if (host) group.hosts.add(host);
+    if (row.companyId) group.companyIds.add(String(row.companyId));
+
+    const rowIsNewer = dateMs(row.lastActivity) > dateMs(target.lastActivity);
+
+    target.company = target.company || row.company;
+    target.score = Math.max(Number(target.score || 0), Number(row.score || 0));
+    target.strategicScore = Math.max(Number(target.strategicScore || 0), Number(row.strategicScore || 0));
+    target.crmActivityScore = Math.max(Number(target.crmActivityScore || 0), Number(row.crmActivityScore || 0));
+    target.dealCount = Number(target.dealCount || 0) + Number(row.dealCount || 0);
+    target.openDeals = Number(target.openDeals || 0) + Number(row.openDeals || 0);
+    target.totalOpportunity = Number(target.totalOpportunity || 0) + Number(row.totalOpportunity || 0);
+    target.wonOpportunity = Number(target.wonOpportunity || 0) + Number(row.wonOpportunity || 0);
+    target.openOpportunity = Number(target.openOpportunity || 0) + Number(row.openOpportunity || 0);
+    target.lostOpportunity = Number(target.lostOpportunity || 0) + Number(row.lostOpportunity || 0);
+    target.unclassifiedOpportunity = Number(target.unclassifiedOpportunity || 0) + Number(row.unclassifiedOpportunity || 0);
+    target.purchasedProducts = combinePurchasedProducts(target.purchasedProducts, row.purchasedProducts);
+    target.managers = [...new Set([...(target.managers || []), ...(row.managers || [])])].slice(0, 8);
+    target.managerNames = [...new Set([...(target.managerNames || []), ...(row.managerNames || [])])].slice(0, 8);
+    target.currentWork = [...(target.currentWork || []), ...(row.currentWork || [])]
+      .sort((x,y) => dateMs(y.lastActivity) - dateMs(x.lastActivity))
+      .slice(0, 8);
+    target.sampleDeals = [...new Set([...(target.sampleDeals || []), ...(row.sampleDeals || [])])].slice(0, 8);
+    target.evidence = [...new Set([...(target.evidence || []), ...(row.evidence || [])])].slice(0, 8);
+
+    if (rowIsNewer) {
+      target.lastActivity = row.lastActivity;
+      target.relationshipStatus = row.relationshipStatus;
+      target.managerQualityScore = row.managerQualityScore;
+      target.managerQualityLevel = row.managerQualityLevel;
+      target.managerQualitySummary = row.managerQualitySummary;
+      target.managerProcessIssue = row.managerProcessIssue;
+      target.companyId = row.companyId;
+    }
+
+    if (!target.inn && inn) target.inn = inn;
+    if (!target.website && row.website) target.website = row.website;
+
+    console.log(JSON.stringify({
+      source: "contractor-dashboard",
+      action: "contractor-duplicate-merged",
+      company: row.company || target.company || "",
+      normalizedCompany: name,
+      companyIds: [...group.companyIds],
+      inns: [...group.inns],
+      websites: [...group.hosts],
+    }));
+  }
+
+  return groups.map(g => ({
+    ...g.row,
+    mergedCompanyIds: [...g.companyIds],
+    duplicateCardsMerged: Math.max(0, g.companyIds.size - 1),
+  }));
+}
+
 function refreshContractorScanSummary() {
   const all = [...CONTRACTOR_SCAN_CANDIDATES.values()].map(publicCandidate);
-  const confirmed = all.filter(x => x.verificationStatus === "confirmed");
+  const confirmedCards = all.filter(x => x.verificationStatus === "confirmed");
+  const confirmed = mergeConfirmedContractorRows(confirmedCards);
 
   confirmed.sort((a,b) =>
     b.score - a.score ||
@@ -5572,6 +5692,7 @@ function refreshContractorScanSummary() {
   const scan = DASHBOARD_STATE.contractorScan;
   scan.discoveredCandidates = all.length;
   scan.verifiedContractors = confirmed.length;
+  scan.verifiedContractorCards = confirmedCards.length;
   scan.pendingVerification = all.filter(
     x => x.verificationStatus === "pending" ||
          x.verificationStatus === "checking" ||
@@ -6022,12 +6143,18 @@ function dashboardHtml(status = dashboardStatus()) {
     return parts.slice(0, 3).join(" · ");
   };
 
+  const visibleNameCounts = new Map();
+  for (const item of top) {
+    const key = normalizedCompanyTitle(item.company);
+    if (key) visibleNameCounts.set(key, (visibleNameCounts.get(key) || 0) + 1);
+  }
+
   const topRows = top.slice(0, 50).map((item, idx) => {
     const score = Number(item.score || 0);
     const cls = score >= 70 ? "ok" : score >= 50 ? "warn" : "";
     return `<tr>
       <td>${idx + 1}</td>
-      <td><b>${escapeHtml(item.company || "—")}</b></td>
+      <td><b>${escapeHtml(item.company || "—")}</b>${visibleNameCounts.get(normalizedCompanyTitle(item.company)) > 1 ? '<span class="mini">ИНН ' + escapeHtml(item.inn || "не найден") + '</span>' : ''}</td>
       <td><span class="badge ${cls}">${score}/100</span></td>
       <td class="compact"><span class="badge">${Number(item.strategicScore || 0)}</span><span class="mini">${escapeHtml(strategicShort(item) || "—")}</span></td>
       <td class="center">${Number(item.dealCount || 0)}${Number(item.openDeals || 0) ? " / " + Number(item.openDeals || 0) : ""}</td>
