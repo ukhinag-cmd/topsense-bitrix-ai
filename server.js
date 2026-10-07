@@ -4752,6 +4752,7 @@ function publicCandidate(item) {
     managerQualityScore: Number(item.managerQualityScore || 0),
     managerQualityLevel: item.managerQualityLevel || "",
     managerQualitySummary: item.managerQualitySummary || "",
+    managerProcessIssue: item.managerProcessIssue || "",
     evidence: verifiedEvidence.slice(0, 5),
     sampleDeals: (item.sampleDeals || []).slice(0, 4),
   };
@@ -5202,6 +5203,7 @@ async function latestOfferSummary(latest, activities) {
     action: commercialActionKind(commercial),
     sentDate: compactDate(commercial?.created),
     followupDate: compactDate(task?.deadline),
+    hasFollowupTask: Boolean(task),
   };
 }
 
@@ -5291,6 +5293,8 @@ async function hydrateContractorRelationshipStatus(item) {
 
   if (offer.followupDate) {
     parts.push("связаться " + offer.followupDate);
+  } else if (latest.isOpen) {
+    parts.push("⚠ НЕТ ЗАДАЧИ СВЯЗАТЬСЯ");
   }
 
   if (ageDays > 7 && ageDays < 9999) {
@@ -5518,14 +5522,16 @@ async function hydrateContractorManagerQuality(item) {
   if (laterOutbound >= 2) followupScore += 3;
   followupScore = Math.min(20, followupScore);
 
-  const total = qualification + contactsScore + approvalScore + followupScore;
+  const missingTaskFault = Boolean(latest.isOpen && !followTask);
+  const rawTotal = qualification + contactsScore + approvalScore + followupScore;
+  const total = missingTaskFault ? Math.min(rawTotal, 59) : rawTotal;
 
   const tags = [
     "квал " + qualification + "/40",
     "конт. " + Math.max(contacts.length, communicationContactIds.size),
     decisionContacts.length ? "ЛПР ✓" : "ЛПР —",
     approvalAttempt ? "соглас. ✓" : "соглас. —",
-    followTask ? "follow-up ✓" : "follow-up —",
+    followTask ? "задача ✓" : (latest.isOpen ? "ЗАДАЧИ НЕТ ⚠" : "задача —"),
   ];
 
   item.managerQualityScore = total;
@@ -5535,6 +5541,7 @@ async function hydrateContractorManagerQuality(item) {
   item.managerContactsScore = contactsScore;
   item.managerApprovalScore = approvalScore;
   item.managerFollowupScore = followupScore;
+  item.managerProcessIssue = missingTaskFault ? "Нет активной задачи на следующий контакт" : "";
   item.managerAuditCheckedAt = Date.now();
 }
 
@@ -5760,6 +5767,7 @@ async function contractorScanStep() {
           managerQualityScore: 0,
           managerQualityLevel: "",
           managerQualitySummary: "",
+          managerProcessIssue: "",
           managerAuditCheckedAt: 0,
           evidence: new Set(),
           sampleDeals: [],
