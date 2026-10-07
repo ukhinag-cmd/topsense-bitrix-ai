@@ -267,6 +267,13 @@ const AI_FIELDS = {
   companyRevenueGrowth: "UF_CRM_AI_REVENUE_GROWTH",
   companyNetProfit: "UF_CRM_AI_NET_PROFIT",
   companyFinancialSource: "UF_CRM_AI_FIN_SOURCE",
+  companyEmployees: "UF_CRM_AI_EMPLOYEES",
+  companyEmployeesYear: "UF_CRM_AI_EMPLOYEES_YEAR",
+  companyBranches: "UF_CRM_AI_BRANCHES",
+  companyRegions: "UF_CRM_AI_REGIONS",
+  companyKeyObjects: "UF_CRM_AI_KEY_OBJECTS",
+  companyQuickSaleScore: "UF_CRM_AI_QUICK_SALE_SCORE",
+  companyQuickSaleReason: "UF_CRM_AI_QUICK_SALE_REASON",
 };
 
 const LEGACY_TYPE_ENUM = {
@@ -445,6 +452,13 @@ async function ensureAIFields() {
   await ensureUserField("company", "AI_REVENUE_GROWTH", "ИИ: Динамика выручки, %", 1);
   await ensureUserField("company", "AI_NET_PROFIT", "ИИ: Чистая прибыль, руб.", 1);
   await ensureUserField("company", "AI_FIN_SOURCE", "ИИ: Источник финансов", 2);
+  await ensureUserField("company", "AI_EMPLOYEES", "ИИ: Численность сотрудников", 1);
+  await ensureUserField("company", "AI_EMPLOYEES_YEAR", "ИИ: Год численности", 1);
+  await ensureUserField("company", "AI_BRANCHES", "ИИ: Филиалы и подразделения", 5);
+  await ensureUserField("company", "AI_REGIONS", "ИИ: География работы", 4);
+  await ensureUserField("company", "AI_KEY_OBJECTS", "ИИ: Ключевые заказчики/объекты", 5);
+  await ensureUserField("company", "AI_QUICK_SALE_SCORE", "ИИ: Потенциал быстрой продажи", 1);
+  await ensureUserField("company", "AI_QUICK_SALE_REASON", "ИИ: Почему интересна ТОП-СЕНС", 4);
 }
 
 async function getCompany(id) {
@@ -576,6 +590,13 @@ async function upsertCompany(deal, analysis) {
     if (companyData.revenue_growth_percent) fields[AI_FIELDS.companyRevenueGrowth] = String(companyData.revenue_growth_percent);
     if (companyData.net_profit) fields[AI_FIELDS.companyNetProfit] = String(companyData.net_profit);
     if (companyData.financial_source) fields[AI_FIELDS.companyFinancialSource] = String(companyData.financial_source);
+    if (companyData.employee_count) fields[AI_FIELDS.companyEmployees] = String(companyData.employee_count);
+    if (companyData.employee_count_year) fields[AI_FIELDS.companyEmployeesYear] = String(companyData.employee_count_year);
+    if (Array.isArray(companyData.branches) && companyData.branches.length) fields[AI_FIELDS.companyBranches] = companyData.branches.join("\n");
+    if (Array.isArray(companyData.operating_regions) && companyData.operating_regions.length) fields[AI_FIELDS.companyRegions] = companyData.operating_regions.join(", ");
+    if (Array.isArray(companyData.key_customers_or_objects) && companyData.key_customers_or_objects.length) fields[AI_FIELDS.companyKeyObjects] = companyData.key_customers_or_objects.join("\n");
+    if (companyData.quick_sale_score !== null && companyData.quick_sale_score !== undefined) fields[AI_FIELDS.companyQuickSaleScore] = String(companyData.quick_sale_score);
+    if (companyData.quick_sale_reason) fields[AI_FIELDS.companyQuickSaleReason] = String(companyData.quick_sale_reason);
 
     const id = await bitrixCall("crm.company.add", { fields });
     company = await getCompany(id);
@@ -658,6 +679,24 @@ async function upsertCompany(deal, analysis) {
       [AI_FIELDS.companyFinancialSource, companyData.financial_source],
     ];
     for (const [field, value] of financialFields) {
+      if (value !== null && value !== undefined && String(value).trim() !== "") {
+        const normalized = String(value).trim();
+        if (String(company[field] || "").trim() !== normalized) {
+          patch[field] = normalized;
+        }
+      }
+    }
+
+    const profileFields = [
+      [AI_FIELDS.companyEmployees, companyData.employee_count],
+      [AI_FIELDS.companyEmployeesYear, companyData.employee_count_year],
+      [AI_FIELDS.companyBranches, Array.isArray(companyData.branches) ? companyData.branches.join("\n") : ""],
+      [AI_FIELDS.companyRegions, Array.isArray(companyData.operating_regions) ? companyData.operating_regions.join(", ") : ""],
+      [AI_FIELDS.companyKeyObjects, Array.isArray(companyData.key_customers_or_objects) ? companyData.key_customers_or_objects.join("\n") : ""],
+      [AI_FIELDS.companyQuickSaleScore, companyData.quick_sale_score],
+      [AI_FIELDS.companyQuickSaleReason, companyData.quick_sale_reason],
+    ];
+    for (const [field, value] of profileFields) {
       if (value !== null && value !== undefined && String(value).trim() !== "") {
         const normalized = String(value).trim();
         if (String(company[field] || "").trim() !== normalized) {
@@ -2227,6 +2266,13 @@ function analysisTextFormat() {
               revenue_growth_percent: { type: "string" },
               net_profit: { type: "string" },
               financial_source: { type: "string" },
+              employee_count: { type: "string" },
+              employee_count_year: { type: "string" },
+              branches: { type: "array", items: { type: "string" } },
+              operating_regions: { type: "array", items: { type: "string" } },
+              key_customers_or_objects: { type: "array", items: { type: "string" } },
+              quick_sale_score: { type: "number", minimum: 0, maximum: 100 },
+              quick_sale_reason: { type: "string" },
             },
             required: [
               "name",
@@ -2249,6 +2295,13 @@ function analysisTextFormat() {
               "revenue_growth_percent",
               "net_profit",
               "financial_source",
+              "employee_count",
+              "employee_count_year",
+              "branches",
+              "operating_regions",
+              "key_customers_or_objects",
+              "quick_sale_score",
+              "quick_sale_reason",
             ],
           },
           contact: {
@@ -2315,6 +2368,14 @@ function analysisInstructions() {
     "company.net_profit — чистая прибыль за тот же последний доступный год в рублях, только цифрами; отрицательное значение допускается. Если данных нет — пустая строка.",
     "company.financial_source — коротко укажи источник и год, например «ГИР БО ФНС, 2025» или «РБК Компании, отчетность 2025». Не угадывай финансовые показатели.",
     "Для ИП и организаций без доступной публичной отчётности оставляй финансовые поля пустыми; не оценивай оборот косвенно.",
+    "Для любой точно идентифицированной компании анализируй официальный сайт и открытые источники на предмет филиалов, обособленных подразделений, сервисных центров и фактической географии работы.",
+    "company.branches — подтверждённые филиалы/подразделения/сервисные центры с городом или регионом. Не путай филиалы с единичными объектами заказчиков.",
+    "company.operating_regions — регионы России и другие территории, где компания реально ведёт работы/оказывает услуги.",
+    "company.employee_count и company.employee_count_year — последняя подтверждённая численность сотрудников и год. Приоритет: официальная публикация компании или открытые сведения ФНС/надёжного реестра. Если есть только маркетинговое «5000+ специалистов», можно сохранить «5000+» и источник в известных фактах.",
+    "company.key_customers_or_objects — только публично подтверждённые крупные заказчики, месторождения, НПЗ, нефтехимические, металлургические и иные промышленные объекты.",
+    "company.quick_sale_score — оценка 0–100 вероятности относительно быстрой продажи ТОП-СЕНС. Это коммерческий скоринг, а не кредитный рейтинг.",
+    "Для quick_sale_score повышай балл подрядчикам и сервисным компаниям на опасных объектах, с мобильными бригадами, несколькими регионами, остановочными/ремонтными работами, прямыми закупками и очевидной потребностью в газоанализаторах. Снижай при чисто тендерной модели, очень длинном цикле, отсутствии полевых работ или слабом соответствии продукту.",
+    "company.quick_sale_reason — 1–2 коротких предложения, почему компания коммерчески интересна или неинтересна ТОП-СЕНС.",
     "client_type — это основной тип компании именно для текущей продажи и выбора вопросов, но он не должен скрывать другие роли компании.",
     "Если компания реально производит продукцию, это должно быть явно отражено даже если она одновременно продаёт, комплектует, интегрирует или оказывает сервис.",
     "Если собственное производство — основная деятельность, не классифицируй компанию как чистую Торговую компанию / комплектатора. Обычно выбирай Завод / промышленное предприятие, а для производителя газоаналитического оборудования — Производитель газоаналитического оборудования / конкурент.",
@@ -2346,7 +2407,7 @@ function analysisInstructions() {
     "Из 3–5 context_questions 1–2 могут быть продающими, если базовая техническая потребность уже понятна.",
     "Не требуй имя конечного заказчика.",
     "Извлеки из сделки данные компании и контактного лица. Для входящих email-заявок обязательно анализируй recent_activities: там может находиться тема, текст письма, подпись отправителя и коммуникации.",
-    "company должен содержать: name, inn, website, phone, email, region, city, address, is_manufacturer, manufactured_products, manufacturer_reason, services, roles, revenue, revenue_year, revenue_previous, revenue_previous_year, revenue_growth_percent, net_profit, financial_source. Неизвестные текстовые значения оставляй пустой строкой.",
+    "company должен содержать: name, inn, website, phone, email, region, city, address, is_manufacturer, manufactured_products, manufacturer_reason, services, roles, revenue, revenue_year, revenue_previous, revenue_previous_year, revenue_growth_percent, net_profit, financial_source, employee_count, employee_count_year, branches, operating_regions, key_customers_or_objects, quick_sale_score, quick_sale_reason. Неизвестные текстовые значения оставляй пустой строкой, неизвестные массивы — пустыми массивами.",
     "contact должен содержать: name, first_name, last_name, second_name, position, email, phone. Неизвестные значения оставляй пустой строкой.",
     "Для contact используй персональные данные только если они явно есть в самой заявке/подписи. Не ищи персональные контакты людей в интернете.",
     "Правила вопросов: " + JSON.stringify(QUESTION_RULES),
@@ -2385,6 +2446,7 @@ async function analyzeDeal(deal, allowWebSearch = false) {
         "Приоритет источников: официальный сайт этого домена, затем надёжные бизнес-реестры.",
         "Заполни company только подтверждёнными данными: официальное название, ИНН, сайт, общий телефон, общий email, регион, город, адрес.",
         "Независимо от типа компании, если это точно идентифицированное российское юрлицо, найди последнюю доступную годовую выручку, выручку предыдущего года, чистую прибыль и источник финансовых данных.",
+        "Также найди численность сотрудников, филиалы/подразделения, географию работ, публичных крупных заказчиков/объекты и оцени потенциал быстрой продажи ТОП-СЕНС.",
         "Не ищи в интернете персональные данные контактного лица."
       ].join("\n"),
       input: [{
@@ -2479,6 +2541,7 @@ async function analyzeDeal(deal, allowWebSearch = false) {
           "Определи тип по фактической основной деятельности компании.",
           "Найди и заполни по открытым источникам компанию: официальное название, ИНН, сайт, общий телефон, общий email, регион, город и адрес.",
           "Для точно идентифицированного российского юрлица независимо от типа компании найди последнюю доступную годовую выручку, выручку предыдущего года, чистую прибыль и источник финансовых данных.",
+          "Также проверь официальный сайт и открытые источники: численность сотрудников, филиалы/подразделения, географию работ, публично названных крупных заказчиков/объекты и оцени потенциал быстрой продажи ТОП-СЕНС.",
           "Не ищи в интернете персональные данные контактного лица."
         ].join("\n"),
         input: [{
