@@ -5017,22 +5017,44 @@ async function contractorUserName(userId) {
     return CONTRACTOR_USER_NAME_CACHE.get(id);
   }
 
-  let name = id;
-  try {
-    const rows = await bitrixCall("user.get", { ID: Number(id) });
-    const user = Array.isArray(rows) ? rows[0] : rows;
-    if (user) {
-      name = [user.NAME || "", user.LAST_NAME || ""]
-        .filter(Boolean)
-        .join(" ")
-        .trim() || id;
+  let user = null;
+  let lastError = "";
+
+  const attempts = [
+    ["user.get", { ID: Number(id) }],
+    ["user.get", { FILTER: { ID: Number(id) } }],
+    ["user.search", { FILTER: { ID: Number(id) } }],
+  ];
+
+  for (const [method, params] of attempts) {
+    try {
+      const result = await bitrixCall(method, params);
+      const row = Array.isArray(result) ? result[0] : result;
+      if (row && (row.LAST_NAME || row.NAME)) {
+        user = row;
+        break;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
     }
-  } catch {}
+  }
 
-  CONTRACTOR_USER_NAME_CACHE.set(id, name);
-  return name;
+  const surname = String(user?.LAST_NAME || "").trim();
+  const firstName = String(user?.NAME || "").trim();
+  const display = surname || firstName || id;
+
+  if (!user && lastError) {
+    console.warn(JSON.stringify({
+      source: "contractor-dashboard",
+      action: "manager-name-resolve-failed",
+      userId: id,
+      error: lastError,
+    }));
+  }
+
+  CONTRACTOR_USER_NAME_CACHE.set(id, display);
+  return display;
 }
-
 
 function recomputeContractorDealMetrics(item) {
   const snapshots = item.dealSnapshots instanceof Map
