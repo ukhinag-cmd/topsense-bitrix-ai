@@ -1547,7 +1547,10 @@ async function getDealActivitiesForRelationship(dealId) {
           }))
         : [],
       files: Array.isArray(item.FILES)
-        ? item.FILES.slice(0, 10).map(f => ({ name: f.NAME || f.name || "" }))
+        ? item.FILES.slice(0, 10).map(f => ({
+            id: f.ID || f.id || null,
+            name: f.NAME || f.name || "",
+          }))
         : [],
     }));
   } catch (error) {
@@ -5114,6 +5117,45 @@ function commercialActionKind(activity) {
   return "Письмо";
 }
 
+
+async function commercialActionKindResolved(activity) {
+  if (!activity) return "";
+
+  let kind = commercialActionKind(activity);
+  if (kind !== "Письмо") return kind;
+
+  const resolvedNames = [];
+  for (const file of (activity.files || []).slice(0, 5)) {
+    if (file?.name) {
+      resolvedNames.push(file.name);
+      continue;
+    }
+    const id = String(file?.id || "").trim();
+    if (!id) continue;
+    try {
+      const diskFile = await bitrixCall("disk.file.get", { id: Number(id) });
+      const name = String(diskFile?.NAME || diskFile?.name || "").trim();
+      if (name) resolvedNames.push(name);
+    } catch {}
+  }
+
+  if (resolvedNames.length) {
+    kind = commercialActionKind({
+      ...activity,
+      files: resolvedNames.map(name => ({ name })),
+    });
+  }
+
+  return kind;
+}
+
+function hasStoredDealFile(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).length > 0;
+  if (value === null || value === undefined) return false;
+  const text = String(value).trim();
+  return Boolean(text && text !== "0" && text !== "[]");
+}
+
 function relationshipFollowupTask(activities, afterMs) {
   const taskRx = /связ|перезвон|узнат|результат|решен|уточн|контакт|follow/i;
 
@@ -5149,10 +5191,34 @@ async function latestOfferSummary(latest, activities) {
     .filter(x => String(x?.direction || "") === "2")
     .sort((a,b) => dateMs(b.created) - dateMs(a.created));
 
-  const commercial = outbound.find(x => {
-    const kind = commercialActionKind(x);
-    return kind === "Счёт" || kind === "КП" || kind === "Цена в письме";
-  }) || outbound[0] || null;
+  let commercial = null;
+  let commercialKind = "";
+
+  for (const activity of outbound.slice(0, 12)) {
+    const kind = await commercialActionKindResolved(activity);
+    if (kind === "Счёт" || kind === "КП" || kind === "Цена в письме") {
+      commercial = activity;
+      commercialKind = kind;
+      break;
+    }
+  }
+
+  if (!commercial) {
+    commercial = outbound[0] || null;
+    commercialKind = await commercialActionKindResolved(commercial);
+  }
+
+  if (
+    (!commercialKind || commercialKind === "Письмо") &&
+    hasStoredDealFile(latest.invoiceFilesRaw)
+  ) {
+    commercialKind = "Счёт в сделке";
+  } else if (
+    (!commercialKind || commercialKind === "Письмо") &&
+    hasStoredDealFile(latest.quoteFilesRaw)
+  ) {
+    commercialKind = "КП в сделке";
+  }
 
   const textForGas = [
     latest.title || "",
@@ -5200,7 +5266,7 @@ async function latestOfferSummary(latest, activities) {
     gases,
     quantity,
     amount,
-    action: commercialActionKind(commercial),
+    action: commercialKind,
     sentDate: compactDate(commercial?.created),
     followupDate: compactDate(task?.deadline),
     hasFollowupTask: Boolean(task),
@@ -5838,6 +5904,7 @@ async function contractorScanStep() {
         "UF_CRM_1728208353618","UF_CRM_1728208500678",
         "UF_CRM_1728208529434","UF_CRM_1728208560055",
         "UF_CRM_1728208192427","UF_CRM_1790850696723",
+        "UF_CRM_1728208597522","UF_CRM_1728208621363",
         AI_FIELDS.dealAnswers,
         AI_FIELDS.dealType,AI_FIELDS.dealRoles,AI_FIELDS.dealServices
       ],
@@ -5947,6 +6014,8 @@ async function contractorScanStep() {
           analogs: asText(deal.UF_CRM_1728208192427),
           qualificationText: String(deal.UF_CRM_1790850696723 || "").slice(0, 10000),
           qualificationHistory: String(deal[AI_FIELDS.dealAnswers] || "").slice(0, 10000),
+          quoteFilesRaw: deal.UF_CRM_1728208597522 || null,
+          invoiceFilesRaw: deal.UF_CRM_1728208621363 || null,
         });
       }
 
