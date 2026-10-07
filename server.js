@@ -4387,12 +4387,48 @@ function dashboardStatus() {
   };
 }
 
-function dashboardHtml() {
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function dashboardHtml(status = dashboardStatus()) {
+  const b = status.contractorBenchmark || {};
+  const total = Number(b.total || 0);
+  const done = Number(b.completed || 0);
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const serviceText = status.ok ? "Работает" : "Ошибка";
+  const currentText =
+    b.current ||
+    (b.status === "completed" ? "Завершено" : b.status === "running" ? "Анализ..." : "Ожидание");
+
+  const rows = (b.results || []).map(item => {
+    const st = String(item.status || "");
+    const cls = st === "profiled" ? "ok" : st === "error" ? "err" : "warn";
+    const score = item.quick_sale_score == null ? "—" : String(item.quick_sale_score) + "/100";
+    return `<tr>
+      <td><b>${escapeHtml(item.seed)}</b></td>
+      <td>${escapeHtml(item.matched_company || "—")}</td>
+      <td><span class="badge ${cls}">${escapeHtml(st || "—")}</span></td>
+      <td>${escapeHtml(score)}</td>
+      <td>${escapeHtml(item.reason || "")}</td>
+    </tr>`;
+  }).join("");
+
+  const errorText = status.lastError
+    ? `${escapeHtml(status.lastError.at || "")} — ${escapeHtml(status.lastError.source || "")}: ${escapeHtml(status.lastError.message || "")}`
+    : "Нет";
+
   return `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="12">
 <title>TOP-SENSE AI Dashboard</title>
 <style>
 :root{color-scheme:dark;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif}
@@ -4404,14 +4440,15 @@ h1{font-size:28px;margin:0 0 6px}.sub{color:#9aa7bd;margin-bottom:22px}
 .k{color:#92a1ba;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 .v{font-size:24px;font-weight:700;margin-top:6px}.small{font-size:13px;color:#aab6c9;margin-top:6px}
 .bar{height:8px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:12px}
-.fill{height:100%;background:#5d8cff;width:0}
+.fill{height:100%;background:#5d8cff}
 table{width:100%;border-collapse:collapse;background:#131b2f;border-radius:14px;overflow:hidden}
 th,td{text-align:left;padding:12px;border-bottom:1px solid #25314e;font-size:14px;vertical-align:top}
 th{color:#9aa7bd;font-size:12px;text-transform:uppercase}
 .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#263653;font-size:12px}
 .ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
 .section{margin-top:18px}.section h2{font-size:18px;margin:0 0 10px}
-@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.wrap{padding:16px}}
+.note{margin-top:14px;color:#8290a7;font-size:12px}
+@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.wrap{padding:16px} table{display:block;overflow:auto}}
 </style>
 </head>
 <body>
@@ -4420,58 +4457,30 @@ th{color:#9aa7bd;font-size:12px;text-transform:uppercase}
 <div class="sub">Живой статус анализа CRM, подрядчиков и AI-процессов</div>
 
 <div class="grid">
-  <div class="card"><div class="k">Сервис</div><div id="service" class="v">—</div><div id="uptime" class="small"></div></div>
-  <div class="card"><div class="k">Эталоны подрядчиков</div><div id="progress" class="v">—</div><div class="bar"><div id="fill" class="fill"></div></div></div>
-  <div class="card"><div class="k">Сейчас</div><div id="current" class="v" style="font-size:18px">—</div><div id="benchStatus" class="small"></div></div>
-  <div class="card"><div class="k">Последнее событие Bitrix</div><div id="lastEvent" class="v" style="font-size:16px">—</div><div id="lastEventAt" class="small"></div></div>
+  <div class="card"><div class="k">Сервис</div><div class="v">${escapeHtml(serviceText)}</div><div class="small">Запущен: ${escapeHtml(status.serviceStartedAt || "—")}</div></div>
+  <div class="card"><div class="k">Эталоны подрядчиков</div><div class="v">${done} / ${total}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div></div>
+  <div class="card"><div class="k">Сейчас</div><div class="v" style="font-size:18px">${escapeHtml(currentText)}</div><div class="small">Статус: ${escapeHtml(b.status || "idle")}</div></div>
+  <div class="card"><div class="k">Последнее событие Bitrix</div><div class="v" style="font-size:16px">${escapeHtml(status.lastBitrixEvent || "—")}</div><div class="small">${escapeHtml(status.lastBitrixEventAt || "—")}</div></div>
 </div>
 
 <div class="section">
 <h2>Эталонные компании</h2>
 <table>
 <thead><tr><th>Компания</th><th>Найдено в CRM</th><th>Статус</th><th>Быстрый потенциал</th><th>Комментарий</th></tr></thead>
-<tbody id="rows"><tr><td colspan="5">Загрузка…</td></tr></tbody>
+<tbody>${rows || `<tr><td colspan="5">Сервис запущен. Результаты анализа ещё формируются — страница обновится сама.</td></tr>`}</tbody>
 </table>
 </div>
 
 <div class="section">
 <h2>Последняя ошибка</h2>
-<div id="errorBox" class="card small">Нет</div>
+<div class="card small">${errorText}</div>
 </div>
+
+<div class="note">Страница обновляется автоматически каждые 12 секунд. На бесплатном Render первое открытие после сна может занять до минуты.</div>
 </div>
-<script>
-function esc(v){return String(v??"").replace(/[&<>"']/g,s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[s]))}
-function fmtDate(v){if(!v)return "—"; try{return new Date(v).toLocaleString("ru-RU")}catch{return v}}
-async function load(){
-  try{
-    const r=await fetch("/dashboard/status",{cache:"no-store"});
-    const s=await r.json();
-    document.getElementById("service").textContent=s.ok?"Работает":"Ошибка";
-    document.getElementById("uptime").textContent="Запущен: "+fmtDate(s.serviceStartedAt);
-    const b=s.contractorBenchmark||{};
-    const total=b.total||0, done=b.completed||0;
-    document.getElementById("progress").textContent=done+" / "+total;
-    document.getElementById("fill").style.width=(total?Math.round(done/total*100):0)+"%";
-    document.getElementById("current").textContent=b.current|| (b.status==="completed"?"Завершено":"Ожидание");
-    document.getElementById("benchStatus").textContent="Статус: "+(b.status||"idle");
-    document.getElementById("lastEvent").textContent=s.lastBitrixEvent||"—";
-    document.getElementById("lastEventAt").textContent=fmtDate(s.lastBitrixEventAt);
-    const rows=(b.results||[]).map(x=>{
-      const st=x.status||"";
-      const cls=st==="profiled"?"ok":st==="error"?"err":"warn";
-      const score=x.quick_sale_score==null?"—":x.quick_sale_score+"/100";
-      return "<tr><td><b>"+esc(x.seed)+"</b></td><td>"+esc(x.matched_company||"—")+"</td><td><span class=\"badge "+cls+"\">"+esc(st)+"</span></td><td>"+esc(score)+"</td><td>"+esc(x.reason||"")+"</td></tr>";
-    }).join("");
-    document.getElementById("rows").innerHTML=rows||"<tr><td colspan=\"5\">Пока нет результатов</td></tr>";
-    document.getElementById("errorBox").textContent=s.lastError?(fmtDate(s.lastError.at)+" — "+s.lastError.source+": "+s.lastError.message):"Нет";
-  }catch(e){
-    document.getElementById("service").textContent="Нет связи";
-  }
-}
-load(); setInterval(load,5000);
-</script>
 </body></html>`;
 }
+
 
 const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url || "/", "http://localhost");
@@ -4482,7 +4491,7 @@ const server = http.createServer((req, res) => {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
     });
-    return res.end(dashboardHtml());
+    return res.end(dashboardHtml(dashboardStatus()));
   }
 
   if (req.method === "GET" && pathname === "/dashboard/status") {
