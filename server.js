@@ -5030,59 +5030,55 @@ async function hydrateContractorRelationshipStatus(item) {
     dateMs(latest.lastActivity),
     dateMs(item.lastActivity)
   );
-  const lastDate = compactDate(lastRealContactMs ? new Date(lastRealContactMs).toISOString() : "");
+
   const ageDays = lastRealContactMs
-    ? Math.floor((Date.now() - lastRealContactMs) / 86400000)
+    ? Math.max(0, Math.floor((Date.now() - lastRealContactMs) / 86400000))
     : 9999;
 
+  const inactivitySuffix = ageDays > 7 && ageDays < 9999
+    ? " · " + ageDays + " дн. без работы"
+    : "";
+
   if (latest.semantic === "S") {
-    item.relationshipStatus = "Продажа завершена";
+    item.relationshipStatus = "Продажа завершена" + inactivitySuffix;
     return;
   }
 
   if (latest.semantic === "F") {
-    if (looksLikeInvoice(outText)) item.relationshipStatus = "Счёт отправлен — не продали";
-    else if (looksLikeQuote(outText)) item.relationshipStatus = "КП отправлено — не продали";
-    else item.relationshipStatus = "Не продали";
-    return;
-  }
-
-  if (inMs > outMs) {
-    item.relationshipStatus = ageDays > 30 && lastDate
-      ? "Запрос без ответа с " + lastDate
-      : "Запрос получен — ответа нет";
-    return;
-  }
-
-  if (looksLikeInvoice(outText)) {
-    item.relationshipStatus = ageDays > 30 && lastDate
-      ? "Счёт без оплаты с " + lastDate
-      : "Счёт отправлен — ждём оплату";
-    return;
-  }
-
-  if (looksLikeQuote(outText)) {
-    item.relationshipStatus = ageDays > 30 && lastDate
-      ? "КП без ответа с " + lastDate
-      : "КП отправлено — ждём решение";
-    return;
-  }
-
-  if (latest.isOpen) {
-    if (ageDays <= 30) {
-      item.relationshipStatus = "В работе";
-    } else if (ageDays <= 90) {
-      item.relationshipStatus = "Зависло — " + ageDays + " дн.";
+    if (looksLikeInvoice(outText)) {
+      item.relationshipStatus = "Счёт отправлен — не продали" + inactivitySuffix;
+    } else if (looksLikeQuote(outText)) {
+      item.relationshipStatus = "КП отправлено — не продали" + inactivitySuffix;
     } else {
-      item.relationshipStatus = lastDate
-        ? "Нет контакта с " + lastDate
-        : "Давно без контакта";
+      item.relationshipStatus = "Не продали" + inactivitySuffix;
     }
     return;
   }
 
-  item.relationshipStatus = lastDate
-    ? "Контакт завершён " + lastDate
+  if (inMs > outMs) {
+    item.relationshipStatus = "Запрос получен — ответа нет" + inactivitySuffix;
+    return;
+  }
+
+  if (looksLikeInvoice(outText)) {
+    item.relationshipStatus = "Счёт отправлен — ждём оплату" + inactivitySuffix;
+    return;
+  }
+
+  if (looksLikeQuote(outText)) {
+    item.relationshipStatus = "КП отправлено — ждём решение" + inactivitySuffix;
+    return;
+  }
+
+  if (latest.isOpen) {
+    item.relationshipStatus = ageDays <= 7
+      ? "В работе"
+      : ageDays + " дн. без работы";
+    return;
+  }
+
+  item.relationshipStatus = ageDays > 7 && ageDays < 9999
+    ? "Контакт завершён · " + ageDays + " дн. без работы"
     : "Контакт завершён";
 }
 
