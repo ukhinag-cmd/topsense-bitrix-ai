@@ -356,6 +356,11 @@ const DASHBOARD_STATE = {
     scannedDealsPass: 0,
     scannedDealsLifetime: 0,
     candidateCompanies: 0,
+    discoveredCandidates: 0,
+    verifiedContractors: 0,
+    pendingVerification: 0,
+    rejectedCandidates: 0,
+    unclearCandidates: 0,
     highPotential: 0,
     directPurchaseCompanies: 0,
     tenderOnlyCompanies: 0,
@@ -4513,49 +4518,52 @@ function asText(value) {
 function dealContractorSignals(deal) {
   const reasons = [];
   let weight = 0;
+  let managerHint = false;
+
   const legacyType = asText(deal.UF_CRM_1739950675115);
   const legacyWho = asText(deal.UF_CRM_1728208341819);
   const aiType = asText(deal[AI_FIELDS.dealType]);
   const aiRoles = asText(deal[AI_FIELDS.dealRoles]);
-  const haystack = [
-    deal.TITLE, deal.COMMENTS, deal.ADDITIONAL_INFO,
-    aiType, aiRoles, deal[AI_FIELDS.dealServices]
-  ].filter(Boolean).join(" ").toLowerCase();
 
   if (/(^|\D)180(\D|$)/.test(legacyType) || /(^|\D)60(\D|$)/.test(legacyWho)) {
-    weight += 8;
-    reasons.push("тип клиента: подрядчик");
+    managerHint = true;
+    reasons.push("CRM-подсказка: подрядчик (не доказательство)");
   }
   if (/(^|\D)182(\D|$)/.test(legacyType) || /(^|\D)196(\D|$)/.test(legacyWho)) {
-    weight += 5;
-    reasons.push("сервисная компания");
+    managerHint = true;
+    reasons.push("CRM-подсказка: сервисная компания (не доказательство)");
   }
   if (/подряд|генподряд|\bepc\b|сервисн|интегратор|кипиа|асу\s*тп/i.test(aiType + " " + aiRoles)) {
-    weight += 6;
-    reasons.push("роль компании");
+    managerHint = true;
+    reasons.push("CRM/AI-подсказка по роли (не доказательство)");
   }
 
+  const haystack = [
+    deal.TITLE, deal.COMMENTS, deal.ADDITIONAL_INFO
+  ].filter(Boolean).join(" ").toLowerCase();
+
   const groups = [
-    [/подряд|генподряд|субподряд/i, "подрядные работы"],
-    [/нефтесервис|бурен|буров|скважин/i, "нефтесервис/бурение"],
-    [/монтаж|пусконалад|\bпнр\b|\bсмр\b/i, "монтаж/ПНР/СМР"],
-    [/капитальн.{0,12}ремонт|ремонт.{0,20}(нпз|завод|труб|резервуар|оборуд)/i, "промышленный ремонт"],
-    [/кипиа|асу\s*тп|автоматизац/i, "КИПиА/АСУ ТП"],
-    [/изоляц|строительн.{0,12}лес/i, "изоляция/леса"],
-    [/опасн.{0,12}производ|газоопас|нефтехим|нефтеперераб/i, "опасные промышленные объекты"]
+    [/подряд|генподряд|субподряд/i, "в истории есть упоминание подрядных работ"],
+    [/нефтесервис|бурен|буров|скважин/i, "в истории есть нефтесервис/бурение"],
+    [/монтаж|пусконалад|\bпнр\b|\bсмр\b/i, "в истории есть монтаж/ПНР/СМР"],
+    [/капитальн.{0,12}ремонт|ремонт.{0,20}(нпз|завод|труб|резервуар|оборуд)/i, "в истории есть промышленный ремонт"],
+    [/кипиа|асу\s*тп|автоматизац/i, "в истории есть КИПиА/АСУ ТП"],
+    [/изоляц|строительн.{0,12}лес/i, "в истории есть изоляция/леса"],
+    [/опасн.{0,12}производ|газоопас|нефтехим|нефтеперераб/i, "в истории есть ОПО/нефтехимия"]
   ];
 
   for (const [rx, label] of groups) {
     if (rx.test(haystack)) {
-      weight += 2;
+      weight += 1;
       reasons.push(label);
     }
   }
 
   return {
-    isCandidate: weight >= 4,
+    isCandidate: managerHint || weight >= 1,
     weight,
-    reasons: [...new Set(reasons)].slice(0, 5)
+    managerHint,
+    reasons: [...new Set(reasons)].slice(0, 6)
   };
 }
 
@@ -4573,6 +4581,7 @@ function dateMs(value) {
 }
 
 function contractorPotentialScore(item) {
+  if (item.verificationStatus !== "confirmed") return 0;
   let score = 25;
   score += Math.min(20, Number(item.maxSignalWeight || 0) * 2);
   score += Math.min(18, Number(item.dealCount || 0) * 3);
@@ -4601,17 +4610,28 @@ function publicCandidate(item) {
         ? "Тендер/торги"
         : "Неизвестно";
 
+  const verifiedEvidence = [
+    item.verificationReason,
+    item.websiteEvidence,
+    item.correspondenceEvidence,
+  ].filter(Boolean);
+
   return {
     companyId: item.companyId,
     company: item.company || "",
     score: contractorPotentialScore(item),
+    verificationStatus: item.verificationStatus || "pending",
+    verificationConfidence: Number(item.verificationConfidence || 0),
+    contractorType: item.contractorType || "",
+    inn: item.verifiedInn || "",
+    website: item.verifiedWebsite || "",
     dealCount: item.dealCount || 0,
     openDeals: item.openDeals || 0,
     totalOpportunity: Math.round(Number(item.totalOpportunity || 0)),
     lastActivity: item.lastActivity || "",
     purchaseMode,
     managers: [...(item.managers || new Set())].slice(0, 5),
-    evidence: [...(item.evidence || new Set())].slice(0, 5),
+    evidence: verifiedEvidence.slice(0, 5),
     sampleDeals: (item.sampleDeals || []).slice(0, 4),
   };
 }
@@ -4632,27 +4652,283 @@ async function contractorCompanyName(companyId) {
   return title;
 }
 
+
+const CONTRACTOR_VERIFY_COMPANY_CACHE = new Map();
+const CONTRACTOR_VERIFICATION_CACHE = new Map();
+
+async function contractorCompanyForVerification(companyId) {
+  if (!companyId || companyId === "0") return null;
+  if (CONTRACTOR_VERIFY_COMPANY_CACHE.has(companyId)) {
+    return CONTRACTOR_VERIFY_COMPANY_CACHE.get(companyId);
+  }
+  let company = null;
+  try { company = await getCompany(companyId); } catch {}
+  CONTRACTOR_VERIFY_COMPANY_CACHE.set(companyId, company);
+  return company;
+}
+
+function contractorCompanyDomain(company) {
+  const web = Array.isArray(company?.WEB) ? company.WEB : [];
+  for (const item of web) {
+    let value = String(item?.VALUE || "").trim();
+    if (!value) continue;
+    try {
+      if (!/^https?:\/\//i.test(value)) value = "https://" + value;
+      const host = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+      if (host) return host;
+    } catch {}
+  }
+
+  const emails = Array.isArray(company?.EMAIL) ? company.EMAIL : [];
+  for (const item of emails) {
+    const domain = emailDomain(item?.VALUE || "");
+    if (isCorporateDomain(domain)) return domain.replace(/^www\./, "");
+  }
+  return "";
+}
+
+async function contractorCompanyInn(companyId, company) {
+  const stored = String(company?.[AI_FIELDS.companyInn] || "").replace(/\D/g, "");
+  if (stored.length === 10 || stored.length === 12) return stored;
+
+  try {
+    const rows = await bitrixCall("crm.requisite.list", {
+      order: { ID: "ASC" },
+      filter: { ENTITY_TYPE_ID: 4, ENTITY_ID: Number(companyId) },
+      select: ["ID", "RQ_INN", "RQ_KPP", "NAME"],
+    });
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const inn = String(row.RQ_INN || "").replace(/\D/g, "");
+      if (inn.length === 10 || inn.length === 12) return inn;
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "contractor-verification",
+      action: "requisite-read-failed",
+      companyId: String(companyId),
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+  return "";
+}
+
+function contractorVerificationFormat() {
+  return {
+    format: {
+      type: "json_schema",
+      name: "contractor_verification",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          status: { type: "string", enum: ["confirmed", "not_contractor", "unclear"] },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          contractor_type: { type: "string" },
+          reason: { type: "string" },
+          identity_evidence: { type: "string" },
+          website_evidence: { type: "string" },
+          correspondence_evidence: { type: "string" }
+        },
+        required: [
+          "status","confidence","contractor_type","reason",
+          "identity_evidence","website_evidence","correspondence_evidence"
+        ]
+      }
+    }
+  };
+}
+
+async function contractorCorrespondence(item) {
+  const result = [];
+  for (const deal of (item.sampleDealContexts || []).slice(0, 2)) {
+    try {
+      const activities = await getRecentDealActivities(deal.id);
+      for (const activity of activities.slice(0, 6)) {
+        const subject = String(activity.subject || "").trim();
+        const description = String(activity.description || "").trim();
+        if (!subject && !description) continue;
+        result.push({
+          deal_title: deal.title || "",
+          direction: String(activity.direction || ""),
+          provider: String(activity.provider_id || ""),
+          subject: subject.slice(0, 500),
+          text: description.slice(0, 5000),
+          created: activity.created || null,
+        });
+        if (result.length >= 10) return result;
+      }
+    } catch {}
+  }
+  return result;
+}
+
+async function verifyContractorCompany(item) {
+  const cached = CONTRACTOR_VERIFICATION_CACHE.get(item.companyId);
+  if (cached && Date.now() - cached.checkedAt < 12 * 60 * 60 * 1000) {
+    Object.assign(item, cached.result);
+    return;
+  }
+
+  item.verificationStatus = "checking";
+  const company = await contractorCompanyForVerification(item.companyId);
+  if (!company) {
+    item.verificationStatus = "unclear";
+    item.verificationReason = "Карточка компании в Bitrix24 не читается.";
+    return;
+  }
+
+  item.company = String(company.TITLE || item.company || "");
+  const inn = await contractorCompanyInn(item.companyId, company);
+  const domain = contractorCompanyDomain(company);
+
+  let website = null;
+  if (domain) {
+    try { website = await fetchDomainWebsite(domain); } catch {}
+  }
+
+  if (!inn && !domain) {
+    const result = {
+      verificationStatus: "unclear",
+      verificationConfidence: 0,
+      contractorType: "",
+      verificationReason: "Нет подтверждённого ИНН и официального корпоративного домена. Тип компании в B24 не считается доказательством.",
+      identityEvidence: "",
+      websiteEvidence: "",
+      correspondenceEvidence: "",
+      verifiedInn: "",
+      verifiedWebsite: "",
+    };
+    Object.assign(item, result);
+    CONTRACTOR_VERIFICATION_CACHE.set(item.companyId, { checkedAt: Date.now(), result });
+    return;
+  }
+
+  // Strict order requested by the user: identity/site first, B24 correspondence second.
+  const correspondence = await contractorCorrespondence(item);
+
+  const response = await callOpenAI({
+    model: process.env.OPENAI_MODEL || "gpt-6-luna",
+    store: false,
+    max_output_tokens: 1400,
+    text: contractorVerificationFormat(),
+    tools: [{ type: "web_search" }],
+    tool_choice: "auto",
+    instructions: [
+      "Определи, является ли компания промышленным подрядчиком или реальной сервисной организацией.",
+      "Поля Bitrix24 «тип компании», «подрядчик», «сервисная компания», AI-роли и мнение менеджера могут быть ошибочными. Никогда не используй их как доказательство.",
+      "Порядок строгий: сначала идентифицируй юрлицо по ИНН и/или официальному домену; затем проверь официальный сайт и связанные с тем же ИНН/доменом надёжные открытые источники; только после этого используй реальную переписку B24 как дополнительное подтверждение.",
+      "Подтверждай подрядчика только если компания сама выполняет работы/услуги для заказчиков на их объектах: строительство, монтаж, ПНР/СМР, промышленный ремонт/ТО, бурение/нефтесервис, работы на ОПО, КИПиА/АСУ ТП-интеграцию, промышленную очистку, ремонт резервуаров/трубопроводов, монтаж лесов/изоляции и подобные услуги.",
+      "Производитель, завод, конечный пользователь, дилер, поставщик или продавец не становится подрядчиком из-за слов «монтаж», «КИПиА», «ремонт» в сделке или CRM.",
+      "Если сайт показывает только поставки/продажи/производство и нет явных работ на объектах заказчиков — status=not_contractor.",
+      "Если идентичность или деятельность недостаточно подтверждена — status=unclear. Не угадывай.",
+      "Для status=confirmed требуется содержательное внешнее подтверждение подрядной/сервисной деятельности, а не поле CRM.",
+      "website_evidence: конкретный факт с сайта/надёжного источника. correspondence_evidence: только факты из предоставленной переписки."
+    ].join("\n"),
+    input: [{
+      role: "user",
+      content: JSON.stringify({
+        company: {
+          title: item.company || "",
+          inn,
+          corporate_domain: domain,
+          official_site: website ? {
+            url: website.url || "",
+            title: website.title || "",
+            description: website.description || "",
+            text: String(website.text || "").slice(0, 16000),
+          } : null,
+        },
+        crm_hints_not_evidence: [...(item.evidence || new Set())].slice(0, 8),
+        b24_correspondence_after_identity_check: correspondence,
+      })
+    }]
+  });
+
+  const parsed = parseJsonText(extractResponseText(response));
+  const status = String(parsed.status || "unclear");
+  const result = {
+    verificationStatus: status === "confirmed"
+      ? "confirmed"
+      : status === "not_contractor" ? "rejected" : "unclear",
+    verificationConfidence: Number(parsed.confidence || 0),
+    contractorType: String(parsed.contractor_type || ""),
+    verificationReason: String(parsed.reason || ""),
+    identityEvidence: String(parsed.identity_evidence || ""),
+    websiteEvidence: String(parsed.website_evidence || ""),
+    correspondenceEvidence: String(parsed.correspondence_evidence || ""),
+    verifiedInn: inn,
+    verifiedWebsite: website?.url || (domain ? "https://" + domain : ""),
+  };
+
+  Object.assign(item, result);
+  CONTRACTOR_VERIFICATION_CACHE.set(item.companyId, { checkedAt: Date.now(), result });
+
+  DASHBOARD_STATE.contractorScan.recentDiscoveries.unshift({
+    at: new Date().toISOString(),
+    company: item.company || "Компания без названия",
+    reason: result.verificationStatus === "confirmed"
+      ? "ПОДТВЕРЖДЁН: " + (result.verificationReason || result.contractorType)
+      : result.verificationStatus === "rejected"
+        ? "НЕ ПОДРЯДЧИК: " + (result.verificationReason || "")
+        : "НЕЯСНО: " + (result.verificationReason || ""),
+  });
+  DASHBOARD_STATE.contractorScan.recentDiscoveries =
+    DASHBOARD_STATE.contractorScan.recentDiscoveries.slice(0, 20);
+}
+
+async function verifyNextContractorCandidate() {
+  const next = [...CONTRACTOR_SCAN_CANDIDATES.values()].find(
+    item => !item.verificationStatus || item.verificationStatus === "pending"
+  );
+  if (!next) return;
+
+  try {
+    await verifyContractorCompany(next);
+  } catch (error) {
+    next.verificationStatus = "error";
+    next.verificationReason = error instanceof Error ? error.message : String(error);
+    DASHBOARD_STATE.lastError = {
+      at: new Date().toISOString(),
+      source: "contractor-verification",
+      message: next.verificationReason,
+    };
+  }
+}
+
 function refreshContractorScanSummary() {
   const all = [...CONTRACTOR_SCAN_CANDIDATES.values()].map(publicCandidate);
-  all.sort((a,b) =>
+  const confirmed = all.filter(x => x.verificationStatus === "confirmed");
+
+  confirmed.sort((a,b) =>
     b.score - a.score ||
     b.dealCount - a.dealCount ||
     dateMs(b.lastActivity) - dateMs(a.lastActivity)
   );
 
   const scan = DASHBOARD_STATE.contractorScan;
-  scan.candidateCompanies = all.length;
-  scan.highPotential = all.filter(x => x.score >= 70).length;
-  scan.directPurchaseCompanies = all.filter(
+  scan.discoveredCandidates = all.length;
+  scan.verifiedContractors = confirmed.length;
+  scan.pendingVerification = all.filter(
+    x => x.verificationStatus === "pending" ||
+         x.verificationStatus === "checking" ||
+         x.verificationStatus === "error"
+  ).length;
+  scan.unclearCandidates = all.filter(x => x.verificationStatus === "unclear").length;
+  scan.rejectedCandidates = all.filter(x => x.verificationStatus === "rejected").length;
+
+  scan.candidateCompanies = confirmed.length;
+  scan.highPotential = confirmed.filter(x => x.score >= 70).length;
+  scan.directPurchaseCompanies = confirmed.filter(
     x => x.purchaseMode === "Прямая закупка" || x.purchaseMode === "Смешанный"
   ).length;
-  scan.tenderOnlyCompanies = all.filter(x => x.purchaseMode === "Тендер/торги").length;
-  scan.topCandidates = all.slice(0, 100);
+  scan.tenderOnlyCompanies = confirmed.filter(x => x.purchaseMode === "Тендер/торги").length;
+  scan.topCandidates = confirmed.slice(0, 100);
 
   DASHBOARD_STATE.similarContractors = {
-    status: "scanning-bitrix",
+    status: "verifying-bitrix-history",
     target: Math.max(30, all.length),
-    completed: all.length,
+    completed: confirmed.length,
   };
 }
 
@@ -4718,6 +4994,16 @@ async function contractorScanStep() {
           managers: new Set(),
           evidence: new Set(),
           sampleDeals: [],
+          sampleDealContexts: [],
+          verificationStatus: "pending",
+          verificationConfidence: 0,
+          contractorType: "",
+          verificationReason: "",
+          identityEvidence: "",
+          websiteEvidence: "",
+          correspondenceEvidence: "",
+          verifiedInn: "",
+          verifiedWebsite: "",
         };
         CONTRACTOR_SCAN_CANDIDATES.set(companyId, item);
       }
@@ -4750,6 +5036,14 @@ async function contractorScanStep() {
         item.sampleDeals = item.sampleDeals.slice(0, 6);
       }
 
+      if (
+        deal.ID &&
+        !item.sampleDealContexts.some(x => String(x.id) === String(deal.ID))
+      ) {
+        item.sampleDealContexts.unshift({ id: String(deal.ID), title });
+        item.sampleDealContexts = item.sampleDealContexts.slice(0, 4);
+      }
+
       if (isNew) {
         scan.lastCandidateAt = new Date().toISOString();
         scan.recentDiscoveries.unshift({
@@ -4760,6 +5054,8 @@ async function contractorScanStep() {
         scan.recentDiscoveries = scan.recentDiscoveries.slice(0, 20);
       }
     }
+
+    await verifyNextContractorCandidate();
 
     scan.lastBatchAt = new Date().toISOString();
     refreshContractorScanSummary();
@@ -4825,6 +5121,11 @@ function dashboardStatus() {
       scannedDealsPass: Number(scan.scannedDealsPass || 0),
       scannedDealsLifetime: Number(scan.scannedDealsLifetime || 0),
       candidateCompanies: Number(scan.candidateCompanies || 0),
+      discoveredCandidates: Number(scan.discoveredCandidates || 0),
+      verifiedContractors: Number(scan.verifiedContractors || 0),
+      pendingVerification: Number(scan.pendingVerification || 0),
+      rejectedCandidates: Number(scan.rejectedCandidates || 0),
+      unclearCandidates: Number(scan.unclearCandidates || 0),
       highPotential: Number(scan.highPotential || 0),
       directPurchaseCompanies: Number(scan.directPurchaseCompanies || 0),
       tenderOnlyCompanies: Number(scan.tenderOnlyCompanies || 0),
@@ -4932,13 +5233,13 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 </head>
 <body><div class="wrap">
 <h1>ДАШБОРД — ПОДРЯДЧИКИ</h1>
-<div class="sub">Полный исторический read-only аудит Bitrix24. <span class="live">● Непрерывный цикл сканирования</span></div>
+<div class="sub">Проверка подрядчиков: сначала юрлицо/ИНН и официальный сайт, затем переписка Bitrix24. Поле «тип компании» — только подсказка. <span class="live">● Непрерывный цикл</span></div>
 
 <div class="grid">
   <div class="card"><div class="k">Сделок в B24</div><div class="v">${totalDeals || "…"}</div><div class="small">проход №${Number(scan.pass || 1)}</div></div>
   <div class="card"><div class="k">Проверено в проходе</div><div class="v">${scanned}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div><div class="small">${pct}%</div></div>
-  <div class="card"><div class="k">Подрядчиков найдено</div><div class="v">${Number(scan.candidateCompanies || 0)}</div><div class="small">по истории B24</div></div>
-  <div class="card"><div class="k">Потенциал ≥70</div><div class="v">${Number(scan.highPotential || 0)}</div><div class="small">приоритет на реактивацию</div></div>
+  <div class="card"><div class="k">Подтверждённых подрядчиков</div><div class="v">${Number(scan.verifiedContractors || 0)}</div><div class="small">после внешней проверки</div></div>
+  <div class="card"><div class="k">На проверке</div><div class="v">${Number(scan.pendingVerification || 0)}</div><div class="small">кандидатов всего: ${Number(scan.discoveredCandidates || 0)} · неясно: ${Number(scan.unclearCandidates || 0)} · отклонено: ${Number(scan.rejectedCandidates || 0)}</div></div>
   <div class="card"><div class="k">Прямая закупка</div><div class="v">${Number(scan.directPurchaseCompanies || 0)}</div><div class="small">включая смешанный формат</div></div>
   <div class="card"><div class="k">Только тендеры</div><div class="v">${Number(scan.tenderOnlyCompanies || 0)}</div><div class="small">по заполненным полям B24</div></div>
 </div>
@@ -4949,19 +5250,19 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
   <div class="small">Последняя пачка: ${escapeHtml(scan.lastBatchAt || "ещё не было")} · последний полный проход: ${escapeHtml(scan.lastCompletedPassAt || "ещё не завершён")} · проверено за жизнь процесса: ${Number(scan.scannedDealsLifetime || 0)}</div>
 </div>
 
-<div class="section"><h2>Топ подрядчиков из истории Bitrix24</h2>
+<div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
 <thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Закупка</th><th>Последняя активность</th><th>Сумма сделок</th><th>Почему подрядчик</th><th>Примеры сделок</th></tr></thead>
-<tbody>${topRows || `<tr><td colspan="10">Идёт первый проход по истории Bitrix24. Таблица заполняется по мере чтения сделок.</td></tr>`}</tbody>
+<tbody>${topRows || `<tr><td colspan="10">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
-<div class="section"><h2>Последние найденные компании</h2>
+<div class="section"><h2>Последние результаты проверки</h2>
 <table><thead><tr><th>Время</th><th>Компания</th><th>Сигнал</th></tr></thead>
 <tbody>${recentRows || `<tr><td colspan="3">Новых находок пока нет.</td></tr>`}</tbody></table></div>
 
 <div class="section"><h2>Техническое состояние</h2>
 <div class="card small">Последняя ошибка: ${errorText}<br>Сделок-кандидатов без привязанной компании: ${Number(scan.unlinkedCandidateDeals || 0)}</div></div>
-<div class="note">Страница обновляется каждые 10 секунд. Сканер ничего не изменяет в реальных сделках и компаниях — только читает и агрегирует историю.</div>
+<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Поля, заполненные менеджером, не являются доказательством. Сканер работает read-only.</div>
 </div></body></html>`;
 }
 
