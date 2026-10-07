@@ -306,7 +306,7 @@ const CONTRACTOR_BASELINE_RESULTS = [
     seed: "Сибирская сервисная компания (ССК)",
     matched_company: "",
     status: "not-found-in-crm",
-    reason: "ССК — это сокращение Сибирской сервисной компании. ООО \"ССК \"Звезда\"\" исключено и не должно использоваться как совпадение."
+    reason: "ССК — это сокращение Сибирской сервисной компании. Идентификация выполняется по полному названию и известным корпоративным доменам."
   },
   {
     seed: "Шлюмберже",
@@ -3941,18 +3941,11 @@ function contractorBenchmarkTextFormat() {
 
 const CONTRACTOR_SEED_ALIASES = {
   "Сибирская сервисная компания (ССК)": [
-    "Сибирская сервисная компания",
-    "ССК"
+    "Сибирская сервисная компания"
   ],
 };
 
-const CONTRACTOR_SEED_EXCLUSIONS = {
-  "Сибирская сервисная компания (ССК)": [
-    "ССК Звезда",
-    "ССК \"Звезда\"",
-    "ООО \"ССК \"Звезда\"\""
-  ],
-};
+const CONTRACTOR_SEED_EXCLUSIONS = {};
 
 const CONTRACTOR_SEED_DOMAINS = {
   "Сибирская сервисная компания (ССК)": [
@@ -4108,7 +4101,7 @@ async function profileBenchmarkCompany(seedLabel, company) {
       content: JSON.stringify({
         seed_label: seedLabel,
         canonical_note: seedLabel === "Сибирская сервисная компания (ССК)"
-          ? "ССК означает Сибирская сервисная компания. Не использовать ООО ССК Звезда."
+          ? "ССК означает Сибирская сервисная компания. Идентифицируй по полному названию и известным корпоративным доменам."
           : "",
         crm_company_name: company?.TITLE || "",
         inn,
