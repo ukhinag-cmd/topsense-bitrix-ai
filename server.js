@@ -4966,6 +4966,53 @@ async function contractorUserName(userId) {
   return name;
 }
 
+
+function recomputeContractorDealMetrics(item) {
+  const snapshots = item.dealSnapshots instanceof Map
+    ? [...item.dealSnapshots.values()]
+    : [];
+
+  item.dealCount = snapshots.length;
+  item.openDeals = snapshots.filter(x => x.isOpen).length;
+  item.directCount = snapshots.filter(x => x.direct).length;
+  item.tenderCount = snapshots.filter(x => x.tender).length;
+  item.totalOpportunity = snapshots.reduce((sum, x) => sum + Number(x.opportunity || 0), 0);
+  item.wonOpportunity = snapshots
+    .filter(x => x.semantic === "S")
+    .reduce((sum, x) => sum + Number(x.opportunity || 0), 0);
+  item.lostOpportunity = snapshots
+    .filter(x => x.semantic === "F")
+    .reduce((sum, x) => sum + Number(x.opportunity || 0), 0);
+  item.openOpportunity = snapshots
+    .filter(x => x.isOpen)
+    .reduce((sum, x) => sum + Number(x.opportunity || 0), 0);
+  item.unclassifiedOpportunity = Math.max(
+    0,
+    item.totalOpportunity - item.wonOpportunity - item.lostOpportunity - item.openOpportunity
+  );
+
+  item.maxSignalWeight = snapshots.reduce(
+    (max, x) => Math.max(max, Number(x.signalWeight || 0)),
+    0
+  );
+
+  item.currentWork = snapshots
+    .filter(x => x.isOpen)
+    .sort((a,b) => dateMs(b.lastActivity) - dateMs(a.lastActivity))
+    .slice(0, 8)
+    .map(x => ({
+      id: x.id,
+      title: x.title,
+      amount: x.opportunity,
+      stage: x.stage,
+      assignedById: x.assignedById,
+      responsible: x.assignedById
+        ? (item.managerNames?.get(String(x.assignedById)) || String(x.assignedById))
+        : "",
+      lastActivity: x.lastActivity,
+    }));
+}
+
 async function contractorScanStep() {
   if (CONTRACTOR_SCAN_RUNNING) return;
 
@@ -5032,6 +5079,7 @@ async function contractorScanStep() {
           managers: new Set(),
           managerNames: new Map(),
           currentWork: [],
+          dealSnapshots: new Map(),
           evidence: new Set(),
           sampleDeals: [],
           sampleDealContexts: [],
@@ -5052,23 +5100,29 @@ async function contractorScanStep() {
         item.company = await contractorCompanyName(companyId);
       }
 
-      item.dealCount += 1;
-      if (String(deal.CLOSED || "").toUpperCase() !== "Y") item.openDeals += 1;
       const opportunity = Number(deal.OPPORTUNITY || 0) || 0;
-      item.totalOpportunity += opportunity;
-
       const semantic = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
-      if (semantic === "S") {
-        item.wonOpportunity += opportunity;
-      } else if (semantic === "F") {
-        item.lostOpportunity += opportunity;
-      } else if (semantic === "P" || String(deal.CLOSED || "").toUpperCase() !== "Y") {
-        item.openOpportunity += opportunity;
-      } else {
-        item.unclassifiedOpportunity += opportunity;
+      const isOpen = String(deal.CLOSED || "").toUpperCase() !== "Y";
+      const ps = purchaseSignals(deal);
+      const activity = deal.LAST_ACTIVITY_TIME || deal.DATE_MODIFY || deal.DATE_CREATE || "";
+      const dealKey = String(deal.ID || "");
+
+      if (dealKey) {
+        item.dealSnapshots.set(dealKey, {
+          id: dealKey,
+          title: String(deal.TITLE || "").trim(),
+          opportunity,
+          semantic,
+          isOpen,
+          direct: Boolean(ps.direct),
+          tender: Boolean(ps.tender),
+          signalWeight: Number(sig.weight || 0),
+          stage: String(deal.STAGE_ID || ""),
+          assignedById: String(deal.ASSIGNED_BY_ID || ""),
+          lastActivity: activity,
+        });
       }
 
-      item.maxSignalWeight = Math.max(item.maxSignalWeight, sig.weight);
       sig.reasons.forEach(x => item.evidence.add(x));
       if (deal.ASSIGNED_BY_ID) {
         const managerId = String(deal.ASSIGNED_BY_ID);
@@ -5078,31 +5132,7 @@ async function contractorScanStep() {
         }
       }
 
-      const ps = purchaseSignals(deal);
-      if (ps.direct) item.directCount += 1;
-      if (ps.tender) item.tenderCount += 1;
-
-      const activity = deal.LAST_ACTIVITY_TIME || deal.DATE_MODIFY || deal.DATE_CREATE || "";
-
-      if (String(deal.CLOSED || "").toUpperCase() !== "Y" && deal.ID) {
-        const openRow = {
-          id: String(deal.ID),
-          title: String(deal.TITLE || "").trim(),
-          amount: opportunity,
-          stage: String(deal.STAGE_ID || ""),
-          assignedById: String(deal.ASSIGNED_BY_ID || ""),
-          responsible: deal.ASSIGNED_BY_ID
-            ? (item.managerNames.get(String(deal.ASSIGNED_BY_ID)) || String(deal.ASSIGNED_BY_ID))
-            : "",
-          lastActivity: activity,
-        };
-        const existingIndex = item.currentWork.findIndex(x => x.id === openRow.id);
-        if (existingIndex >= 0) item.currentWork[existingIndex] = openRow;
-        else item.currentWork.unshift(openRow);
-        item.currentWork = item.currentWork
-          .sort((a,b) => dateMs(b.lastActivity) - dateMs(a.lastActivity))
-          .slice(0, 8);
-      }
+      recomputeContractorDealMetrics(item);
 
       const ms = dateMs(activity);
       if (ms > item.lastActivityMs) {
@@ -5273,7 +5303,6 @@ function dashboardHtml(status = dashboardStatus()) {
       <td><span class="badge ${cls}">${score}/100</span></td>
       <td>${Number(item.dealCount || 0)}</td>
       <td>${Number(item.openDeals || 0)}</td>
-      <td>${escapeHtml(item.purchaseMode || "—")}</td>
       <td>${escapeHtml(item.lastActivity || "—")}</td>
       <td>${escapeHtml(money(item.wonOpportunity))}</td>
       <td>${escapeHtml(money(item.openOpportunity))}</td>
@@ -5284,8 +5313,6 @@ function dashboardHtml(status = dashboardStatus()) {
         const moneyText = amount ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(amount) + " ₽" : "";
         return [x.title, x.responsible, moneyText, x.lastActivity].filter(Boolean).join(" — ");
       }).join(" • ") || "Нет открытых сделок")}</td>
-      <td>${escapeHtml((item.evidence || []).join(", "))}</td>
-      <td>${escapeHtml((item.sampleDeals || []).slice(0,2).join(" • "))}</td>
     </tr>`;
   }).join("");
 
@@ -5340,8 +5367,8 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Закупка</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Кто работал</th><th>Что происходит сейчас</th><th>Почему подрядчик</th><th>Примеры сделок</th></tr></thead>
-<tbody>${topRows || `<tr><td colspan="14">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
+<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Кто работал</th><th>Что происходит сейчас</th></tr></thead>
+<tbody>${topRows || `<tr><td colspan="11">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
 <div class="section"><h2>Последние результаты проверки</h2>
