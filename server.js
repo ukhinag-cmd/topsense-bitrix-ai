@@ -4601,10 +4601,42 @@ function contractorCrmActivityScore(item) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
+
+function contractorStrategicScore(item) {
+  if (item.verificationStatus !== "confirmed") return 0;
+
+  const relevance = String(item.industrialRelevance || "").toLowerCase();
+  const gasNeed = String(item.gasDetectionNeed || "").toLowerCase();
+  const scale = String(item.scaleLevel || "").toLowerCase();
+  const works = Array.isArray(item.relevantWorkTypes) ? item.relevantWorkTypes : [];
+
+  let score = relevance === "high" ? 45
+    : relevance === "medium" ? 25
+      : relevance === "low" ? 5
+        : 10;
+
+  if (item.hazardousIndustrialSites) score += 20;
+  score += Math.min(15, works.length * 5);
+
+  if (scale === "large") score += 10;
+  else if (scale === "medium") score += 5;
+
+  if (gasNeed === "high") score += 10;
+  else if (gasNeed === "medium") score += 5;
+
+  // A company with low industrial relevance and no work on hazardous sites
+  // must not outrank major industrial contractors just because CRM is active.
+  if (relevance === "low" && !item.hazardousIndustrialSites) {
+    score = Math.min(score, 25);
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
 function contractorPotentialScore(item) {
   if (item.verificationStatus !== "confirmed") return 0;
 
-  const strategic = Number(item.strategicScore || 0);
+  const strategic = contractorStrategicScore(item);
   const crm = contractorCrmActivityScore(item);
 
   // Overall priority should not punish a strategically valuable contractor
@@ -4638,8 +4670,13 @@ function publicCandidate(item) {
     verificationStatus: item.verificationStatus || "pending",
     verificationConfidence: Number(item.verificationConfidence || 0),
     contractorType: item.contractorType || "",
-    strategicScore: Number(item.strategicScore || 0),
+    strategicScore: contractorStrategicScore(item),
     strategicReason: item.strategicReason || "",
+    industrialRelevance: item.industrialRelevance || "",
+    hazardousIndustrialSites: Boolean(item.hazardousIndustrialSites),
+    relevantWorkTypes: Array.isArray(item.relevantWorkTypes) ? item.relevantWorkTypes : [],
+    scaleLevel: item.scaleLevel || "",
+    gasDetectionNeed: item.gasDetectionNeed || "",
     crmActivityScore: contractorCrmActivityScore(item),
     inn: item.verifiedInn || "",
     website: item.verifiedWebsite || "",
@@ -4757,6 +4794,11 @@ function contractorVerificationFormat() {
           reason: { type: "string" },
           strategic_score: { type: "number", minimum: 0, maximum: 100 },
           strategic_reason: { type: "string" },
+          industrial_relevance: { type: "string", enum: ["high", "medium", "low", "unknown"] },
+          hazardous_industrial_sites: { type: "boolean" },
+          relevant_work_types: { type: "array", items: { type: "string" }, maxItems: 8 },
+          scale_level: { type: "string", enum: ["large", "medium", "small", "unknown"] },
+          gas_detection_need: { type: "string", enum: ["high", "medium", "low", "unknown"] },
           identity_evidence: { type: "string" },
           website_evidence: { type: "string" },
           correspondence_evidence: { type: "string" }
@@ -4764,6 +4806,7 @@ function contractorVerificationFormat() {
         required: [
           "status","confidence","contractor_type","reason",
           "strategic_score","strategic_reason",
+          "industrial_relevance","hazardous_industrial_sites","relevant_work_types","scale_level","gas_detection_need",
           "identity_evidence","website_evidence","correspondence_evidence"
         ]
       }
@@ -4826,6 +4869,11 @@ async function verifyContractorCompany(item) {
       contractorType: "",
       strategicScore: 0,
       strategicReason: "",
+      industrialRelevance: "unknown",
+      hazardousIndustrialSites: false,
+      relevantWorkTypes: [],
+      scaleLevel: "unknown",
+      gasDetectionNeed: "unknown",
       verificationReason: "Нет подтверждённого ИНН и официального корпоративного домена. Тип компании в B24 не считается доказательством.",
       identityEvidence: "",
       websiteEvidence: "",
@@ -4860,6 +4908,11 @@ async function verifyContractorCompany(item) {
       "Отдельно оцени strategic_score 0-100 — стратегическую привлекательность компании для продаж ТОП-СЕНС независимо от текущей активности в CRM.",
       "Для strategic_score учитывай: масштаб компании и географию работ; число/класс промышленных объектов и проектов; работу на нефтегазовых, нефтеперерабатывающих, химических, металлургических и других ОПО; наличие строительно-монтажных, пусконаладочных, ремонтных, сервисных, EPC/EPCm работ; вероятность регулярной потребности в переносных/стационарных газоанализаторах для собственных бригад и объектов.",
       "Крупный многопрофильный промышленный подрядчик с большим числом проектов и работами на ОПО должен иметь высокий strategic_score даже если в Bitrix24 мало недавних сделок.",
+      "Компании ЖКХ, благоустройства, озеленения, санитарной обработки, клининга, обычного строительства без подтверждённых работ на ОПО или промышленного сервиса должны иметь industrial_relevance=low и низкий strategic_score, даже если у них много активности в CRM.",
+      "industrial_relevance=high ставь только когда профиль напрямую связан с промышленными объектами/ОПО и релевантными подрядными работами.",
+      "hazardous_industrial_sites=true только при подтверждении работы на нефтегазовых, НПЗ/НХЗ, химических, металлургических, горнодобывающих, энергетических или иных опасных производственных объектах.",
+      "relevant_work_types перечисли подтверждённые типы работ: СМР, ПНР, EPC/EPCm, ремонт, обслуживание, бурение, КИПиА/АСУ ТП, изоляция/леса и т.п.",
+      "gas_detection_need=high ставь, если по профилю работ у собственных бригад/объектов регулярно вероятна потребность в газоанализаторах; medium — если потребность возможна, но не системна.",
       "Не повышай strategic_score только за известность бренда: нужны подтверждённые факты о масштабе и релевантных работах.",
       "strategic_reason — краткое объяснение оценки на основании внешних фактов.",
       "website_evidence: конкретный факт с сайта/надёжного источника. correspondence_evidence: только факты из предоставленной переписки."
@@ -4894,6 +4947,11 @@ async function verifyContractorCompany(item) {
     contractorType: String(parsed.contractor_type || ""),
     strategicScore: Number(parsed.strategic_score || 0),
     strategicReason: String(parsed.strategic_reason || ""),
+    industrialRelevance: String(parsed.industrial_relevance || "unknown"),
+    hazardousIndustrialSites: Boolean(parsed.hazardous_industrial_sites),
+    relevantWorkTypes: Array.isArray(parsed.relevant_work_types) ? parsed.relevant_work_types : [],
+    scaleLevel: String(parsed.scale_level || "unknown"),
+    gasDetectionNeed: String(parsed.gas_detection_need || "unknown"),
     verificationReason: String(parsed.reason || ""),
     identityEvidence: String(parsed.identity_evidence || ""),
     websiteEvidence: String(parsed.website_evidence || ""),
@@ -5211,6 +5269,11 @@ async function contractorScanStep() {
           contractorType: "",
           strategicScore: 0,
           strategicReason: "",
+          industrialRelevance: "unknown",
+          hazardousIndustrialSites: false,
+          relevantWorkTypes: [],
+          scaleLevel: "unknown",
+          gasDetectionNeed: "unknown",
           verificationReason: "",
           identityEvidence: "",
           websiteEvidence: "",
@@ -5427,7 +5490,7 @@ function dashboardHtml(status = dashboardStatus()) {
       <td>${idx + 1}</td>
       <td><b>${escapeHtml(item.company || "—")}</b></td>
       <td><span class="badge ${cls}">${score}/100</span></td>
-      <td><span class="badge">${Number(item.strategicScore || 0)}/100</span><br><span class="small">${escapeHtml(item.strategicReason || "")}</span></td>
+      <td><span class="badge">${Number(item.strategicScore || 0)}/100</span><br><span class="small">${escapeHtml(item.strategicReason || "")}</span><br><span class="small">${escapeHtml((item.relevantWorkTypes || []).join(", "))}</span></td>
       <td><span class="badge">${Number(item.crmActivityScore || 0)}/100</span></td>
       <td>${Number(item.dealCount || 0)}</td>
       <td>${Number(item.openDeals || 0)}</td>
