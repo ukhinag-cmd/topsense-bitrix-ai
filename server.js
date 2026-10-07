@@ -1521,7 +1521,7 @@ async function getDealActivitiesForRelationship(dealId) {
       },
       select: [
         "ID","TYPE_ID","DIRECTION","PROVIDER_ID","SUBJECT","DESCRIPTION",
-        "CREATED","DEADLINE","COMPLETED","RESPONSIBLE_ID","FILES"
+        "CREATED","DEADLINE","COMPLETED","RESPONSIBLE_ID","FILES","COMMUNICATIONS"
       ],
     });
 
@@ -1538,6 +1538,14 @@ async function getDealActivitiesForRelationship(dealId) {
       deadline: item.DEADLINE || null,
       completed: String(item.COMPLETED || "").toUpperCase() === "Y",
       responsible_id: item.RESPONSIBLE_ID || null,
+      communications: Array.isArray(item.COMMUNICATIONS)
+        ? item.COMMUNICATIONS.slice(0, 10).map(c => ({
+            type: c.TYPE || "",
+            value: c.VALUE || "",
+            entity_type_id: c.ENTITY_TYPE_ID || null,
+            entity_id: c.ENTITY_ID || null,
+          }))
+        : [],
       files: Array.isArray(item.FILES)
         ? item.FILES.slice(0, 10).map(f => ({ name: f.NAME || f.name || "" }))
         : [],
@@ -4741,6 +4749,9 @@ function publicCandidate(item) {
       : [],
     currentWork: Array.isArray(item.currentWork) ? item.currentWork.slice(0, 8) : [],
     relationshipStatus: item.relationshipStatus || "",
+    managerQualityScore: Number(item.managerQualityScore || 0),
+    managerQualityLevel: item.managerQualityLevel || "",
+    managerQualitySummary: item.managerQualitySummary || "",
     evidence: verifiedEvidence.slice(0, 5),
     sampleDeals: (item.sampleDeals || []).slice(0, 4),
   };
@@ -5342,6 +5353,7 @@ async function verifyNextContractorCandidate() {
     if (next.verificationStatus === "confirmed") {
       await hydrateContractorPurchasedProducts(next);
       await hydrateContractorRelationshipStatus(next);
+      await hydrateContractorManagerQuality(next);
     }
   } catch (error) {
     next.verificationStatus = "error";
@@ -5355,6 +5367,148 @@ async function verifyNextContractorCandidate() {
 }
 
 
+
+async function contractorCompanyContacts(companyId) {
+  try {
+    const rows = await bitrixCall("crm.contact.list", {
+      order: { ID: "DESC" },
+      filter: { COMPANY_ID: Number(companyId) },
+      select: ["ID","NAME","LAST_NAME","POST","EMAIL","PHONE","DATE_CREATE"],
+      start: 0,
+    });
+    return Array.isArray(rows) ? rows.slice(0, 50) : [];
+  } catch {
+    return [];
+  }
+}
+
+function contactLooksLikeDecisionMaker(contact) {
+  const post = String(contact?.POST || "").toLowerCase();
+  return /директор|руковод|начальник|главн|снабж|закуп|кип|автомат|промбез|промышленн.{0,12}безопас|охран.{0,8}труд|hse|технич/i.test(post);
+}
+
+function managerAuditScoreClass(score) {
+  if (score >= 80) return "сильно";
+  if (score >= 60) return "нормально";
+  if (score >= 40) return "слабо";
+  return "плохо";
+}
+
+async function hydrateContractorManagerQuality(item) {
+  if (item.verificationStatus !== "confirmed") return;
+
+  const snapshots = item.dealSnapshots instanceof Map
+    ? [...item.dealSnapshots.values()]
+    : [];
+  if (!snapshots.length) return;
+
+  snapshots.sort((a,b) => dateMs(b.lastActivity) - dateMs(a.lastActivity));
+  const latest = snapshots[0];
+
+  const activities = await getDealActivitiesForRelationship(latest.id);
+  const contacts = await contractorCompanyContacts(item.companyId);
+  const offer = await latestOfferSummary(latest, activities);
+
+  const qText = [latest.qualificationText || "", latest.qualificationHistory || ""]
+    .filter(Boolean)
+    .join("\n\n");
+  const qBlocks = parseQuestionBlocks(qText);
+  const answered = qBlocks.filter(x => isMeaningfulManagerAnswer(x.answer)).length;
+  const qRatio = qBlocks.length ? answered / qBlocks.length : 0;
+
+  let qualification = 0;
+  if (offer.product) qualification += 5;
+  if (offer.gases.length) qualification += 5;
+  if (offer.quantity) qualification += 5;
+  if (String(latest.purchaseFormatRaw || "").trim()) qualification += 5;
+  if (String(latest.deliveryDeadline || "").trim()) qualification += 5;
+  if (String(latest.endCustomer || "").trim()) qualification += 5;
+  if (
+    String(latest.brands || "").trim() ||
+    String(latest.competitorPrices || "").trim() ||
+    String(latest.analogs || "").trim()
+  ) qualification += 5;
+  qualification += Math.round(Math.min(1, qRatio) * 5);
+  qualification = Math.min(40, qualification);
+
+  const communicationContactIds = new Set();
+  const communicationValues = new Set();
+  for (const activity of activities) {
+    for (const c of activity.communications || []) {
+      if (c.entity_id) communicationContactIds.add(String(c.entity_id));
+      const v = String(c.value || "").trim().toLowerCase();
+      if (v) communicationValues.add(v);
+    }
+  }
+
+  const decisionContacts = contacts.filter(contactLooksLikeDecisionMaker);
+  const auditText = [
+    latest.title || "",
+    latest.comments || "",
+    latest.additionalInfo || "",
+    ...activities.map(x => [x.subject || "", x.description || ""].join(" ")),
+  ].join(" ").toLowerCase();
+
+  const explicitContactSearch = /кто.{0,20}(отвеч|заним|реш)|контакт.{0,25}(лпр|руковод|началь|кип|снабж|закуп)|лпр|выйти.{0,15}на|соедините|переключите/i.test(auditText);
+  const additionalContacts = Math.max(
+    contacts.length,
+    communicationContactIds.size,
+    communicationValues.size
+  );
+
+  let contactsScore = 0;
+  if (additionalContacts >= 1) contactsScore += 5;
+  if (additionalContacts >= 2) contactsScore += 5;
+  if (additionalContacts >= 3) contactsScore += 3;
+  if (decisionContacts.length) contactsScore += 5;
+  if (explicitContactSearch) contactsScore += 2;
+  contactsScore = Math.min(20, contactsScore);
+
+  const approvalAttempt = /согласов|утверд|одобр|допуск|включ.{0,15}спецификац|залож.{0,15}проект|технич.{0,15}соглас|соглас.{0,15}аналог/i.test(auditText);
+  const technicalWin = /аналог|альтернатив|замен|вариант|сертифик|опросн|технич.{0,15}(опис|док|реш)|подбор|испыт|образец|демо/i.test(auditText);
+  const endCustomerWork = /конечн.{0,15}заказ|эксплуатир|проектн.{0,15}организац|генподряд|заказчик/i.test(auditText);
+
+  let approvalScore = 0;
+  if (approvalAttempt) approvalScore += 10;
+  if (technicalWin) approvalScore += 6;
+  if (endCustomerWork) approvalScore += 4;
+  approvalScore = Math.min(20, approvalScore);
+
+  const outbound = activities.filter(x => String(x?.direction || "") === "2");
+  const commercial = outbound.find(x => ["Счёт","КП","Цена в письме"].includes(commercialActionKind(x))) || null;
+  const commercialMs = dateMs(commercial?.created);
+  const followTask = relationshipFollowupTask(activities, commercialMs);
+  const laterOutbound = commercialMs
+    ? outbound.filter(x => dateMs(x.created) > commercialMs).length
+    : 0;
+
+  let followupScore = 0;
+  if (commercial) followupScore += 5;
+  if (followTask) followupScore += 8;
+  if (laterOutbound >= 1) followupScore += 4;
+  if (laterOutbound >= 2) followupScore += 3;
+  followupScore = Math.min(20, followupScore);
+
+  const total = qualification + contactsScore + approvalScore + followupScore;
+
+  const tags = [
+    "квал " + qualification + "/40",
+    "конт. " + Math.max(contacts.length, communicationContactIds.size),
+    decisionContacts.length ? "ЛПР ✓" : "ЛПР —",
+    approvalAttempt ? "соглас. ✓" : "соглас. —",
+    followTask ? "follow-up ✓" : "follow-up —",
+  ];
+
+  item.managerQualityScore = total;
+  item.managerQualityLevel = managerAuditScoreClass(total);
+  item.managerQualitySummary = tags.join(" · ");
+  item.managerQualificationScore = qualification;
+  item.managerContactsScore = contactsScore;
+  item.managerApprovalScore = approvalScore;
+  item.managerFollowupScore = followupScore;
+  item.managerAuditCheckedAt = Date.now();
+}
+
 async function refreshOneContractorRelationshipStatus() {
   const now = Date.now();
   const candidate = [...CONTRACTOR_SCAN_CANDIDATES.values()]
@@ -5363,7 +5517,10 @@ async function refreshOneContractorRelationshipStatus() {
     .find(x => now - Number(x.relationshipCheckedAt || 0) > 15 * 60 * 1000);
 
   if (!candidate) return;
-  try { await hydrateContractorRelationshipStatus(candidate); } catch {}
+  try {
+    await hydrateContractorRelationshipStatus(candidate);
+    await hydrateContractorManagerQuality(candidate);
+  } catch {}
 }
 
 function refreshContractorScanSummary() {
@@ -5522,7 +5679,9 @@ async function contractorScanStep() {
         "UF_CRM_1739950675115","UF_CRM_1728208341819",
         "UF_CRM_1728208250222","UF_CRM_1728208292193",
         "UF_CRM_1728208353618","UF_CRM_1728208500678",
-        "UF_CRM_1728208529434",
+        "UF_CRM_1728208529434","UF_CRM_1728208560055",
+        "UF_CRM_1728208192427","UF_CRM_1790850696723",
+        AI_FIELDS.dealAnswers,
         AI_FIELDS.dealType,AI_FIELDS.dealRoles,AI_FIELDS.dealServices
       ],
       start: Number(scan.cursor || 0)
@@ -5569,6 +5728,10 @@ async function contractorScanStep() {
           dealSnapshots: new Map(),
           purchasedProducts: [],
           relationshipStatus: "",
+          managerQualityScore: 0,
+          managerQualityLevel: "",
+          managerQualitySummary: "",
+          managerAuditCheckedAt: 0,
           evidence: new Set(),
           sampleDeals: [],
           sampleDealContexts: [],
@@ -5618,6 +5781,14 @@ async function contractorScanStep() {
           lastActivity: activity,
           comments: String(deal.COMMENTS || "").slice(0, 5000),
           additionalInfo: String(deal.ADDITIONAL_INFO || "").slice(0, 3000),
+          purchaseFormatRaw: asText(deal.UF_CRM_1728208250222),
+          endCustomer: String(deal.UF_CRM_1728208529434 || ""),
+          deliveryDeadline: String(deal.UF_CRM_1728208560055 || ""),
+          brands: String(deal.UF_CRM_1728208353618 || ""),
+          competitorPrices: String(deal.UF_CRM_1728208500678 || ""),
+          analogs: asText(deal.UF_CRM_1728208192427),
+          qualificationText: String(deal.UF_CRM_1790850696723 || "").slice(0, 10000),
+          qualificationHistory: String(deal[AI_FIELDS.dealAnswers] || "").slice(0, 10000),
         });
       }
 
@@ -5829,7 +6000,7 @@ function dashboardHtml(status = dashboardStatus()) {
         const qty = Number(x.quantity || 0);
         return x.product + (qty ? " ×" + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(qty) : "");
       }).join(" · ") || "—")}</td>
-      <td>${escapeHtml((item.managerNames || []).join(", ") || "—")}</td>
+      <td class="managercell">${escapeHtml((item.managerNames || []).join(", ") || "—")}<br><span class="auditbadge">${Number(item.managerQualityScore || 0)}/100 · ${escapeHtml(item.managerQualityLevel || "—")}</span><br><span class="audittags">${escapeHtml(item.managerQualitySummary || "")}</span></td>
       <td class="statuscell" title="${escapeHtml(item.relationshipStatus || "")}">${escapeHtml(item.relationshipStatus || "—")}</td>
     </tr>`;
   }).join("");
@@ -5863,7 +6034,7 @@ th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:
 .badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#263653;font-size:11px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
 .scroll{overflow:auto;max-height:calc(100vh - 220px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
 .productcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.statuscell{white-space:normal;overflow:visible;line-height:1.2}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:11px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.2;overflow:visible}
-.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:160px}.statuscell{max-width:320px}
+.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:150px}.statuscell{max-width:300px}.managercell{white-space:normal;line-height:1.18}.auditbadge{display:inline-block;margin-top:3px;font-weight:700}.audittags{display:block;margin-top:2px;font-size:10px;color:#aebbd0}
 @media(max-width:1400px){th,td{font-size:12px;padding:6px 7px}.mini{font-size:10px}.grid{grid-template-columns:repeat(6,1fr)}}
 </style>
 </head>
@@ -5883,7 +6054,7 @@ th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Компания</th><th>Приоритет</th><th>Стратегия</th><th>Сделки / откр.</th><th>Последний контакт</th><th>Деньги<br>✓ / ↗ / ×</th><th>Что купили</th><th>Менеджер</th><th>Сейчас</th></tr></thead>
+<thead><tr><th>#</th><th>Компания</th><th>Приоритет</th><th>Стратегия</th><th>Сделки / откр.</th><th>Последний контакт</th><th>Деньги<br>✓ / ↗ / ×</th><th>Что купили</th><th>Менеджер / работа</th><th>Сейчас</th></tr></thead>
 <tbody>${topRows || `<tr><td colspan="10">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
