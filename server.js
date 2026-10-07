@@ -5617,12 +5617,12 @@ h1{font-size:24px;margin:0 0 4px}.sub{color:#9aa7bd;margin-bottom:10px;font-size
 .card{background:#131b2f;border:1px solid #25314e;border-radius:10px;padding:9px 11px}.k{color:#92a1ba;font-size:10px;text-transform:uppercase}.v{font-size:20px;font-weight:700;margin-top:3px}.small{font-size:10px;color:#aab6c9;margin-top:2px}
 .bar{height:6px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:5px}.fill{height:100%;background:#5d8cff}
 .section{margin-top:10px}.section h2{font-size:16px;margin:0 0 6px}table{width:100%;border-collapse:collapse;table-layout:fixed;background:#131b2f}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #25314e;font-size:12px;line-height:1.2;vertical-align:middle}th{color:#9aa7bd;font-size:10px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:13px;line-height:1.25;vertical-align:middle}th{color:#9aa7bd;font-size:11px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
 .badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#263653;font-size:11px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
 .scroll{overflow:auto;max-height:calc(100vh - 220px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
-.compact,.productcell,.statuscell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini{display:block;font-size:10px;color:#93a0b5;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.productcell,.statuscell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:11px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.2;overflow:visible}
 .nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:180px}.statuscell{max-width:220px}
-@media(max-width:1400px){th,td{font-size:11px;padding:6px}.grid{grid-template-columns:repeat(6,1fr)}}
+@media(max-width:1400px){th,td{font-size:12px;padding:6px 7px}.mini{font-size:10px}.grid{grid-template-columns:repeat(6,1fr)}}
 </style>
 </head>
 <body><div class="wrap">
