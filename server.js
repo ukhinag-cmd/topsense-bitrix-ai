@@ -5025,24 +5025,67 @@ async function hydrateContractorRelationshipStatus(item) {
   const outMs = dateMs(lastOutbound?.created);
   const outText = activityText(lastOutbound);
 
+  const lastRealContactMs = Math.max(
+    dateMs(activities[0]?.created),
+    dateMs(latest.lastActivity),
+    dateMs(item.lastActivity)
+  );
+  const lastDate = compactDate(lastRealContactMs ? new Date(lastRealContactMs).toISOString() : "");
+  const ageDays = lastRealContactMs
+    ? Math.floor((Date.now() - lastRealContactMs) / 86400000)
+    : 9999;
+
   if (latest.semantic === "S") {
     item.relationshipStatus = "Продажа завершена";
-  } else if (latest.semantic === "F") {
+    return;
+  }
+
+  if (latest.semantic === "F") {
     if (looksLikeInvoice(outText)) item.relationshipStatus = "Счёт отправлен — не продали";
     else if (looksLikeQuote(outText)) item.relationshipStatus = "КП отправлено — не продали";
     else item.relationshipStatus = "Не продали";
-  } else if (inMs > outMs) {
-    item.relationshipStatus = "Запрос получен — ответа нет";
-  } else if (looksLikeInvoice(outText)) {
-    item.relationshipStatus = "Счёт отправлен — оплата не подтверждена";
-  } else if (looksLikeQuote(outText)) {
-    item.relationshipStatus = "КП отправлено — ждём решение";
-  } else if (latest.isOpen) {
-    item.relationshipStatus = "В работе";
-  } else {
-    item.relationshipStatus = "Контакт завершён";
+    return;
   }
+
+  if (inMs > outMs) {
+    item.relationshipStatus = ageDays > 30 && lastDate
+      ? "Запрос без ответа с " + lastDate
+      : "Запрос получен — ответа нет";
+    return;
+  }
+
+  if (looksLikeInvoice(outText)) {
+    item.relationshipStatus = ageDays > 30 && lastDate
+      ? "Счёт без оплаты с " + lastDate
+      : "Счёт отправлен — ждём оплату";
+    return;
+  }
+
+  if (looksLikeQuote(outText)) {
+    item.relationshipStatus = ageDays > 30 && lastDate
+      ? "КП без ответа с " + lastDate
+      : "КП отправлено — ждём решение";
+    return;
+  }
+
+  if (latest.isOpen) {
+    if (ageDays <= 30) {
+      item.relationshipStatus = "В работе";
+    } else if (ageDays <= 90) {
+      item.relationshipStatus = "Зависло — " + ageDays + " дн.";
+    } else {
+      item.relationshipStatus = lastDate
+        ? "Нет контакта с " + lastDate
+        : "Давно без контакта";
+    }
+    return;
+  }
+
+  item.relationshipStatus = lastDate
+    ? "Контакт завершён " + lastDate
+    : "Контакт завершён";
 }
+
 
 const CONTRACTOR_PRODUCT_ROWS_CACHE = new Map();
 
