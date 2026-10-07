@@ -4625,6 +4625,9 @@ function publicCandidate(item) {
     contractorType: item.contractorType || "",
     inn: item.verifiedInn || "",
     website: item.verifiedWebsite || "",
+    purchasedProducts: Array.isArray(item.purchasedProducts)
+      ? item.purchasedProducts.slice(0, 12)
+      : [],
     dealCount: item.dealCount || 0,
     openDeals: item.openDeals || 0,
     totalOpportunity: Math.round(Number(item.totalOpportunity || 0)),
@@ -4885,6 +4888,67 @@ async function verifyContractorCompany(item) {
     DASHBOARD_STATE.contractorScan.recentDiscoveries.slice(0, 20);
 }
 
+
+const CONTRACTOR_PRODUCT_ROWS_CACHE = new Map();
+
+async function contractorDealProductRows(dealId) {
+  const id = String(dealId || "").trim();
+  if (!id) return [];
+  if (CONTRACTOR_PRODUCT_ROWS_CACHE.has(id)) {
+    return CONTRACTOR_PRODUCT_ROWS_CACHE.get(id);
+  }
+
+  let rows = [];
+  try {
+    const result = await bitrixCall("crm.deal.productrows.get", { id: Number(id) });
+    rows = (Array.isArray(result) ? result : []).map(row => {
+      const quantity = Number(row.QUANTITY || 0) || 0;
+      const price = Number(row.PRICE || row.PRICE_EXCLUSIVE || 0) || 0;
+      return {
+        product: String(row.PRODUCT_NAME || row.NAME || "").trim(),
+        quantity,
+        price,
+        sum: quantity * price,
+      };
+    }).filter(x => x.product);
+  } catch {}
+
+  CONTRACTOR_PRODUCT_ROWS_CACHE.set(id, rows);
+  return rows;
+}
+
+async function hydrateContractorPurchasedProducts(item) {
+  if (item.verificationStatus !== "confirmed") return;
+
+  const wonDeals = item.dealSnapshots instanceof Map
+    ? [...item.dealSnapshots.values()]
+        .filter(x => x.semantic === "S")
+        .sort((a,b) => dateMs(b.lastActivity) - dateMs(a.lastActivity))
+        .slice(0, 12)
+    : [];
+
+  const grouped = new Map();
+
+  for (const deal of wonDeals) {
+    const rows = await contractorDealProductRows(deal.id);
+    for (const row of rows) {
+      const key = row.product.toLowerCase();
+      const current = grouped.get(key) || {
+        product: row.product,
+        quantity: 0,
+        sum: 0,
+      };
+      current.quantity += Number(row.quantity || 0);
+      current.sum += Number(row.sum || 0);
+      grouped.set(key, current);
+    }
+  }
+
+  item.purchasedProducts = [...grouped.values()]
+    .sort((a,b) => b.sum - a.sum || b.quantity - a.quantity)
+    .slice(0, 12);
+}
+
 async function verifyNextContractorCandidate() {
   const next = [...CONTRACTOR_SCAN_CANDIDATES.values()].find(
     item => !item.verificationStatus || item.verificationStatus === "pending"
@@ -4893,6 +4957,9 @@ async function verifyNextContractorCandidate() {
 
   try {
     await verifyContractorCompany(next);
+    if (next.verificationStatus === "confirmed") {
+      await hydrateContractorPurchasedProducts(next);
+    }
   } catch (error) {
     next.verificationStatus = "error";
     next.verificationReason = error instanceof Error ? error.message : String(error);
@@ -5080,6 +5147,7 @@ async function contractorScanStep() {
           managerNames: new Map(),
           currentWork: [],
           dealSnapshots: new Map(),
+          purchasedProducts: [],
           evidence: new Set(),
           sampleDeals: [],
           sampleDealContexts: [],
@@ -5307,6 +5375,13 @@ function dashboardHtml(status = dashboardStatus()) {
       <td>${escapeHtml(money(item.wonOpportunity))}</td>
       <td>${escapeHtml(money(item.openOpportunity))}</td>
       <td>${escapeHtml(money(item.lostOpportunity))}</td>
+      <td>${escapeHtml((item.purchasedProducts || []).slice(0,6).map(x => {
+        const qty = Number(x.quantity || 0);
+        const sum = Number(x.sum || 0);
+        const qtyText = qty ? " × " + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(qty) : "";
+        const sumText = sum ? " = " + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(sum) + " ₽" : "";
+        return x.product + qtyText + sumText;
+      }).join(" • ") || "Нет товарных строк в успешных сделках")}</td>
       <td>${escapeHtml((item.managerNames || []).join(", ") || "—")}</td>
       <td>${escapeHtml((item.currentWork || []).slice(0,3).map(x => {
         const amount = Number(x.amount || 0);
@@ -5367,8 +5442,8 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Кто работал</th><th>Что происходит сейчас</th></tr></thead>
-<tbody>${topRows || `<tr><td colspan="11">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
+<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Что купили*</th><th>Кто работал</th><th>Что происходит сейчас</th></tr></thead>
+<tbody>${topRows || `<tr><td colspan="12">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
 <div class="section"><h2>Последние результаты проверки</h2>
@@ -5377,7 +5452,7 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Техническое состояние</h2>
 <div class="card small">Последняя ошибка: ${errorText}<br>Сделок-кандидатов без привязанной компании: ${Number(scan.unlinkedCandidateDeals || 0)}</div></div>
-<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Поля, заполненные менеджером, не являются доказательством. *«Выиграно в B24» — сумма сделок со статусом успеха; это ещё не подтверждённая оплата по счетам. Сканер работает read-only.</div>
+<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Поля, заполненные менеджером, не являются доказательством. *«Выиграно в B24» и «Что купили» сейчас берутся из успешных сделок и их товарных строк; это ещё не подтверждённая оплата по счетам. Сканер работает read-only.</div>
 </div></body></html>`;
 }
 
