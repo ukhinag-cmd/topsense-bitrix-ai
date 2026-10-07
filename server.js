@@ -1510,6 +1510,49 @@ async function getRecentDealActivities(dealId) {
 }
 
 
+
+async function getDealActivitiesForRelationship(dealId) {
+  try {
+    const activities = await bitrixCall("crm.activity.list", {
+      order: { ID: "DESC" },
+      filter: {
+        OWNER_TYPE_ID: 2,
+        OWNER_ID: Number(dealId),
+      },
+      select: [
+        "ID","TYPE_ID","DIRECTION","PROVIDER_ID","SUBJECT","DESCRIPTION",
+        "CREATED","DEADLINE","COMPLETED","RESPONSIBLE_ID","FILES"
+      ],
+    });
+
+    if (!Array.isArray(activities)) return [];
+
+    return activities.slice(0, 30).map(item => ({
+      id: item.ID,
+      type_id: item.TYPE_ID,
+      direction: item.DIRECTION,
+      provider_id: item.PROVIDER_ID,
+      subject: String(item.SUBJECT || "").slice(0, 700),
+      description: stripHtml(item.DESCRIPTION).slice(0, 12000),
+      created: item.CREATED || null,
+      deadline: item.DEADLINE || null,
+      completed: String(item.COMPLETED || "").toUpperCase() === "Y",
+      responsible_id: item.RESPONSIBLE_ID || null,
+      files: Array.isArray(item.FILES)
+        ? item.FILES.slice(0, 10).map(f => ({ name: f.NAME || f.name || "" }))
+        : [],
+    }));
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "contractor-dashboard",
+      action: "relationship-activities-read-failed",
+      dealId: String(dealId),
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return [];
+  }
+}
+
 function isPrivateAddress(address) {
   const ip = String(address || "").toLowerCase();
   const version = net.isIP(ip);
@@ -5000,6 +5043,133 @@ function looksLikeQuote(text) {
   return /\bкп\b|коммерческ.{0,20}предлож/i.test(String(text || ""));
 }
 
+
+function normalizeDashboardProductName(value) {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+
+  // Do not introduce the ambiguous generic word "датчик".
+  // If source explicitly says "сенсор", preserve it.
+  if (/сенсор/i.test(raw)) return raw;
+
+  return raw.replace(/^датчик(?:и)?\s+/i, "").trim();
+}
+
+function extractGasList(text) {
+  const source = " " + String(text || "").toUpperCase().replace(/[А-ЯЁ]/g, " ") + " ";
+  const gases = [
+    "H2S","CO2","CH4","NH3","SO2","NO2","CL2","O3","PH3","HCN","HCL","HF",
+    "C2H4","C3H8","C4H10","H2","CO","O2","NO"
+  ];
+  const found = [];
+  for (const gas of gases) {
+    const re = new RegExp("(^|[^A-Z0-9])" + gas + "([^A-Z0-9]|$)", "i");
+    if (re.test(source) && !found.includes(gas)) found.push(gas);
+  }
+  return found.slice(0, 5);
+}
+
+function commercialActionKind(activity) {
+  if (!activity) return "";
+  const text = [
+    activity.subject || "",
+    activity.description || "",
+    ...(activity.files || []).map(f => f.name || ""),
+  ].join(" ");
+
+  if (looksLikeInvoice(text)) return "Счёт";
+  if (looksLikeQuote(text)) return "КП";
+
+  if (
+    /(^|\D)\d[\d\s]{2,}(?:[,.]\d+)?\s*(?:₽|руб(?:\.|лей)?|р\.)/i.test(text) ||
+    /\b(?:цена|стоимость)\b/i.test(text)
+  ) {
+    return "Цена в письме";
+  }
+
+  return "Письмо";
+}
+
+function relationshipFollowupTask(activities, afterMs) {
+  const taskRx = /связ|перезвон|узнат|результат|решен|уточн|контакт|follow/i;
+  const rows = (activities || [])
+    .filter(x => !x.completed && x.deadline)
+    .filter(x => dateMs(x.deadline) >= Number(afterMs || 0));
+
+  const explicit = rows
+    .filter(x => taskRx.test([x.subject || "", x.description || ""].join(" ")))
+    .sort((a,b) => dateMs(a.deadline) - dateMs(b.deadline))[0];
+
+  if (explicit) return explicit;
+
+  return rows
+    .filter(x => String(x.direction || "") !== "1")
+    .sort((a,b) => dateMs(a.deadline) - dateMs(b.deadline))[0] || null;
+}
+
+async function latestOfferSummary(latest, activities) {
+  const rows = await contractorDealProductRows(latest.id);
+  const outbound = (activities || [])
+    .filter(x => String(x?.direction || "") === "2")
+    .sort((a,b) => dateMs(b.created) - dateMs(a.created));
+
+  const commercial = outbound.find(x => {
+    const kind = commercialActionKind(x);
+    return kind === "Счёт" || kind === "КП" || kind === "Цена в письме";
+  }) || outbound[0] || null;
+
+  const textForGas = [
+    latest.title || "",
+    latest.comments || "",
+    latest.additionalInfo || "",
+    commercial?.subject || "",
+    commercial?.description || "",
+    ...rows.map(x => x.product || ""),
+  ].join(" ");
+
+  const gases = extractGasList(textForGas);
+
+  let product = "";
+  let quantity = 0;
+  let productSum = 0;
+
+  if (rows.length) {
+    product = normalizeDashboardProductName(rows[0].product);
+    quantity = rows.reduce((sum, x) => sum + Number(x.quantity || 0), 0);
+    productSum = rows.reduce((sum, x) => sum + Number(x.sum || 0), 0);
+  }
+
+  if (!product) {
+    product = normalizeDashboardProductName(
+      String(latest.title || "")
+        .replace(/\b\d+\s*(?:шт\.?|штук[аи]?)\b/ig, "")
+        .replace(/\b(?:CO|CO2|CH4|O2|H2S|NH3|SO2|NO2|CL2|H2|O3|PH3|HCN|HCL|HF)\b/ig, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 55)
+    );
+  }
+
+  if (!quantity) {
+    const m = String(latest.title || "").match(/\b(\d+)\s*(?:шт\.?|штук[аи]?)\b/i);
+    if (m) quantity = Number(m[1] || 0);
+  }
+
+  const amount = Number(latest.opportunity || 0) || Number(productSum || 0) || 0;
+  const sentAtMs = dateMs(commercial?.created);
+  const task = relationshipFollowupTask(activities, sentAtMs);
+
+  return {
+    product,
+    gases,
+    quantity,
+    amount,
+    action: commercialActionKind(commercial),
+    sentDate: compactDate(commercial?.created),
+    followupDate: compactDate(task?.deadline),
+  };
+}
+
 function shortRequestTopic(latest, lastInbound) {
   const candidates = [
     String(lastInbound?.subject || "").trim(),
@@ -5049,72 +5219,54 @@ async function hydrateContractorRelationshipStatus(item) {
   snapshots.sort((a,b) => dateMs(b.lastActivity) - dateMs(a.lastActivity));
   const latest = snapshots[0];
 
-  let activities = [];
-  try { activities = await getRecentDealActivities(latest.id); } catch {}
-  activities = (activities || []).slice().sort((a,b) => dateMs(b.created) - dateMs(a.created));
+  const activities = await getDealActivitiesForRelationship(latest.id);
+  const offer = await latestOfferSummary(latest, activities);
 
-  const inbound = activities.filter(x => String(x?.direction || "") === "1");
-  const outbound = activities.filter(x => String(x?.direction || "") === "2");
-  const lastInbound = inbound[0] || null;
-  const lastOutbound = outbound[0] || null;
-
-  const lastInboundMs = dateMs(lastInbound?.created);
-  const lastOutboundMs = dateMs(lastOutbound?.created);
-  const topic = shortRequestTopic(latest, lastInbound);
-  const action = outboundActionLabel(lastOutbound);
-
-  const crmText = [
-    latest.title || "",
-    latest.comments || "",
-    latest.additionalInfo || "",
-  ].join(" ");
-
-  const hasQuote = Boolean(outbound.find(x => looksLikeQuote(activityText(x)))) || looksLikeQuote(crmText);
-  const hasInvoice = Boolean(outbound.find(x => looksLikeInvoice(activityText(x)))) || looksLikeInvoice(crmText);
-  const hasInbound = inbound.length > 0 || /запрос|заявк|request/i.test(crmText);
-
-  const lastRealContactMs = Math.max(
-    dateMs(activities[0]?.created),
+  const lastContactMs = Math.max(
+    0,
+    ...activities.map(x => dateMs(x.created)),
     dateMs(latest.lastActivity),
     dateMs(item.lastActivity)
   );
 
-  const ageDays = lastRealContactMs
-    ? Math.max(0, Math.floor((Date.now() - lastRealContactMs) / 86400000))
+  const ageDays = lastContactMs
+    ? Math.max(0, Math.floor((Date.now() - lastContactMs) / 86400000))
     : 9999;
 
-  const stale = ageDays > 7 && ageDays < 9999
-    ? " · " + ageDays + " дн. без работы"
-    : "";
+  const parts = [];
+  const productParts = [];
 
-  let summary = "";
+  if (offer.product) productParts.push(offer.product);
+  if (offer.gases.length) productParts.push(offer.gases.join("/"));
+  if (offer.quantity) productParts.push(String(offer.quantity) + " шт.");
+  if (productParts.length) parts.push(productParts.join(" · "));
 
-  if (latest.semantic === "S") {
-    if (hasInvoice) summary = topic + " → счёт → продажа";
-    else if (hasQuote) summary = topic + " → КП → продажа";
-    else summary = topic + " → продажа";
-  } else if (latest.semantic === "F") {
-    if (hasInvoice) summary = topic + " → счёт → не продали";
-    else if (hasQuote) summary = topic + " → КП → не продали";
-    else if (action) summary = topic + " → " + action + " → не продали";
-    else summary = topic + " → не продали";
-  } else if (lastInboundMs > lastOutboundMs) {
-    summary = topic + " → ответа нет";
-  } else if (hasInvoice) {
-    summary = topic + " → счёт отправлен → оплаты нет";
-  } else if (hasQuote) {
-    summary = topic + " → КП отправлено → " + (ageDays > 7 ? "ответа нет" : "ждём решение");
-  } else if (hasInbound && lastOutbound) {
-    summary = topic + " → " + action + " → " + (ageDays > 7 ? "тишина" : "в работе");
-  } else if (hasInbound) {
-    summary = topic + " → ответа нет";
-  } else if (latest.isOpen) {
-    summary = topic + " → открытая сделка";
-  } else {
-    summary = topic + " → контакт завершён";
+  if (offer.amount) {
+    parts.push(new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(offer.amount) + " ₽");
   }
 
-  item.relationshipStatus = summary + stale;
+  if (offer.action) {
+    parts.push(offer.action + (offer.sentDate ? " " + offer.sentDate : ""));
+  }
+
+  if (offer.followupDate) {
+    parts.push("связаться " + offer.followupDate);
+  }
+
+  if (ageDays > 7 && ageDays < 9999) {
+    parts.push(ageDays + " дн. без работы");
+  }
+
+  if (!parts.length) {
+    parts.push(
+      latest.semantic === "S" ? "Продажа завершена"
+        : latest.semantic === "F" ? "Не продали"
+          : latest.isOpen ? "Открытая сделка"
+            : "Контакт завершён"
+    );
+  }
+
+  item.relationshipStatus = parts.join(" · ");
   item.relationshipCheckedAt = Date.now();
 }
 
@@ -5711,7 +5863,7 @@ th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:
 .badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#263653;font-size:11px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
 .scroll{overflow:auto;max-height:calc(100vh - 220px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
 .productcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.statuscell{white-space:normal;overflow:visible;line-height:1.2}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:11px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.2;overflow:visible}
-.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:180px}.statuscell{max-width:220px}
+.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:160px}.statuscell{max-width:320px}
 @media(max-width:1400px){th,td{font-size:12px;padding:6px 7px}.mini{font-size:10px}.grid{grid-template-columns:repeat(6,1fr)}}
 </style>
 </head>
