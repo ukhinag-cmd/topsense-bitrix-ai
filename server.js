@@ -4628,6 +4628,10 @@ function publicCandidate(item) {
     dealCount: item.dealCount || 0,
     openDeals: item.openDeals || 0,
     totalOpportunity: Math.round(Number(item.totalOpportunity || 0)),
+    wonOpportunity: Math.round(Number(item.wonOpportunity || 0)),
+    openOpportunity: Math.round(Number(item.openOpportunity || 0)),
+    lostOpportunity: Math.round(Number(item.lostOpportunity || 0)),
+    unclassifiedOpportunity: Math.round(Number(item.unclassifiedOpportunity || 0)),
     lastActivity: item.lastActivity || "",
     purchaseMode,
     managers: [...(item.managers || new Set())].slice(0, 5),
@@ -4947,7 +4951,7 @@ async function contractorScanStep() {
       order: { ID: "DESC" },
       filter: {},
       select: [
-        "ID","TITLE","COMPANY_ID","CONTACT_ID","STAGE_ID","CLOSED",
+        "ID","TITLE","COMPANY_ID","CONTACT_ID","STAGE_ID","STAGE_SEMANTIC_ID","CLOSED",
         "OPPORTUNITY","CURRENCY_ID","ASSIGNED_BY_ID",
         "DATE_CREATE","DATE_MODIFY","LAST_ACTIVITY_TIME",
         "COMMENTS","ADDITIONAL_INFO",
@@ -4988,6 +4992,10 @@ async function contractorScanStep() {
           directCount: 0,
           tenderCount: 0,
           totalOpportunity: 0,
+          wonOpportunity: 0,
+          openOpportunity: 0,
+          lostOpportunity: 0,
+          unclassifiedOpportunity: 0,
           lastActivityMs: 0,
           lastActivity: "",
           maxSignalWeight: 0,
@@ -5014,7 +5022,20 @@ async function contractorScanStep() {
 
       item.dealCount += 1;
       if (String(deal.CLOSED || "").toUpperCase() !== "Y") item.openDeals += 1;
-      item.totalOpportunity += Number(deal.OPPORTUNITY || 0) || 0;
+      const opportunity = Number(deal.OPPORTUNITY || 0) || 0;
+      item.totalOpportunity += opportunity;
+
+      const semantic = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
+      if (semantic === "S") {
+        item.wonOpportunity += opportunity;
+      } else if (semantic === "F") {
+        item.lostOpportunity += opportunity;
+      } else if (semantic === "P" || String(deal.CLOSED || "").toUpperCase() !== "Y") {
+        item.openOpportunity += opportunity;
+      } else {
+        item.unclassifiedOpportunity += opportunity;
+      }
+
       item.maxSignalWeight = Math.max(item.maxSignalWeight, sig.weight);
       sig.reasons.forEach(x => item.evidence.add(x));
       if (deal.ASSIGNED_BY_ID) item.managers.add(String(deal.ASSIGNED_BY_ID));
@@ -5195,7 +5216,9 @@ function dashboardHtml(status = dashboardStatus()) {
       <td>${Number(item.openDeals || 0)}</td>
       <td>${escapeHtml(item.purchaseMode || "—")}</td>
       <td>${escapeHtml(item.lastActivity || "—")}</td>
-      <td>${escapeHtml(money(item.totalOpportunity))}</td>
+      <td>${escapeHtml(money(item.wonOpportunity))}</td>
+      <td>${escapeHtml(money(item.openOpportunity))}</td>
+      <td>${escapeHtml(money(item.lostOpportunity))}</td>
       <td>${escapeHtml((item.evidence || []).join(", "))}</td>
       <td>${escapeHtml((item.sampleDeals || []).slice(0,2).join(" • "))}</td>
     </tr>`;
@@ -5252,7 +5275,7 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Закупка</th><th>Последняя активность</th><th>Сумма сделок</th><th>Почему подрядчик</th><th>Примеры сделок</th></tr></thead>
+<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Закупка</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Почему подрядчик</th><th>Примеры сделок</th></tr></thead>
 <tbody>${topRows || `<tr><td colspan="10">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
@@ -5262,7 +5285,7 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Техническое состояние</h2>
 <div class="card small">Последняя ошибка: ${errorText}<br>Сделок-кандидатов без привязанной компании: ${Number(scan.unlinkedCandidateDeals || 0)}</div></div>
-<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Поля, заполненные менеджером, не являются доказательством. Сканер работает read-only.</div>
+<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Поля, заполненные менеджером, не являются доказательством. *«Выиграно в B24» — сумма сделок со статусом успеха; это ещё не подтверждённая оплата по счетам. Сканер работает read-only.</div>
 </div></body></html>`;
 }
 
