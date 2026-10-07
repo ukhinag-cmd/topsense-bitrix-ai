@@ -5041,7 +5041,7 @@ async function contractorUserName(userId) {
 
   const surname = String(user?.LAST_NAME || "").trim();
   const firstName = String(user?.NAME || "").trim();
-  const display = surname || firstName || id;
+  const display = surname || firstName || "";
 
   if (!user && lastError) {
     console.warn(JSON.stringify({
@@ -5050,9 +5050,12 @@ async function contractorUserName(userId) {
       userId: id,
       error: lastError,
     }));
+    // Do not cache failed lookups: after webhook scope is expanded,
+    // surnames will start appearing automatically without a restart.
+    return "";
   }
 
-  CONTRACTOR_USER_NAME_CACHE.set(id, display);
+  if (display) CONTRACTOR_USER_NAME_CACHE.set(id, display);
   return display;
 }
 
@@ -5217,8 +5220,9 @@ async function contractorScanStep() {
       if (deal.ASSIGNED_BY_ID) {
         const managerId = String(deal.ASSIGNED_BY_ID);
         item.managers.add(managerId);
-        if (!item.managerNames.has(managerId)) {
-          item.managerNames.set(managerId, await contractorUserName(managerId));
+        if (!item.managerNames.get(managerId)) {
+          const resolvedSurname = await contractorUserName(managerId);
+          if (resolvedSurname) item.managerNames.set(managerId, resolvedSurname);
         }
       }
 
