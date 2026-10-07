@@ -289,6 +289,22 @@ const LEGACY_TYPE_ENUM = {
 
 const SELF_UPDATES = new Map();
 
+const DASHBOARD_STATE = {
+  serviceStartedAt: new Date().toISOString(),
+  lastBitrixEventAt: null,
+  lastBitrixEvent: null,
+  lastError: null,
+  contractorBenchmark: {
+    status: "idle",
+    total: 0,
+    completed: 0,
+    current: "",
+    startedAt: null,
+    finishedAt: null,
+    results: [],
+  },
+};
+
 async function bitrixCall(method, params = {}) {
   const url = new URL(method + ".json", bitrixBaseUrl());
   const response = await fetch(url, {
@@ -3994,7 +4010,18 @@ async function runContractorBenchmarkPilot() {
 
   const results = [];
 
+  DASHBOARD_STATE.contractorBenchmark = {
+    status: "running",
+    total: seeds.length,
+    completed: 0,
+    current: "",
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    results: [],
+  };
+
   for (const seed of seeds) {
+    DASHBOARD_STATE.contractorBenchmark.current = seed;
     try {
       const candidates = await findBenchmarkCompanyCandidates(seed);
 
@@ -4003,6 +4030,8 @@ async function runContractorBenchmarkPilot() {
           seed,
           status: "not-found-in-crm"
         });
+        DASHBOARD_STATE.contractorBenchmark.completed = results.length;
+        DASHBOARD_STATE.contractorBenchmark.results = results.slice();
         continue;
       }
 
@@ -4017,14 +4046,28 @@ async function runContractorBenchmarkPilot() {
 
       const profiled = await profileBenchmarkCompany(seed, chosen);
       results.push(profiled);
+      DASHBOARD_STATE.contractorBenchmark.completed = results.length;
+      DASHBOARD_STATE.contractorBenchmark.results = results.slice();
     } catch (error) {
       results.push({
         seed,
         status: "error",
         error: error instanceof Error ? error.message : String(error)
       });
+      DASHBOARD_STATE.lastError = {
+        at: new Date().toISOString(),
+        source: "contractor-benchmark",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      DASHBOARD_STATE.contractorBenchmark.completed = results.length;
+      DASHBOARD_STATE.contractorBenchmark.results = results.slice();
     }
   }
+
+  DASHBOARD_STATE.contractorBenchmark.status = "completed";
+  DASHBOARD_STATE.contractorBenchmark.current = "";
+  DASHBOARD_STATE.contractorBenchmark.finishedAt = new Date().toISOString();
+  DASHBOARD_STATE.contractorBenchmark.results = results.slice();
 
   console.log(JSON.stringify({
     source: "contractor-benchmark",
@@ -4301,7 +4344,148 @@ async function processDeal(evt) {
   }
 }
 
+
+function dashboardStatus() {
+  const benchmark = DASHBOARD_STATE.contractorBenchmark || {};
+  const results = Array.isArray(benchmark.results) ? benchmark.results : [];
+
+  const counts = results.reduce((acc, item) => {
+    const status = String(item.status || "unknown");
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    ok: true,
+    service: "topsense-bitrix-ai",
+    serviceStartedAt: DASHBOARD_STATE.serviceStartedAt,
+    now: new Date().toISOString(),
+    lastBitrixEventAt: DASHBOARD_STATE.lastBitrixEventAt,
+    lastBitrixEvent: DASHBOARD_STATE.lastBitrixEvent,
+    lastError: DASHBOARD_STATE.lastError,
+    contractorBenchmark: {
+      status: benchmark.status || "idle",
+      total: Number(benchmark.total || 0),
+      completed: Number(benchmark.completed || 0),
+      current: benchmark.current || "",
+      startedAt: benchmark.startedAt || null,
+      finishedAt: benchmark.finishedAt || null,
+      counts,
+      results: results.map(item => ({
+        seed: item.seed || "",
+        matched_company: item.matched_company || item.profile?.company_name || "",
+        status: item.status || "",
+        quick_sale_score: item.profile?.quick_sale_score ?? null,
+        profile: item.profile?.profile || "",
+        reason:
+          item.reason ||
+          item.profile?.why_interesting_for_topsense ||
+          item.error ||
+          "",
+      })),
+    },
+  };
+}
+
+function dashboardHtml() {
+  return `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TOP-SENSE AI Dashboard</title>
+<style>
+:root{color-scheme:dark;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif}
+*{box-sizing:border-box} body{margin:0;background:#0b1020}
+.wrap{max-width:1200px;margin:0 auto;padding:28px}
+h1{font-size:28px;margin:0 0 6px}.sub{color:#9aa7bd;margin-bottom:22px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.card{background:#131b2f;border:1px solid #25314e;border-radius:14px;padding:16px}
+.k{color:#92a1ba;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.v{font-size:24px;font-weight:700;margin-top:6px}.small{font-size:13px;color:#aab6c9;margin-top:6px}
+.bar{height:8px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:12px}
+.fill{height:100%;background:#5d8cff;width:0}
+table{width:100%;border-collapse:collapse;background:#131b2f;border-radius:14px;overflow:hidden}
+th,td{text-align:left;padding:12px;border-bottom:1px solid #25314e;font-size:14px;vertical-align:top}
+th{color:#9aa7bd;font-size:12px;text-transform:uppercase}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#263653;font-size:12px}
+.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
+.section{margin-top:18px}.section h2{font-size:18px;margin:0 0 10px}
+@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.wrap{padding:16px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>TOP-SENSE AI Monitor</h1>
+<div class="sub">Живой статус анализа CRM, подрядчиков и AI-процессов</div>
+
+<div class="grid">
+  <div class="card"><div class="k">Сервис</div><div id="service" class="v">—</div><div id="uptime" class="small"></div></div>
+  <div class="card"><div class="k">Эталоны подрядчиков</div><div id="progress" class="v">—</div><div class="bar"><div id="fill" class="fill"></div></div></div>
+  <div class="card"><div class="k">Сейчас</div><div id="current" class="v" style="font-size:18px">—</div><div id="benchStatus" class="small"></div></div>
+  <div class="card"><div class="k">Последнее событие Bitrix</div><div id="lastEvent" class="v" style="font-size:16px">—</div><div id="lastEventAt" class="small"></div></div>
+</div>
+
+<div class="section">
+<h2>Эталонные компании</h2>
+<table>
+<thead><tr><th>Компания</th><th>Найдено в CRM</th><th>Статус</th><th>Быстрый потенциал</th><th>Комментарий</th></tr></thead>
+<tbody id="rows"><tr><td colspan="5">Загрузка…</td></tr></tbody>
+</table>
+</div>
+
+<div class="section">
+<h2>Последняя ошибка</h2>
+<div id="errorBox" class="card small">Нет</div>
+</div>
+</div>
+<script>
+function esc(v){return String(v??"").replace(/[&<>"']/g,s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[s]))}
+function fmtDate(v){if(!v)return "—"; try{return new Date(v).toLocaleString("ru-RU")}catch{return v}}
+async function load(){
+  try{
+    const r=await fetch("/dashboard/status",{cache:"no-store"});
+    const s=await r.json();
+    document.getElementById("service").textContent=s.ok?"Работает":"Ошибка";
+    document.getElementById("uptime").textContent="Запущен: "+fmtDate(s.serviceStartedAt);
+    const b=s.contractorBenchmark||{};
+    const total=b.total||0, done=b.completed||0;
+    document.getElementById("progress").textContent=done+" / "+total;
+    document.getElementById("fill").style.width=(total?Math.round(done/total*100):0)+"%";
+    document.getElementById("current").textContent=b.current|| (b.status==="completed"?"Завершено":"Ожидание");
+    document.getElementById("benchStatus").textContent="Статус: "+(b.status||"idle");
+    document.getElementById("lastEvent").textContent=s.lastBitrixEvent||"—";
+    document.getElementById("lastEventAt").textContent=fmtDate(s.lastBitrixEventAt);
+    const rows=(b.results||[]).map(x=>{
+      const st=x.status||"";
+      const cls=st==="profiled"?"ok":st==="error"?"err":"warn";
+      const score=x.quick_sale_score==null?"—":x.quick_sale_score+"/100";
+      return "<tr><td><b>"+esc(x.seed)+"</b></td><td>"+esc(x.matched_company||"—")+"</td><td><span class=\"badge "+cls+"\">"+esc(st)+"</span></td><td>"+esc(score)+"</td><td>"+esc(x.reason||"")+"</td></tr>";
+    }).join("");
+    document.getElementById("rows").innerHTML=rows||"<tr><td colspan=\"5\">Пока нет результатов</td></tr>";
+    document.getElementById("errorBox").textContent=s.lastError?(fmtDate(s.lastError.at)+" — "+s.lastError.source+": "+s.lastError.message):"Нет";
+  }catch(e){
+    document.getElementById("service").textContent="Нет связи";
+  }
+}
+load(); setInterval(load,5000);
+</script>
+</body></html>`;
+}
+
 const server = http.createServer((req, res) => {
+  if (req.method === "GET" && req.url === "/dashboard") {
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    });
+    return res.end(dashboardHtml());
+  }
+
+  if (req.method === "GET" && req.url === "/dashboard/status") {
+    return json(res, 200, dashboardStatus());
+  }
+
   if (req.method === "GET" && (req.url === "/" || req.url === "/health")) {
     return json(res, 200, {
       ok: true,
@@ -4338,6 +4522,9 @@ const server = http.createServer((req, res) => {
         console.warn("Rejected Bitrix event: invalid application token");
         return json(res, 401, { ok: false, error: "invalid token" });
       }
+
+      DASHBOARD_STATE.lastBitrixEventAt = new Date().toISOString();
+      DASHBOARD_STATE.lastBitrixEvent = String(evt.event || "");
 
       console.log(
         JSON.stringify({
