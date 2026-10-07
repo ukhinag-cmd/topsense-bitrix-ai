@@ -4474,7 +4474,10 @@ load(); setInterval(load,5000);
 }
 
 const server = http.createServer((req, res) => {
-  if (req.method === "GET" && req.url === "/dashboard") {
+  const requestUrl = new URL(req.url || "/", "http://localhost");
+  const pathname = requestUrl.pathname.replace(/\/+$/, "") || "/";
+
+  if (req.method === "GET" && pathname === "/dashboard") {
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
@@ -4482,11 +4485,11 @@ const server = http.createServer((req, res) => {
     return res.end(dashboardHtml());
   }
 
-  if (req.method === "GET" && req.url === "/dashboard/status") {
+  if (req.method === "GET" && pathname === "/dashboard/status") {
     return json(res, 200, dashboardStatus());
   }
 
-  if (req.method === "GET" && (req.url === "/" || req.url === "/health")) {
+  if (req.method === "GET" && (pathname === "/" || pathname === "/health")) {
     return json(res, 200, {
       ok: true,
       service: "topsense-bitrix-ai",
