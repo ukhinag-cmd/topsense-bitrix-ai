@@ -5008,7 +5008,8 @@ async function hydrateContractorRelationshipStatus(item) {
     : [];
 
   if (!snapshots.length) {
-    item.relationshipStatus = "Нет истории";
+    item.relationshipStatus = "Нет истории в B24";
+    item.relationshipCheckedAt = Date.now();
     return;
   }
 
@@ -5019,11 +5020,20 @@ async function hydrateContractorRelationshipStatus(item) {
   try { activities = await getRecentDealActivities(latest.id); } catch {}
   activities = (activities || []).slice().sort((a,b) => dateMs(b.created) - dateMs(a.created));
 
-  const lastInbound = activities.find(x => String(x?.direction || "") === "1") || null;
-  const lastOutbound = activities.find(x => String(x?.direction || "") === "2") || null;
-  const inMs = dateMs(lastInbound?.created);
-  const outMs = dateMs(lastOutbound?.created);
-  const outText = activityText(lastOutbound);
+  const inbound = activities.filter(x => String(x?.direction || "") === "1");
+  const outbound = activities.filter(x => String(x?.direction || "") === "2");
+  const lastInbound = inbound[0] || null;
+  const lastOutbound = outbound[0] || null;
+
+  const lastInboundMs = dateMs(lastInbound?.created);
+  const lastOutboundMs = dateMs(lastOutbound?.created);
+
+  const hasQuote = Boolean(outbound.find(x => looksLikeQuote(activityText(x)))) ||
+    looksLikeQuote([latest.title, latest.comments, latest.additionalInfo].join(" "));
+  const hasInvoice = Boolean(outbound.find(x => looksLikeInvoice(activityText(x)))) ||
+    looksLikeInvoice([latest.title, latest.comments, latest.additionalInfo].join(" "));
+  const hasInbound = inbound.length > 0 ||
+    /запрос|заявк|request/i.test([latest.title, latest.comments, latest.additionalInfo].join(" "));
 
   const lastRealContactMs = Math.max(
     dateMs(activities[0]?.created),
@@ -5035,51 +5045,40 @@ async function hydrateContractorRelationshipStatus(item) {
     ? Math.max(0, Math.floor((Date.now() - lastRealContactMs) / 86400000))
     : 9999;
 
-  const inactivitySuffix = ageDays > 7 && ageDays < 9999
+  const stale = ageDays > 7 && ageDays < 9999
     ? " · " + ageDays + " дн. без работы"
     : "";
 
+  let summary = "";
+
   if (latest.semantic === "S") {
-    item.relationshipStatus = "Продажа завершена" + inactivitySuffix;
-    return;
+    summary = hasInvoice ? "Счёт → продажа"
+      : hasQuote ? "КП → продажа"
+      : "Продажа завершена";
+  } else if (latest.semantic === "F") {
+    summary = hasInvoice ? "Счёт → не продали"
+      : hasQuote ? "КП → не продали"
+      : hasInbound ? "Запрос → не продали"
+      : "Сделка проиграна";
+  } else if (lastInboundMs > lastOutboundMs) {
+    summary = lastOutbound ? "Клиент ответил → ответа нет" : "Запрос → ответа нет";
+  } else if (hasInvoice) {
+    summary = "Счёт отправлен → оплаты нет";
+  } else if (hasQuote) {
+    summary = ageDays > 7 ? "КП отправлено → ответа нет" : "КП отправлено → ждём";
+  } else if (hasInbound && outbound.length) {
+    summary = ageDays > 7 ? "Запрос → ответили → тишина" : "Запрос → ответили → в работе";
+  } else if (hasInbound) {
+    summary = "Запрос → ответа нет";
+  } else if (latest.isOpen) {
+    const shortTitle = String(latest.title || "").replace(/\s+/g, " ").trim().slice(0, 55);
+    summary = shortTitle ? "Открытая сделка: " + shortTitle : "Открытая сделка";
+  } else {
+    summary = "Контакт завершён";
   }
 
-  if (latest.semantic === "F") {
-    if (looksLikeInvoice(outText)) {
-      item.relationshipStatus = "Счёт отправлен — не продали" + inactivitySuffix;
-    } else if (looksLikeQuote(outText)) {
-      item.relationshipStatus = "КП отправлено — не продали" + inactivitySuffix;
-    } else {
-      item.relationshipStatus = "Не продали" + inactivitySuffix;
-    }
-    return;
-  }
-
-  if (inMs > outMs) {
-    item.relationshipStatus = "Запрос получен — ответа нет" + inactivitySuffix;
-    return;
-  }
-
-  if (looksLikeInvoice(outText)) {
-    item.relationshipStatus = "Счёт отправлен — ждём оплату" + inactivitySuffix;
-    return;
-  }
-
-  if (looksLikeQuote(outText)) {
-    item.relationshipStatus = "КП отправлено — ждём решение" + inactivitySuffix;
-    return;
-  }
-
-  if (latest.isOpen) {
-    item.relationshipStatus = ageDays <= 7
-      ? "В работе"
-      : ageDays + " дн. без работы";
-    return;
-  }
-
-  item.relationshipStatus = ageDays > 7 && ageDays < 9999
-    ? "Контакт завершён · " + ageDays + " дн. без работы"
-    : "Контакт завершён";
+  item.relationshipStatus = summary + stale;
+  item.relationshipCheckedAt = Date.now();
 }
 
 
@@ -5164,6 +5163,18 @@ async function verifyNextContractorCandidate() {
       message: next.verificationReason,
     };
   }
+}
+
+
+async function refreshOneContractorRelationshipStatus() {
+  const now = Date.now();
+  const candidate = [...CONTRACTOR_SCAN_CANDIDATES.values()]
+    .filter(x => x.verificationStatus === "confirmed")
+    .sort((a,b) => Number(a.relationshipCheckedAt || 0) - Number(b.relationshipCheckedAt || 0))
+    .find(x => now - Number(x.relationshipCheckedAt || 0) > 15 * 60 * 1000);
+
+  if (!candidate) return;
+  try { await hydrateContractorRelationshipStatus(candidate); } catch {}
 }
 
 function refreshContractorScanSummary() {
@@ -5416,6 +5427,8 @@ async function contractorScanStep() {
           stage: String(deal.STAGE_ID || ""),
           assignedById: String(deal.ASSIGNED_BY_ID || ""),
           lastActivity: activity,
+          comments: String(deal.COMMENTS || "").slice(0, 5000),
+          additionalInfo: String(deal.ADDITIONAL_INFO || "").slice(0, 3000),
         });
       }
 
@@ -5463,6 +5476,7 @@ async function contractorScanStep() {
     }
 
     await verifyNextContractorCandidate();
+    await refreshOneContractorRelationshipStatus();
 
     scan.lastBatchAt = new Date().toISOString();
     refreshContractorScanSummary();
@@ -5659,7 +5673,7 @@ h1{font-size:24px;margin:0 0 4px}.sub{color:#9aa7bd;margin-bottom:10px;font-size
 th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:13px;line-height:1.25;vertical-align:middle}th{color:#9aa7bd;font-size:11px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
 .badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#263653;font-size:11px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
 .scroll{overflow:auto;max-height:calc(100vh - 220px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
-.productcell,.statuscell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:11px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.2;overflow:visible}
+.productcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.statuscell{white-space:normal;overflow:visible;line-height:1.2}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:11px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.2;overflow:visible}
 .nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:180px}.statuscell{max-width:220px}
 @media(max-width:1400px){th,td{font-size:12px;padding:6px 7px}.mini{font-size:10px}.grid{grid-template-columns:repeat(6,1fr)}}
 </style>
