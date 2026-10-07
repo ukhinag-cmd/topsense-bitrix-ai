@@ -321,7 +321,7 @@ const CONTRACTOR_BASELINE_RESULTS = [
     reason: "Карточка найдена, но в CRM нет ИНН и сайта для строгой идентификации."
   },
   {
-    seed: "Бур-сервис",
+    seed: "Бурсервис",
     matched_company: "",
     status: "not-found-in-crm",
     reason: "По этому написанию точного совпадения в CRM не найдено."
