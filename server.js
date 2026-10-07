@@ -3954,6 +3954,13 @@ const CONTRACTOR_SEED_EXCLUSIONS = {
   ],
 };
 
+const CONTRACTOR_SEED_DOMAINS = {
+  "Сибирская сервисная компания (ССК)": [
+    "sibserv.com",
+    "ssc.djiggo.ru"
+  ],
+};
+
 function benchmarkSearchTerms(term) {
   return CONTRACTOR_SEED_ALIASES[term] || [term];
 }
@@ -4003,6 +4010,53 @@ async function findBenchmarkCompanyCandidates(term) {
 
       for (const deal of Array.isArray(deals) ? deals.slice(0, 20) : []) {
         const companyId = String(deal.COMPANY_ID || "");
+        if (!companyId || companyId === "0" || seen.has(companyId)) continue;
+        try {
+          const company = await getCompany(companyId);
+          if (!company || !benchmarkCandidateAllowed(term, company)) continue;
+          seen.add(companyId);
+          out.push(company);
+        } catch {}
+      }
+    } catch {}
+  }
+
+
+  const domains = CONTRACTOR_SEED_DOMAINS[term] || [];
+  for (const domain of domains) {
+    try {
+      const companiesByWeb = await bitrixCall("crm.company.list", {
+        order: { ID: "DESC" },
+        filter: { "%WEB": domain },
+        select: [
+          "ID","TITLE","WEB","PHONE","EMAIL",
+          AI_FIELDS.companyInn,
+          AI_FIELDS.companyType,
+          AI_FIELDS.companyRoles,
+          AI_FIELDS.companyRevenue,
+          AI_FIELDS.companyRevenueYear
+        ],
+        start: 0
+      });
+
+      for (const company of Array.isArray(companiesByWeb) ? companiesByWeb : []) {
+        const id = String(company.ID || "");
+        if (!id || seen.has(id) || !benchmarkCandidateAllowed(term, company)) continue;
+        seen.add(id);
+        out.push(company);
+      }
+    } catch {}
+
+    try {
+      const contactsByEmail = await bitrixCall("crm.contact.list", {
+        order: { ID: "DESC" },
+        filter: { "%EMAIL": domain },
+        select: ["ID","COMPANY_ID","EMAIL"],
+        start: 0
+      });
+
+      for (const contact of Array.isArray(contactsByEmail) ? contactsByEmail : []) {
+        const companyId = String(contact.COMPANY_ID || "");
         if (!companyId || companyId === "0" || seen.has(companyId)) continue;
         try {
           const company = await getCompany(companyId);
