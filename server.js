@@ -5115,8 +5115,20 @@ function commercialActionKind(activity) {
 
 function relationshipFollowupTask(activities, afterMs) {
   const taskRx = /связ|перезвон|узнат|результат|решен|уточн|контакт|follow/i;
+
+  const validDeadline = value => {
+    const ms = dateMs(value);
+    if (!ms) return false;
+    const year = new Date(ms).getUTCFullYear();
+
+    // Bitrix can expose sentinel deadlines around year 9999 for "no real deadline".
+    // Such placeholders must never appear on the dashboard.
+    return year >= 2000 && year < 2100;
+  };
+
   const rows = (activities || [])
     .filter(x => !x.completed && x.deadline)
+    .filter(x => validDeadline(x.deadline))
     .filter(x => dateMs(x.deadline) >= Number(afterMs || 0));
 
   const explicit = rows
