@@ -4580,25 +4580,40 @@ function dateMs(value) {
   return Number.isFinite(t) ? t : 0;
 }
 
-function contractorPotentialScore(item) {
-  if (item.verificationStatus !== "confirmed") return 0;
-  let score = 25;
-  score += Math.min(20, Number(item.maxSignalWeight || 0) * 2);
-  score += Math.min(18, Number(item.dealCount || 0) * 3);
-  if (item.directCount > 0) score += 18;
-  if (item.directCount === 0 && item.tenderCount > 0) score -= 12;
-  if (item.openDeals > 0) score += 8;
+function contractorCrmActivityScore(item) {
+  let score = 10;
+
+  score += Math.min(20, Number(item.dealCount || 0) * 4);
+  if (Number(item.wonOpportunity || 0) > 0) score += 20;
+  if (Number(item.openDeals || 0) > 0) score += 20;
+  if (Number(item.directCount || 0) > 0) score += 10;
+  if (Number(item.directCount || 0) === 0 && Number(item.tenderCount || 0) > 0) score -= 5;
 
   const ageDays = item.lastActivityMs
     ? (Date.now() - item.lastActivityMs) / 86400000
     : 9999;
 
-  if (ageDays <= 180) score += 12;
-  else if (ageDays <= 365) score += 8;
-  else if (ageDays <= 730) score += 3;
+  if (ageDays <= 90) score += 20;
+  else if (ageDays <= 180) score += 15;
+  else if (ageDays <= 365) score += 10;
+  else if (ageDays <= 730) score += 5;
 
-  if (Number(item.totalOpportunity || 0) > 0) score += 4;
   return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function contractorPotentialScore(item) {
+  if (item.verificationStatus !== "confirmed") return 0;
+
+  const strategic = Number(item.strategicScore || 0);
+  const crm = contractorCrmActivityScore(item);
+
+  // Overall priority should not punish a strategically valuable contractor
+  // just because there is little recent CRM activity.
+  if (strategic > 0) {
+    return Math.max(0, Math.min(100, Math.round(strategic * 0.7 + crm * 0.3)));
+  }
+
+  return crm;
 }
 
 function publicCandidate(item) {
@@ -4623,6 +4638,9 @@ function publicCandidate(item) {
     verificationStatus: item.verificationStatus || "pending",
     verificationConfidence: Number(item.verificationConfidence || 0),
     contractorType: item.contractorType || "",
+    strategicScore: Number(item.strategicScore || 0),
+    strategicReason: item.strategicReason || "",
+    crmActivityScore: contractorCrmActivityScore(item),
     inn: item.verifiedInn || "",
     website: item.verifiedWebsite || "",
     purchasedProducts: Array.isArray(item.purchasedProducts)
@@ -4737,12 +4755,15 @@ function contractorVerificationFormat() {
           confidence: { type: "number", minimum: 0, maximum: 1 },
           contractor_type: { type: "string" },
           reason: { type: "string" },
+          strategic_score: { type: "number", minimum: 0, maximum: 100 },
+          strategic_reason: { type: "string" },
           identity_evidence: { type: "string" },
           website_evidence: { type: "string" },
           correspondence_evidence: { type: "string" }
         },
         required: [
           "status","confidence","contractor_type","reason",
+          "strategic_score","strategic_reason",
           "identity_evidence","website_evidence","correspondence_evidence"
         ]
       }
@@ -4803,6 +4824,8 @@ async function verifyContractorCompany(item) {
       verificationStatus: "unclear",
       verificationConfidence: 0,
       contractorType: "",
+      strategicScore: 0,
+      strategicReason: "",
       verificationReason: "Нет подтверждённого ИНН и официального корпоративного домена. Тип компании в B24 не считается доказательством.",
       identityEvidence: "",
       websiteEvidence: "",
@@ -4834,6 +4857,11 @@ async function verifyContractorCompany(item) {
       "Если сайт показывает только поставки/продажи/производство и нет явных работ на объектах заказчиков — status=not_contractor.",
       "Если идентичность или деятельность недостаточно подтверждена — status=unclear. Не угадывай.",
       "Для status=confirmed требуется содержательное внешнее подтверждение подрядной/сервисной деятельности, а не поле CRM.",
+      "Отдельно оцени strategic_score 0-100 — стратегическую привлекательность компании для продаж ТОП-СЕНС независимо от текущей активности в CRM.",
+      "Для strategic_score учитывай: масштаб компании и географию работ; число/класс промышленных объектов и проектов; работу на нефтегазовых, нефтеперерабатывающих, химических, металлургических и других ОПО; наличие строительно-монтажных, пусконаладочных, ремонтных, сервисных, EPC/EPCm работ; вероятность регулярной потребности в переносных/стационарных газоанализаторах для собственных бригад и объектов.",
+      "Крупный многопрофильный промышленный подрядчик с большим числом проектов и работами на ОПО должен иметь высокий strategic_score даже если в Bitrix24 мало недавних сделок.",
+      "Не повышай strategic_score только за известность бренда: нужны подтверждённые факты о масштабе и релевантных работах.",
+      "strategic_reason — краткое объяснение оценки на основании внешних фактов.",
       "website_evidence: конкретный факт с сайта/надёжного источника. correspondence_evidence: только факты из предоставленной переписки."
     ].join("\n"),
     input: [{
@@ -4864,6 +4892,8 @@ async function verifyContractorCompany(item) {
       : status === "not_contractor" ? "rejected" : "unclear",
     verificationConfidence: Number(parsed.confidence || 0),
     contractorType: String(parsed.contractor_type || ""),
+    strategicScore: Number(parsed.strategic_score || 0),
+    strategicReason: String(parsed.strategic_reason || ""),
     verificationReason: String(parsed.reason || ""),
     identityEvidence: String(parsed.identity_evidence || ""),
     websiteEvidence: String(parsed.website_evidence || ""),
@@ -5179,6 +5209,8 @@ async function contractorScanStep() {
           verificationStatus: "pending",
           verificationConfidence: 0,
           contractorType: "",
+          strategicScore: 0,
+          strategicReason: "",
           verificationReason: "",
           identityEvidence: "",
           websiteEvidence: "",
@@ -5395,6 +5427,8 @@ function dashboardHtml(status = dashboardStatus()) {
       <td>${idx + 1}</td>
       <td><b>${escapeHtml(item.company || "—")}</b></td>
       <td><span class="badge ${cls}">${score}/100</span></td>
+      <td><span class="badge">${Number(item.strategicScore || 0)}/100</span><br><span class="small">${escapeHtml(item.strategicReason || "")}</span></td>
+      <td><span class="badge">${Number(item.crmActivityScore || 0)}/100</span></td>
       <td>${Number(item.dealCount || 0)}</td>
       <td>${Number(item.openDeals || 0)}</td>
       <td>${escapeHtml(item.lastActivity || "—")}</td>
@@ -5468,8 +5502,8 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Компания</th><th>Потенциал</th><th>Сделок</th><th>Открытых</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Что купили*</th><th>Кто работал</th><th>Что происходит сейчас</th></tr></thead>
-<tbody>${topRows || `<tr><td colspan="12">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
+<thead><tr><th>#</th><th>Компания</th><th>Итоговый приоритет</th><th>Стратегический потенциал</th><th>Активность B24</th><th>Сделок</th><th>Открытых</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Что купили*</th><th>Кто работал</th><th>Что происходит сейчас</th></tr></thead>
+<tbody>${topRows || `<tr><td colspan="14">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
 <div class="section"><h2>Последние результаты проверки</h2>
@@ -5478,7 +5512,7 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
 
 <div class="section"><h2>Техническое состояние</h2>
 <div class="card small">Последняя ошибка: ${errorText}<br>Сделок-кандидатов без привязанной компании: ${Number(scan.unlinkedCandidateDeals || 0)}</div></div>
-<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Поля, заполненные менеджером, не являются доказательством. *«Выиграно в B24» и «Что купили» сейчас берутся из успешных сделок и их товарных строк; это ещё не подтверждённая оплата по счетам. Сканер работает read-only.</div>
+<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Итоговый приоритет = 70% стратегический потенциал компании + 30% текущая активность B24. Поля, заполненные менеджером, не являются доказательством. *«Выиграно в B24» и «Что купили» сейчас берутся из успешных сделок и их товарных строк; это ещё не подтверждённая оплата по счетам. Сканер работает read-only.</div>
 </div></body></html>`;
 }
 
