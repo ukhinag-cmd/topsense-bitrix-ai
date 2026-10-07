@@ -4697,6 +4697,7 @@ function publicCandidate(item) {
       ? [...item.managerNames.values()].filter(Boolean).slice(0, 8)
       : [],
     currentWork: Array.isArray(item.currentWork) ? item.currentWork.slice(0, 8) : [],
+    relationshipStatus: item.relationshipStatus || "",
     evidence: verifiedEvidence.slice(0, 5),
     sampleDeals: (item.sampleDeals || []).slice(0, 4),
   };
@@ -4977,6 +4978,72 @@ async function verifyContractorCompany(item) {
 }
 
 
+
+function compactDate(value) {
+  const t = value ? Date.parse(value) : NaN;
+  if (!Number.isFinite(t)) return "";
+  const d = new Date(t);
+  return String(d.getUTCDate()).padStart(2, "0") + "." +
+    String(d.getUTCMonth() + 1).padStart(2, "0") + "." +
+    d.getUTCFullYear();
+}
+
+function activityText(activity) {
+  return [activity?.subject || "", activity?.description || ""].join(" ").toLowerCase();
+}
+
+function looksLikeInvoice(text) {
+  return /\bсч[её]т\b|invoice|оплат/i.test(String(text || ""));
+}
+
+function looksLikeQuote(text) {
+  return /\bкп\b|коммерческ.{0,20}предлож/i.test(String(text || ""));
+}
+
+async function hydrateContractorRelationshipStatus(item) {
+  if (item.verificationStatus !== "confirmed") return;
+
+  const snapshots = item.dealSnapshots instanceof Map
+    ? [...item.dealSnapshots.values()]
+    : [];
+
+  if (!snapshots.length) {
+    item.relationshipStatus = "Нет истории";
+    return;
+  }
+
+  snapshots.sort((a,b) => dateMs(b.lastActivity) - dateMs(a.lastActivity));
+  const latest = snapshots[0];
+
+  let activities = [];
+  try { activities = await getRecentDealActivities(latest.id); } catch {}
+  activities = (activities || []).slice().sort((a,b) => dateMs(b.created) - dateMs(a.created));
+
+  const lastInbound = activities.find(x => String(x?.direction || "") === "1") || null;
+  const lastOutbound = activities.find(x => String(x?.direction || "") === "2") || null;
+  const inMs = dateMs(lastInbound?.created);
+  const outMs = dateMs(lastOutbound?.created);
+  const outText = activityText(lastOutbound);
+
+  if (latest.semantic === "S") {
+    item.relationshipStatus = "Продажа завершена";
+  } else if (latest.semantic === "F") {
+    if (looksLikeInvoice(outText)) item.relationshipStatus = "Счёт отправлен — не продали";
+    else if (looksLikeQuote(outText)) item.relationshipStatus = "КП отправлено — не продали";
+    else item.relationshipStatus = "Не продали";
+  } else if (inMs > outMs) {
+    item.relationshipStatus = "Запрос получен — ответа нет";
+  } else if (looksLikeInvoice(outText)) {
+    item.relationshipStatus = "Счёт отправлен — оплата не подтверждена";
+  } else if (looksLikeQuote(outText)) {
+    item.relationshipStatus = "КП отправлено — ждём решение";
+  } else if (latest.isOpen) {
+    item.relationshipStatus = "В работе";
+  } else {
+    item.relationshipStatus = "Контакт завершён";
+  }
+}
+
 const CONTRACTOR_PRODUCT_ROWS_CACHE = new Map();
 
 async function contractorDealProductRows(dealId) {
@@ -5047,6 +5114,7 @@ async function verifyNextContractorCandidate() {
     await verifyContractorCompany(next);
     if (next.verificationStatus === "confirmed") {
       await hydrateContractorPurchasedProducts(next);
+      await hydrateContractorRelationshipStatus(next);
     }
   } catch (error) {
     next.verificationStatus = "error";
@@ -5261,6 +5329,7 @@ async function contractorScanStep() {
           currentWork: [],
           dealSnapshots: new Map(),
           purchasedProducts: [],
+          relationshipStatus: "",
           evidence: new Set(),
           sampleDeals: [],
           sampleDealContexts: [],
@@ -5483,6 +5552,26 @@ function dashboardHtml(status = dashboardStatus()) {
     return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n) + " ₽";
   };
 
+  const dateOnly = value => {
+    const t = value ? Date.parse(value) : NaN;
+    if (!Number.isFinite(t)) return "—";
+    const d = new Date(t);
+    return String(d.getUTCDate()).padStart(2, "0") + "." +
+      String(d.getUTCMonth() + 1).padStart(2, "0") + "." +
+      d.getUTCFullYear();
+  };
+
+  const strategicShort = item => {
+    const parts = [];
+    if (item.hazardousIndustrialSites) parts.push("ОПО");
+    if (String(item.scaleLevel || "") === "large") parts.push("крупная");
+    for (const x of (item.relevantWorkTypes || []).slice(0, 2)) {
+      const v = String(x || "").trim();
+      if (v && !parts.includes(v)) parts.push(v);
+    }
+    return parts.slice(0, 3).join(" · ");
+  };
+
   const topRows = top.slice(0, 50).map((item, idx) => {
     const score = Number(item.score || 0);
     const cls = score >= 70 ? "ok" : score >= 50 ? "warn" : "";
@@ -5490,27 +5579,16 @@ function dashboardHtml(status = dashboardStatus()) {
       <td>${idx + 1}</td>
       <td><b>${escapeHtml(item.company || "—")}</b></td>
       <td><span class="badge ${cls}">${score}/100</span></td>
-      <td><span class="badge">${Number(item.strategicScore || 0)}/100</span><br><span class="small">${escapeHtml(item.strategicReason || "")}</span><br><span class="small">${escapeHtml((item.relevantWorkTypes || []).join(", "))}</span></td>
-      <td><span class="badge">${Number(item.crmActivityScore || 0)}/100</span></td>
-      <td>${Number(item.dealCount || 0)}</td>
-      <td>${Number(item.openDeals || 0)}</td>
-      <td>${escapeHtml(item.lastActivity || "—")}</td>
-      <td>${escapeHtml(money(item.wonOpportunity))}</td>
-      <td>${escapeHtml(money(item.openOpportunity))}</td>
-      <td>${escapeHtml(money(item.lostOpportunity))}</td>
-      <td>${escapeHtml((item.purchasedProducts || []).slice(0,6).map(x => {
+      <td class="compact"><span class="badge">${Number(item.strategicScore || 0)}</span><span class="mini">${escapeHtml(strategicShort(item) || "—")}</span></td>
+      <td class="center">${Number(item.dealCount || 0)}${Number(item.openDeals || 0) ? " / " + Number(item.openDeals || 0) : ""}</td>
+      <td class="nowrap">${escapeHtml(dateOnly(item.lastActivity))}</td>
+      <td class="moneycell">✓ ${escapeHtml(money(item.wonOpportunity))}<br>↗ ${escapeHtml(money(item.openOpportunity))}<br>× ${escapeHtml(money(item.lostOpportunity))}</td>
+      <td class="productcell" title="${escapeHtml((item.purchasedProducts || []).map(x => x.product).join(" • "))}">${escapeHtml((item.purchasedProducts || []).slice(0,2).map(x => {
         const qty = Number(x.quantity || 0);
-        const sum = Number(x.sum || 0);
-        const qtyText = qty ? " × " + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(qty) : "";
-        const sumText = sum ? " = " + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(sum) + " ₽" : "";
-        return x.product + qtyText + sumText;
-      }).join(" • ") || "Нет товарных строк в успешных сделках")}</td>
+        return x.product + (qty ? " ×" + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(qty) : "");
+      }).join(" · ") || "—")}</td>
       <td>${escapeHtml((item.managerNames || []).join(", ") || "—")}</td>
-      <td>${escapeHtml((item.currentWork || []).slice(0,3).map(x => {
-        const amount = Number(x.amount || 0);
-        const moneyText = amount ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(amount) + " ₽" : "";
-        return [x.title, x.responsible, moneyText, x.lastActivity].filter(Boolean).join(" — ");
-      }).join(" • ") || "Нет открытых сделок")}</td>
+      <td class="statuscell" title="${escapeHtml(item.relationshipStatus || "")}">${escapeHtml(item.relationshipStatus || "—")}</td>
     </tr>`;
   }).join("");
 
@@ -5533,20 +5611,23 @@ function dashboardHtml(status = dashboardStatus()) {
 <title>TOP-SENSE — Подрядчики</title>
 <style>
 :root{color-scheme:dark;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif}
-*{box-sizing:border-box}body{margin:0;background:#0b1020}.wrap{max-width:1500px;margin:0 auto;padding:24px}
-h1{font-size:28px;margin:0 0 6px}.sub{color:#9aa7bd;margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px}
-.card{background:#131b2f;border:1px solid #25314e;border-radius:14px;padding:14px}.k{color:#92a1ba;font-size:11px;text-transform:uppercase;letter-spacing:.05em}.v{font-size:24px;font-weight:700;margin-top:6px}.small{font-size:12px;color:#aab6c9;margin-top:5px}
-.bar{height:9px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:8px}.fill{height:100%;background:#5d8cff}
-.section{margin-top:18px}.section h2{font-size:18px;margin:0 0 10px}table{width:100%;border-collapse:collapse;background:#131b2f;border-radius:14px;overflow:hidden}
-th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13px;vertical-align:top}th{color:#9aa7bd;font-size:11px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
-.badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#263653;font-size:12px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
-.scroll{overflow:auto;max-height:680px;border-radius:14px}.note{margin-top:12px;color:#8290a7;font-size:12px}.live{color:#9ce4bd}
-@media(max-width:1100px){.grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:700px){.grid{grid-template-columns:1fr 1fr}.wrap{padding:12px}}
+*{box-sizing:border-box}html,body{margin:0;background:#0b1020}.wrap{max-width:none;width:100%;margin:0;padding:8px 10px}
+h1{font-size:18px;margin:0 0 2px}.sub{color:#9aa7bd;margin-bottom:5px;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:5px}
+.card{background:#131b2f;border:1px solid #25314e;border-radius:7px;padding:5px 7px}.k{color:#92a1ba;font-size:7px;text-transform:uppercase}.v{font-size:14px;font-weight:700;margin-top:1px}.small{font-size:8px;color:#aab6c9;margin-top:1px}
+.bar{height:4px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:3px}.fill{height:100%;background:#5d8cff}
+.section{margin-top:5px}.section h2{font-size:12px;margin:0 0 3px}table{width:100%;border-collapse:collapse;table-layout:fixed;background:#131b2f}
+th,td{text-align:left;padding:3px 4px;border-bottom:1px solid #25314e;font-size:9px;line-height:1.12;vertical-align:middle}th{color:#9aa7bd;font-size:7px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
+.badge{display:inline-block;padding:2px 4px;border-radius:999px;background:#263653;font-size:8px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
+.scroll{overflow:auto;max-height:calc(100vh - 145px);border-radius:7px}.note{margin-top:3px;color:#8290a7;font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
+.compact,.productcell,.statuscell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini{display:block;font-size:7px;color:#93a0b5;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:8px}.productcell{max-width:145px}.statuscell{max-width:180px}
+@media(max-width:1200px){th,td{font-size:8px;padding:3px}.grid{grid-template-columns:repeat(3,1fr)}}
 </style>
 </head>
 <body><div class="wrap">
 <h1>ДАШБОРД — ПОДРЯДЧИКИ</h1>
-<div class="sub">Проверка подрядчиков: сначала юрлицо/ИНН и официальный сайт, затем переписка Bitrix24. Поле «тип компании» — только подсказка. <span class="live">● Непрерывный цикл</span></div>
+<div class="sub">ИНН/сайт → B24. <span class="live">● live</span></div>
 
 <div class="grid">
   <div class="card"><div class="k">Сделок в B24</div><div class="v">${totalDeals || "…"}</div><div class="small">проход №${Number(scan.pass || 1)}</div></div>
@@ -5557,25 +5638,14 @@ th,td{text-align:left;padding:10px;border-bottom:1px solid #25314e;font-size:13p
   <div class="card"><div class="k">Только тендеры</div><div class="v">${Number(scan.tenderOnlyCompanies || 0)}</div><div class="small">по заполненным полям B24</div></div>
 </div>
 
-<div class="card">
-  <div class="k">Состояние фонового сканера</div>
-  <div class="v" style="font-size:18px">${escapeHtml(scan.status || "starting")} · ${escapeHtml(scan.mode || "")}</div>
-  <div class="small">Последняя пачка: ${escapeHtml(scan.lastBatchAt || "ещё не было")} · последний полный проход: ${escapeHtml(scan.lastCompletedPassAt || "ещё не завершён")} · проверено за жизнь процесса: ${Number(scan.scannedDealsLifetime || 0)}</div>
-</div>
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Компания</th><th>Итоговый приоритет</th><th>Стратегический потенциал</th><th>Активность B24</th><th>Сделок</th><th>Открытых</th><th>Последняя активность</th><th>Выиграно в B24*</th><th>Открытый потенциал</th><th>Проиграно</th><th>Что купили*</th><th>Кто работал</th><th>Что происходит сейчас</th></tr></thead>
-<tbody>${topRows || `<tr><td colspan="14">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
+<thead><tr><th>#</th><th>Компания</th><th>Приоритет</th><th>Стратегия</th><th>Сделки / откр.</th><th>Последний контакт</th><th>Деньги<br>✓ / ↗ / ×</th><th>Что купили</th><th>Менеджер</th><th>Сейчас</th></tr></thead>
+<tbody>${topRows || `<tr><td colspan="10">Пока нет компаний, прошедших проверку ИНН/официального сайта. CRM-тип сам по себе больше не считается доказательством.</td></tr>`}</tbody>
 </table></div></div>
 
-<div class="section"><h2>Последние результаты проверки</h2>
-<table><thead><tr><th>Время</th><th>Компания</th><th>Сигнал</th></tr></thead>
-<tbody>${recentRows || `<tr><td colspan="3">Новых находок пока нет.</td></tr>`}</tbody></table></div>
-
-<div class="section"><h2>Техническое состояние</h2>
-<div class="card small">Последняя ошибка: ${errorText}<br>Сделок-кандидатов без привязанной компании: ${Number(scan.unlinkedCandidateDeals || 0)}</div></div>
-<div class="note">Страница обновляется каждые 10 секунд. Классификация: ИНН/юрлицо → официальный сайт/надёжные источники → реальная переписка B24. Итоговый приоритет = 70% стратегический потенциал компании + 30% текущая активность B24. Поля, заполненные менеджером, не являются доказательством. *«Выиграно в B24» и «Что купили» сейчас берутся из успешных сделок и их товарных строк; это ещё не подтверждённая оплата по счетам. Сканер работает read-only.</div>
+<div class="note">✓ выиграно · ↗ открыто · × проиграно. «Сейчас» — краткий итог последнего общения. Успешная сделка ≠ подтверждённая оплата.</div>
 </div></body></html>`;
 }
 
