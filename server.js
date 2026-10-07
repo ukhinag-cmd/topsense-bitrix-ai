@@ -5000,6 +5000,39 @@ function looksLikeQuote(text) {
   return /\bкп\b|коммерческ.{0,20}предлож/i.test(String(text || ""));
 }
 
+function shortRequestTopic(latest, lastInbound) {
+  const candidates = [
+    String(lastInbound?.subject || "").trim(),
+    String(latest?.title || "").trim(),
+  ].filter(Boolean);
+
+  let text = candidates[0] || "Запрос";
+  text = text
+    .replace(/^(re|fw|fwd)\s*:\s*/ig, "")
+    .replace(/^запрос\s*(коммерческого\s+предложения|кп)?\s*[:\-–—]?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!text || text.length < 3) text = "Запрос";
+  if (text.length > 46) text = text.slice(0, 43).trim() + "…";
+  return text;
+}
+
+function outboundActionLabel(activity) {
+  if (!activity) return "";
+  const text = activityText(activity);
+
+  if (looksLikeInvoice(text)) return "счёт отправлен";
+  if (looksLikeQuote(text)) return "КП отправлено";
+
+  const provider = String(activity.provider_id || "").toUpperCase();
+  const typeId = String(activity.type_id || "");
+
+  if (provider.includes("EMAIL") || typeId === "4") return "ответили письмом";
+  if (provider.includes("VOX") || provider.includes("CALL") || typeId === "2") return "созвонились";
+  return "ответили";
+}
+
 async function hydrateContractorRelationshipStatus(item) {
   if (item.verificationStatus !== "confirmed") return;
 
@@ -5027,13 +5060,18 @@ async function hydrateContractorRelationshipStatus(item) {
 
   const lastInboundMs = dateMs(lastInbound?.created);
   const lastOutboundMs = dateMs(lastOutbound?.created);
+  const topic = shortRequestTopic(latest, lastInbound);
+  const action = outboundActionLabel(lastOutbound);
 
-  const hasQuote = Boolean(outbound.find(x => looksLikeQuote(activityText(x)))) ||
-    looksLikeQuote([latest.title, latest.comments, latest.additionalInfo].join(" "));
-  const hasInvoice = Boolean(outbound.find(x => looksLikeInvoice(activityText(x)))) ||
-    looksLikeInvoice([latest.title, latest.comments, latest.additionalInfo].join(" "));
-  const hasInbound = inbound.length > 0 ||
-    /запрос|заявк|request/i.test([latest.title, latest.comments, latest.additionalInfo].join(" "));
+  const crmText = [
+    latest.title || "",
+    latest.comments || "",
+    latest.additionalInfo || "",
+  ].join(" ");
+
+  const hasQuote = Boolean(outbound.find(x => looksLikeQuote(activityText(x)))) || looksLikeQuote(crmText);
+  const hasInvoice = Boolean(outbound.find(x => looksLikeInvoice(activityText(x)))) || looksLikeInvoice(crmText);
+  const hasInbound = inbound.length > 0 || /запрос|заявк|request/i.test(crmText);
 
   const lastRealContactMs = Math.max(
     dateMs(activities[0]?.created),
@@ -5052,29 +5090,28 @@ async function hydrateContractorRelationshipStatus(item) {
   let summary = "";
 
   if (latest.semantic === "S") {
-    summary = hasInvoice ? "Счёт → продажа"
-      : hasQuote ? "КП → продажа"
-      : "Продажа завершена";
+    if (hasInvoice) summary = topic + " → счёт → продажа";
+    else if (hasQuote) summary = topic + " → КП → продажа";
+    else summary = topic + " → продажа";
   } else if (latest.semantic === "F") {
-    summary = hasInvoice ? "Счёт → не продали"
-      : hasQuote ? "КП → не продали"
-      : hasInbound ? "Запрос → не продали"
-      : "Сделка проиграна";
+    if (hasInvoice) summary = topic + " → счёт → не продали";
+    else if (hasQuote) summary = topic + " → КП → не продали";
+    else if (action) summary = topic + " → " + action + " → не продали";
+    else summary = topic + " → не продали";
   } else if (lastInboundMs > lastOutboundMs) {
-    summary = lastOutbound ? "Клиент ответил → ответа нет" : "Запрос → ответа нет";
+    summary = topic + " → ответа нет";
   } else if (hasInvoice) {
-    summary = "Счёт отправлен → оплаты нет";
+    summary = topic + " → счёт отправлен → оплаты нет";
   } else if (hasQuote) {
-    summary = ageDays > 7 ? "КП отправлено → ответа нет" : "КП отправлено → ждём";
-  } else if (hasInbound && outbound.length) {
-    summary = ageDays > 7 ? "Запрос → ответили → тишина" : "Запрос → ответили → в работе";
+    summary = topic + " → КП отправлено → " + (ageDays > 7 ? "ответа нет" : "ждём решение");
+  } else if (hasInbound && lastOutbound) {
+    summary = topic + " → " + action + " → " + (ageDays > 7 ? "тишина" : "в работе");
   } else if (hasInbound) {
-    summary = "Запрос → ответа нет";
+    summary = topic + " → ответа нет";
   } else if (latest.isOpen) {
-    const shortTitle = String(latest.title || "").replace(/\s+/g, " ").trim().slice(0, 55);
-    summary = shortTitle ? "Открытая сделка: " + shortTitle : "Открытая сделка";
+    summary = topic + " → открытая сделка";
   } else {
-    summary = "Контакт завершён";
+    summary = topic + " → контакт завершён";
   }
 
   item.relationshipStatus = summary + stale;
