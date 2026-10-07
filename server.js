@@ -5059,11 +5059,23 @@ function normalizeDashboardProductName(value) {
   const raw = String(value || "").replace(/\s+/g, " ").trim();
   if (!raw) return "";
 
-  // Do not introduce the ambiguous generic word "датчик".
-  // If source explicitly says "сенсор", preserve it.
-  if (/сенсор/i.test(raw)) return raw;
+  // TOP-SENSE models are shown in the shortest commercial form: ТС260, ТС220, etc.
+  const topSense = raw.match(/(?:ТОП[\s-]*СЕНС|TOP[\s-]*SENSE|TOPSENSE|ТС|TS)\s*[-–—]?\s*(\d{2,4}[A-ZА-Я0-9-]*)/i);
+  if (topSense?.[1]) {
+    return "ТС" + String(topSense[1]).replace(/\s+/g, "").toUpperCase();
+  }
 
-  return raw.replace(/^датчик(?:и)?\s+/i, "").trim();
+  // Preserve other concise model codes if they are explicitly present.
+  const modelCode = raw.match(/\b([A-ZА-ЯЁ]{2,8}[- ]?\d{2,5}[A-ZА-ЯЁ0-9-]*)\b/i);
+  if (modelCode?.[1]) {
+    return String(modelCode[1]).replace(/\s+/g, "").toUpperCase();
+  }
+
+  // If the source explicitly says "сенсор", use that exact unambiguous term.
+  if (/сенсор/i.test(raw)) return "Сенсор";
+
+  // Never display the ambiguous generic term "датчик".
+  return "";
 }
 
 function extractGasList(text) {
@@ -5247,8 +5259,13 @@ async function hydrateContractorRelationshipStatus(item) {
   const parts = [];
   const productParts = [];
 
-  if (offer.product) productParts.push(offer.product);
-  if (offer.gases.length) productParts.push(offer.gases.join("/"));
+  if (offer.product) {
+    productParts.push(
+      offer.product + (offer.gases.length ? " (" + offer.gases.join("/") + ")" : "")
+    );
+  } else if (offer.gases.length) {
+    productParts.push(offer.gases.join("/"));
+  }
   if (offer.quantity) productParts.push(String(offer.quantity) + " шт.");
   if (productParts.length) parts.push(productParts.join(" · "));
 
@@ -5998,7 +6015,12 @@ function dashboardHtml(status = dashboardStatus()) {
       <td class="moneycell">✓ ${escapeHtml(money(item.wonOpportunity))}<br>↗ ${escapeHtml(money(item.openOpportunity))}<br>× ${escapeHtml(money(item.lostOpportunity))}</td>
       <td class="productcell" title="${escapeHtml((item.purchasedProducts || []).map(x => x.product).join(" • "))}">${escapeHtml((item.purchasedProducts || []).slice(0,2).map(x => {
         const qty = Number(x.quantity || 0);
-        return x.product + (qty ? " ×" + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(qty) : "");
+        const model = normalizeDashboardProductName(x.product);
+        const gases = extractGasList(x.product);
+        const label = model
+          ? model + (gases.length ? " (" + gases.join("/") + ")" : "")
+          : (gases.length ? gases.join("/") : "—");
+        return label + (qty ? " ×" + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(qty) : "");
       }).join(" · ") || "—")}</td>
       <td class="managercell">${escapeHtml((item.managerNames || []).join(", ") || "—")}<br><span class="auditbadge">${Number(item.managerQualityScore || 0)}/100 · ${escapeHtml(item.managerQualityLevel || "—")}</span><br><span class="audittags">${escapeHtml(item.managerQualitySummary || "")}</span></td>
       <td class="statuscell" title="${escapeHtml(item.relationshipStatus || "")}">${escapeHtml(item.relationshipStatus || "—")}</td>
