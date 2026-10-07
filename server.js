@@ -4755,6 +4755,8 @@ function publicCandidate(item) {
     managerQualityScore: Number(item.managerQualityScore || 0),
     managerQualityLevel: item.managerQualityLevel || "",
     managerQualitySummary: item.managerQualitySummary || "",
+    managerQualificationScore: Number(item.managerQualificationScore || 0),
+    managerQualificationSummary: item.managerQualificationSummary || "",
     managerProcessIssue: item.managerProcessIssue || "",
     evidence: verifiedEvidence.slice(0, 5),
     sampleDeals: (item.sampleDeals || []).slice(0, 4),
@@ -5511,24 +5513,11 @@ async function hydrateContractorManagerQuality(item) {
   const qText = [latest.qualificationText || "", latest.qualificationHistory || ""]
     .filter(Boolean)
     .join("\n\n");
-  const qBlocks = parseQuestionBlocks(qText);
-  const answered = qBlocks.filter(x => isMeaningfulManagerAnswer(x.answer)).length;
-  const qRatio = qBlocks.length ? answered / qBlocks.length : 0;
+  const qBlocks = parseQuestionBlocks(qText)
+    .filter(x => isMeaningfulManagerAnswer(x.answer));
 
-  let qualification = 0;
-  if (offer.product) qualification += 5;
-  if (offer.gases.length) qualification += 5;
-  if (offer.quantity) qualification += 5;
-  if (String(latest.purchaseFormatRaw || "").trim()) qualification += 5;
-  if (String(latest.deliveryDeadline || "").trim()) qualification += 5;
-  if (String(latest.endCustomer || "").trim()) qualification += 5;
-  if (
-    String(latest.brands || "").trim() ||
-    String(latest.competitorPrices || "").trim() ||
-    String(latest.analogs || "").trim()
-  ) qualification += 5;
-  qualification += Math.round(Math.min(1, qRatio) * 5);
-  qualification = Math.min(40, qualification);
+  const answeredQuestion = re =>
+    qBlocks.some(x => re.test((x.question + " " + x.answer).toLowerCase()));
 
   const communicationContactIds = new Set();
   const communicationValues = new Set();
@@ -5541,6 +5530,12 @@ async function hydrateContractorManagerQuality(item) {
   }
 
   const decisionContacts = contacts.filter(contactLooksLikeDecisionMaker);
+  const decisionContactIds = new Set(
+    decisionContacts.map(x => String(x.ID || "")).filter(Boolean)
+  );
+  const communicatedWithDecisionMaker = [...communicationContactIds]
+    .some(id => decisionContactIds.has(id));
+
   const auditText = [
     latest.title || "",
     latest.comments || "",
@@ -5549,6 +5544,75 @@ async function hydrateContractorManagerQuality(item) {
   ].join(" ").toLowerCase();
 
   const explicitContactSearch = /кто.{0,20}(отвеч|заним|реш)|контакт.{0,25}(лпр|руковод|началь|кип|снабж|закуп)|лпр|выйти.{0,15}на|соедините|переключите/i.test(auditText);
+
+  // Qualification score measures what the manager actually clarified,
+  // not facts already present in the incoming request (model/gas/quantity/sum).
+  let qualification = 0;
+  const qualificationFacts = [];
+  const qualificationMissing = [];
+
+  const addQualification = (ok, points, label) => {
+    if (ok) {
+      qualification += points;
+      qualificationFacts.push(label);
+    } else {
+      qualificationMissing.push(label);
+    }
+  };
+
+  const lprAnswered = answeredQuestion(/лпр|принимает.{0,15}решен|кто.{0,15}реша|согласовывает|утверждает/);
+  const lprKnown = lprAnswered || communicatedWithDecisionMaker;
+  if (lprKnown) {
+    qualification += 10;
+    qualificationFacts.push("ЛПР");
+  } else if (decisionContacts.length) {
+    qualification += 5;
+    qualificationFacts.push("ЛПР найден");
+    qualificationMissing.push("контакт с ЛПР");
+  } else {
+    qualificationMissing.push("ЛПР");
+  }
+
+  const objectTask = answeredQuestion(/для какой.{0,20}(задач|объект)|на каком.{0,15}объект|где.{0,15}использ|назначен|услови.{0,10}эксплуатац/);
+  addQualification(objectTask, 5, "объект/задача");
+
+  const endCustomerKnown =
+    answeredQuestion(/конечн.{0,15}заказчик|для кого|на чей.{0,10}объект|кто заказчик/) ||
+    Boolean(String(latest.endCustomer || "").trim());
+  addQualification(endCustomerKnown, 5, "конечный заказчик");
+
+  const selectionRight = answeredQuestion(/сами.{0,15}выбира|кто.{0,15}выбира|готов.{0,15}спецификац|по спецификац|право.{0,10}выбор|кто.{0,15}определяет.{0,15}оборуд/);
+  addQualification(selectionRight, 5, "кто выбирает");
+
+  const alternativeKnown =
+    answeredQuestion(/аналог|альтернатив|друг.{0,15}бренд|смен.{0,10}бренд|можно.{0,15}предлож/) ||
+    Boolean(String(latest.analogs || "").trim());
+  addQualification(alternativeKnown, 5, "аналог/бренд");
+
+  const deadlineKnown =
+    answeredQuestion(/срок|когда.{0,15}(нуж|постав|кп)|к какому/) ||
+    Boolean(String(latest.deliveryDeadline || "").trim());
+  addQualification(deadlineKnown, 5, "срок");
+
+  const purchaseKnown =
+    answeredQuestion(/тендер|прямая.{0,10}закуп|как.{0,15}закуп|формат.{0,10}закуп|через.{0,10}закуп/) ||
+    Boolean(String(latest.purchaseFormatRaw || "").trim());
+  addQualification(purchaseKnown, 5, "закупка");
+
+  const competitorsKnown =
+    answeredQuestion(/конкур|какие.{0,15}(бренд|производител)|что.{0,15}использ|текущ.{0,15}(прибор|поставщик)|цена.{0,15}конкур/) ||
+    Boolean(String(latest.brands || "").trim()) ||
+    Boolean(String(latest.competitorPrices || "").trim());
+  addQualification(competitorsKnown, 5, "конкуренты");
+
+  const choiceCriterion = answeredQuestion(/что.{0,15}важнее|главн.{0,20}при выборе|критери.{0,10}выбор|на что.{0,20}смотр|приоритет.{0,15}(цен|срок|характер)/);
+  addQualification(choiceCriterion, 5, "критерий выбора");
+
+  const winCondition = answeredQuestion(/что.{0,15}нужно.{0,20}(сделать|быть)|чтобы.{0,20}(выбра|куп|отдал)|что.{0,20}повысит.{0,15}шанс|услови.{0,15}побед|отдали.{0,15}нам/);
+  addQualification(winCondition, 5, "как выиграть");
+
+  qualification = Math.min(55, qualification);
+
   const additionalContacts = Math.max(
     contacts.length,
     communicationContactIds.size,
@@ -5574,7 +5638,15 @@ async function hydrateContractorManagerQuality(item) {
   approvalScore = Math.min(20, approvalScore);
 
   const outbound = activities.filter(x => String(x?.direction || "") === "2");
-  const commercial = outbound.find(x => ["Счёт","КП","Цена в письме"].includes(commercialActionKind(x))) || null;
+  let commercial = null;
+  for (const activity of outbound) {
+    const kind = await commercialActionKindResolved(activity);
+    if (["Счёт","КП","Цена в письме"].includes(kind)) {
+      commercial = activity;
+      break;
+    }
+  }
+
   const commercialMs = dateMs(commercial?.created);
   const followTask = relationshipFollowupTask(activities, commercialMs);
   const laterOutbound = commercialMs
@@ -5588,12 +5660,23 @@ async function hydrateContractorManagerQuality(item) {
   if (laterOutbound >= 2) followupScore += 3;
   followupScore = Math.min(20, followupScore);
 
+  // Overall manager score remains 0-100:
+  // qualification 55%, contacts 15%, approval 15%, follow-up 15%.
+  const weightedTotal = Math.round(
+    qualification +
+    (contactsScore / 20) * 15 +
+    (approvalScore / 20) * 15 +
+    (followupScore / 20) * 15
+  );
+
   const missingTaskFault = Boolean(latest.isOpen && !followTask);
-  const rawTotal = qualification + contactsScore + approvalScore + followupScore;
-  const total = missingTaskFault ? Math.min(rawTotal, 59) : rawTotal;
+  const total = missingTaskFault ? Math.min(weightedTotal, 59) : weightedTotal;
+
+  const missingText = qualificationMissing.length
+    ? "не выяснено: " + qualificationMissing.slice(0, 5).join(", ")
+    : "квалификация полная";
 
   const tags = [
-    "квал " + qualification + "/40",
     "конт. " + Math.max(contacts.length, communicationContactIds.size),
     decisionContacts.length ? "ЛПР ✓" : "ЛПР —",
     approvalAttempt ? "соглас. ✓" : "соглас. —",
@@ -5604,6 +5687,9 @@ async function hydrateContractorManagerQuality(item) {
   item.managerQualityLevel = managerAuditScoreClass(total);
   item.managerQualitySummary = tags.join(" · ");
   item.managerQualificationScore = qualification;
+  item.managerQualificationSummary = missingText;
+  item.managerQualificationFacts = qualificationFacts;
+  item.managerQualificationMissing = qualificationMissing;
   item.managerContactsScore = contactsScore;
   item.managerApprovalScore = approvalScore;
   item.managerFollowupScore = followupScore;
@@ -5955,6 +6041,8 @@ async function contractorScanStep() {
           managerQualityScore: 0,
           managerQualityLevel: "",
           managerQualitySummary: "",
+          managerQualificationScore: 0,
+          managerQualificationSummary: "",
           managerProcessIssue: "",
           managerAuditCheckedAt: 0,
           evidence: new Set(),
@@ -6238,7 +6326,7 @@ function dashboardHtml(status = dashboardStatus()) {
           : (gases.length ? gases.join("/") : "—");
         return label + (qty ? " ×" + new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(qty) : "");
       }).join(" · ") || "—")}</td>
-      <td class="managercell">${escapeHtml((item.managerNames || []).join(", ") || "—")}<br><span class="auditbadge">${Number(item.managerQualityScore || 0)}/100 · ${escapeHtml(item.managerQualityLevel || "—")}</span><br><span class="audittags">${escapeHtml(item.managerQualitySummary || "")}</span></td>
+      <td class="managercell">${escapeHtml((item.managerNames || []).join(", ") || "—")}<br><span class="qualbadge">Квал. ${Number(item.managerQualificationScore || 0)}/55</span><br><span class="qualsummary">${escapeHtml(item.managerQualificationSummary || "")}</span><br><span class="auditbadge">Работа ${Number(item.managerQualityScore || 0)}/100 · ${escapeHtml(item.managerQualityLevel || "—")}</span><br><span class="audittags">${escapeHtml(item.managerQualitySummary || "")}</span></td>
       <td class="statuscell" title="${escapeHtml(item.relationshipStatus || "")}">${escapeHtml(item.relationshipStatus || "—")}</td>
     </tr>`;
   }).join("");
@@ -6272,7 +6360,7 @@ th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #25314e;font-size:
 .badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#263653;font-size:11px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
 .scroll{overflow:auto;max-height:calc(100vh - 220px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
 .productcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.statuscell{white-space:normal;overflow:visible;line-height:1.2}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:11px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.2;overflow:visible}
-.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:150px}.statuscell{max-width:300px}.managercell{white-space:normal;line-height:1.18}.auditbadge{display:inline-block;margin-top:3px;font-weight:700}.audittags{display:block;margin-top:2px;font-size:10px;color:#aebbd0}
+.nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:11px}.productcell{max-width:150px}.statuscell{max-width:300px}.managercell{white-space:normal;line-height:1.22}.qualbadge{display:inline-block;margin-top:4px;font-size:15px;font-weight:800}.qualsummary{display:block;margin-top:2px;font-size:12px;color:#d3dced}.auditbadge{display:inline-block;margin-top:5px;font-size:13px;font-weight:700}.audittags{display:block;margin-top:2px;font-size:11px;color:#aebbd0}
 @media(max-width:1400px){th,td{font-size:12px;padding:6px 7px}.mini{font-size:10px}.grid{grid-template-columns:repeat(6,1fr)}}
 </style>
 </head>
