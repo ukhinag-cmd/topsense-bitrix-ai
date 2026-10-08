@@ -7004,6 +7004,9 @@ function dashboardStatus() {
       persistentStoreConfigured: sheetStoreConfigured(),
       classifiedCompanyRegistry: PERSISTED_COMPANY_TYPES.size,
       pendingCompanyRegistry: PERSISTED_PENDING_COMPANIES.size,
+      pendingCompanies: [...PERSISTED_PENDING_COMPANIES.values()]
+        .sort((a,b) => dateMs(b?.queuedAt || b?.lastActivity) - dateMs(a?.queuedAt || a?.lastActivity))
+        .slice(0, 100),
       lastDailyScanDate: scan.lastDailyScanDate || null,
       lastDailyScanAt: scan.lastDailyScanAt || null,
       dailyScanEnabled: dailyContractorScanEnabled(),
@@ -7049,6 +7052,7 @@ function dashboardHtml(status = dashboardStatus()) {
   const scanned = Number(scan.scannedDealsPass || 0);
   const pct = totalDeals ? Math.min(100, Math.round(scanned / totalDeals * 100)) : 0;
   const top = Array.isArray(scan.topCandidates) ? scan.topCandidates : [];
+  const pending = Array.isArray(scan.pendingCompanies) ? scan.pendingCompanies : [];
   const recent = Array.isArray(scan.recentDiscoveries) ? scan.recentDiscoveries : [];
 
   const money = value => {
@@ -7108,6 +7112,25 @@ function dashboardHtml(status = dashboardStatus()) {
     </tr>`;
   }).join("");
 
+  const pendingRows = pending.map((item, idx) => {
+    const inn = String(item.inn || "").trim();
+    const latestDeal = Array.isArray(item.sampleDeals) && item.sampleDeals.length
+      ? item.sampleDeals[0]
+      : "—";
+    const statusText = scan.openAiPaused
+      ? "Ждёт пополнения API"
+      : "Ждёт AI-проверки";
+    return `<tr>
+      <td>${idx + 1}</td>
+      <td><b>${escapeHtml(item.company || "—")}</b></td>
+      <td class="nowrap">${escapeHtml(inn || "—")}</td>
+      <td class="nowrap">${escapeHtml(item.companyId || "—")}</td>
+      <td>${escapeHtml(latestDeal)}</td>
+      <td class="nowrap">${escapeHtml(dateOnly(item.queuedAt || item.lastActivity))}</td>
+      <td><span class="badge warn">${escapeHtml(statusText)}</span></td>
+    </tr>`;
+  }).join("");
+
   const recentRows = recent.slice(0, 12).map(item => `<tr>
     <td>${escapeHtml(item.at || "")}</td>
     <td><b>${escapeHtml(item.company || "")}</b></td>
@@ -7134,6 +7157,7 @@ h1{font-size:27px;margin:0 0 5px}.sub{color:#9aa7bd;margin-bottom:11px;font-size
 .bar{height:6px;background:#24304b;border-radius:999px;overflow:hidden;margin-top:5px}.fill{height:100%;background:#5d8cff}
 .section{margin-top:10px}.section h2{font-size:19px;margin:0 0 7px}
 table{width:100%;min-width:1580px;border-collapse:collapse;table-layout:fixed;background:#131b2f}
+table.queue{min-width:1100px}
 .col-num{width:34px}.col-company{width:180px}.col-priority{width:76px}.col-strategy{width:150px}.col-deals{width:82px}.col-contact{width:106px}.col-money{width:108px}.col-bought{width:92px}.col-manager{width:370px}.col-now{width:430px}
 th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #25314e;font-size:15px;line-height:1.28;vertical-align:middle}
 th{color:#9aa7bd;font-size:12px;text-transform:uppercase;position:sticky;top:0;background:#131b2f}
@@ -7155,11 +7179,17 @@ th:nth-child(8),td:nth-child(8){padding-left:4px;padding-right:4px}
   <div class="card"><div class="k">Сделок в B24</div><div class="v">${totalDeals || "…"}</div><div class="small">проход №${Number(scan.pass || 1)}</div></div>
   <div class="card"><div class="k">Проверено в проходе</div><div class="v">${scanned}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div><div class="small">${pct}%</div></div>
   <div class="card"><div class="k">Подтверждённых подрядчиков</div><div class="v">${Number(scan.verifiedContractors || 0)}</div><div class="small">после внешней проверки</div></div>
-  <div class="card"><div class="k">На проверке</div><div class="v">${Number(scan.pendingVerification || 0)}</div><div class="small">кандидатов всего: ${Number(scan.discoveredCandidates || 0)} · неясно: ${Number(scan.unclearCandidates || 0)} · отклонено: ${Number(scan.rejectedCandidates || 0)}</div></div>
+  <div class="card"><div class="k">Ждут AI-проверки</div><div class="v">${Number(scan.pendingCompanyRegistry || 0)}</div><div class="small">новые компании сохранены в Google Таблице</div></div>
   <div class="card"><div class="k">Прямая закупка</div><div class="v">${Number(scan.directPurchaseCompanies || 0)}</div><div class="small">включая смешанный формат</div></div>
   <div class="card"><div class="k">Только тендеры</div><div class="v">${Number(scan.tenderOnlyCompanies || 0)}</div><div class="small">по заполненным полям B24</div></div>
 </div>
 
+
+<div class="section"><h2>Новые компании — очередь на проверку</h2>
+<div class="scroll"><table class="queue">
+<thead><tr><th>#</th><th>Компания</th><th>ИНН</th><th>Bitrix ID</th><th>Последняя сделка</th><th>Добавлена</th><th>Статус</th></tr></thead>
+<tbody>${pendingRows || `<tr><td colspan="7">Очередь пуста.</td></tr>`}</tbody>
+</table></div></div>
 
 <div class="section"><h2>Подтверждённые подрядчики</h2>
 <div class="scroll"><table>
