@@ -429,16 +429,18 @@ async function handleEvent(evt) {
   }
 }
 
-async function syncOpenDeals(limitPages = 4) {
+async function syncRecentDeals(limitPages = 4) {
   if (SALES.syncing) return;
   SALES.syncing = true;
   try {
     let start = 0;
     let pages = 0;
+    const since = new Date(Date.now() - 45 * 86400000).toISOString();
+
     do {
       const payload = await bitrixRaw("crm.deal.list", {
         order: { DATE_MODIFY: "DESC" },
-        filter: { CLOSED: "N" },
+        filter: { ">DATE_MODIFY": since },
         select: [
           "ID","TITLE","ASSIGNED_BY_ID","SOURCE_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID",
           "OPPORTUNITY","CURRENCY_ID","DATE_CREATE","DATE_MODIFY","BEGINDATE","CLOSEDATE",
@@ -451,18 +453,34 @@ async function syncOpenDeals(limitPages = 4) {
       for (const deal of rows) {
         await snapshotDeal(deal, "sync");
       }
+
       pages += 1;
       start = Number.isFinite(Number(payload.next)) ? Number(payload.next) : -1;
+
       if (start >= 0 && pages < limitPages) {
-        await new Promise(resolve => setTimeout(resolve, 1200));
+        await new Promise(resolve => setTimeout(resolve, 1400));
       }
     } while (start >= 0 && pages < limitPages);
 
     SALES.lastSyncAt = new Date().toISOString();
-    console.log(JSON.stringify({ source: "sales-mvp", action: "sync-ok", pages, deals: SALES.deals.size }));
+    console.log(JSON.stringify({
+      source: "sales-mvp",
+      action: "sync-ok",
+      pages,
+      trackedDeals: SALES.deals.size,
+      since,
+    }));
   } catch (error) {
-    SALES.lastError = { at: new Date().toISOString(), source: "sales-sync", message: String(error.message || error) };
-    console.warn(JSON.stringify({ source: "sales-mvp", action: "sync-failed", error: String(error.message || error) }));
+    SALES.lastError = {
+      at: new Date().toISOString(),
+      source: "sales-sync",
+      message: String(error.message || error),
+    };
+    console.warn(JSON.stringify({
+      source: "sales-mvp",
+      action: "sync-failed",
+      error: String(error.message || error),
+    }));
   } finally {
     SALES.syncing = false;
   }
@@ -597,8 +615,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 async function start() {
   await loadStages();
   await loadPersisted();
-  setTimeout(() => syncOpenDeals().catch(() => {}), 5000);
-  SALES.syncTimer = setInterval(() => syncOpenDeals(2).catch(() => {}), 15 * 60 * 1000);
+  setTimeout(() => syncRecentDeals().catch(() => {}), 5000);
+  SALES.syncTimer = setInterval(() => syncRecentDeals(2).catch(() => {}), 2 * 60 * 1000);
 }
 
 module.exports = {
