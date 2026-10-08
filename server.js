@@ -4565,6 +4565,7 @@ async function processDeal(evt) {
 const CONTRACTOR_SCAN_CANDIDATES = new Map();
 const PERSISTED_CONTRACTORS = new Map();
 const PERSISTED_COMPANY_TYPES = new Map();
+const PERSISTED_PENDING_COMPANIES = new Map();
 const CONTRACTOR_SCAN_COMPANY_CACHE = new Map();
 let CONTRACTOR_SCAN_RUNNING = false;
 let CONTRACTOR_SCAN_TIMER = null;
@@ -5899,6 +5900,7 @@ async function loadPersistedContractors() {
 
     PERSISTED_CONTRACTORS.clear();
     PERSISTED_COMPANY_TYPES.clear();
+    PERSISTED_PENDING_COMPANIES.clear();
 
     let lastDailyScanDate = "";
 
@@ -5916,6 +5918,10 @@ async function loadPersistedContractors() {
         PERSISTED_COMPANY_TYPES.set(key, row);
       }
 
+      if (row.verificationStatus === "pending") {
+        PERSISTED_PENDING_COMPANIES.set(key, row);
+      }
+
       if (row.verificationStatus === "confirmed") {
         PERSISTED_CONTRACTORS.set(key, row);
       }
@@ -5928,6 +5934,7 @@ async function loadPersistedContractors() {
       action: "load-ok",
       contractorCount: PERSISTED_CONTRACTORS.size,
       classifiedCompanyCount: PERSISTED_COMPANY_TYPES.size,
+      pendingCompanyCount: PERSISTED_PENDING_COMPANIES.size,
       lastDailyScanDate: lastDailyScanDate || null,
     }));
 
@@ -5949,6 +5956,7 @@ async function persistContractorCandidate(item) {
   if (!key) return;
 
   PERSISTED_COMPANY_TYPES.set(key, row);
+  PERSISTED_PENDING_COMPANIES.delete(key);
 
   if (row.verificationStatus === "confirmed") {
     PERSISTED_CONTRACTORS.set(key, row);
@@ -5976,6 +5984,158 @@ async function persistContractorCandidate(item) {
       error: error instanceof Error ? error.message : String(error),
     }));
   }
+}
+
+async function persistPendingCompany(item) {
+  if (!item || !item.companyId) return null;
+
+  const known = await persistedClassificationForItem(item);
+  if (known) {
+    applyPersistedClassification(item, known);
+    return { reused: true, row: known };
+  }
+
+  // Identity lookup is Bitrix-only and does not spend OpenAI credits.
+  const company = await contractorCompanyForVerification(item.companyId);
+  if (company) {
+    item.company = String(company.TITLE || item.company || "");
+    const inn = await contractorCompanyInn(item.companyId, company);
+    const domain = contractorCompanyDomain(company);
+    item.verifiedInn = inn || item.verifiedInn || "";
+    item.verifiedWebsite = domain ? "https://" + domain : (item.verifiedWebsite || "");
+  }
+
+  item.verificationStatus = "pending";
+  const row = publicCandidate(item);
+  row.recordType = "company-classification";
+  row.queuedAt = new Date().toISOString();
+
+  const key = contractorPersistenceKey(row);
+  if (!key) return null;
+
+  PERSISTED_PENDING_COMPANIES.set(key, row);
+
+  if (sheetStoreConfigured()) {
+    try {
+      await sheetStoreRequest("upsert", [{ key, payload: row }]);
+      console.log(JSON.stringify({
+        source: "contractor-store",
+        action: "pending-upsert-ok",
+        key,
+        company: row.company || "",
+      }));
+    } catch (error) {
+      console.warn(JSON.stringify({
+        source: "contractor-store",
+        action: "pending-upsert-failed",
+        key,
+        company: row.company || "",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+
+  return { reused: false, row };
+}
+
+function candidateFromPersistedRow(row) {
+  const item = {
+    companyId: String(row?.companyId || ""),
+    company: String(row?.company || ""),
+    dealCount: Number(row?.dealCount || 0),
+    openDeals: Number(row?.openDeals || 0),
+    directCount: row?.purchaseMode === "Прямая закупка" || row?.purchaseMode === "Смешанный" ? 1 : 0,
+    tenderCount: row?.purchaseMode === "Тендер/торги" || row?.purchaseMode === "Смешанный" ? 1 : 0,
+    totalOpportunity: Number(row?.totalOpportunity || 0),
+    wonOpportunity: Number(row?.wonOpportunity || 0),
+    openOpportunity: Number(row?.openOpportunity || 0),
+    lostOpportunity: Number(row?.lostOpportunity || 0),
+    unclassifiedOpportunity: Number(row?.unclassifiedOpportunity || 0),
+    lastActivityMs: dateMs(row?.lastActivity),
+    lastActivity: row?.lastActivity || "",
+    maxSignalWeight: 0,
+    managers: new Set(Array.isArray(row?.managers) ? row.managers : []),
+    managerNames: new Map(),
+    currentWork: Array.isArray(row?.currentWork) ? row.currentWork : [],
+    dealSnapshots: new Map(),
+    purchasedProducts: Array.isArray(row?.purchasedProducts) ? row.purchasedProducts : [],
+    relationshipStatus: row?.relationshipStatus || "",
+    managerQualityScore: Number(row?.managerQualityScore || 0),
+    managerQualityLevel: row?.managerQualityLevel || "",
+    managerQualitySummary: row?.managerQualitySummary || "",
+    managerQualificationScore: Number(row?.managerQualificationScore || 0),
+    managerQualificationSummary: row?.managerQualificationSummary || "",
+    managerProcessIssue: row?.managerProcessIssue || "",
+    managerAuditCheckedAt: 0,
+    evidence: new Set(Array.isArray(row?.evidence) ? row.evidence : []),
+    sampleDeals: Array.isArray(row?.sampleDeals) ? row.sampleDeals : [],
+    sampleDealContexts: [],
+    verificationStatus: "pending",
+    verificationConfidence: 0,
+    contractorType: "",
+    strategicScore: 0,
+    strategicReason: "",
+    industrialRelevance: "unknown",
+    hazardousIndustrialSites: false,
+    relevantWorkTypes: [],
+    scaleLevel: "unknown",
+    gasDetectionNeed: "unknown",
+    verificationReason: "",
+    identityEvidence: "",
+    websiteEvidence: "",
+    correspondenceEvidence: "",
+    verifiedInn: row?.inn || "",
+    verifiedWebsite: row?.website || "",
+  };
+
+  if (Array.isArray(row?.managerNames)) {
+    row.managerNames.forEach((name, idx) => {
+      const id = [...item.managers][idx] || "name:" + idx;
+      item.managerNames.set(String(id), String(name || ""));
+    });
+  }
+
+  return item;
+}
+
+async function classifyPersistedPendingCompanies(limit = 25) {
+  if (openAiPaused()) return { skipped: "openai-paused" };
+
+  let classified = 0;
+  const rows = [...PERSISTED_PENDING_COMPANIES.values()].slice(0, limit);
+
+  for (const row of rows) {
+    if (openAiPaused()) break;
+
+    const item = candidateFromPersistedRow(row);
+    if (!item.companyId) continue;
+
+    CONTRACTOR_SCAN_CANDIDATES.set(item.companyId, item);
+
+    await verifyContractorCompany(item);
+
+    if (item.verificationStatus === "confirmed") {
+      await hydrateContractorPurchasedProducts(item);
+      await hydrateContractorRelationshipStatus(item);
+      await hydrateContractorManagerQuality(item);
+    }
+
+    if (item.verificationStatus === "confirmed" || item.verificationStatus === "rejected") {
+      await persistContractorCandidate(item);
+      classified += 1;
+    }
+  }
+
+  refreshContractorScanSummary();
+
+  console.log(JSON.stringify({
+    source: "contractor-daily-scan",
+    action: "pending-classification-pass",
+    classified,
+    remaining: PERSISTED_PENDING_COMPANIES.size,
+  }));
+
+  return { classified, remaining: PERSISTED_PENDING_COMPANIES.size };
 }
 
 async function persistDailyContractorScanMeta(dateKey, stats = {}) {
@@ -6415,7 +6575,6 @@ let DAILY_CONTRACTOR_SCAN_RUNNING = false;
 
 async function runDailyContractorScan(dateKey) {
   if (!dailyContractorScanEnabled()) return { skipped: "disabled" };
-  if (openAiPaused()) return { skipped: "openai-paused" };
   if (DAILY_CONTRACTOR_SCAN_RUNNING) return { skipped: "already-running" };
 
   DAILY_CONTRACTOR_SCAN_RUNNING = true;
@@ -6469,18 +6628,24 @@ async function runDailyContractorScan(dateKey) {
       cursor = Number(raw.next);
     }
 
+    let queuedNow = 0;
+    let reusedKnown = 0;
+
+    const dailyItems = [...CONTRACTOR_SCAN_CANDIDATES.values()]
+      .filter(item => item.dailyScanDate === dateKey);
+
+    for (const item of dailyItems) {
+      if (item.verificationStatus && item.verificationStatus !== "pending") continue;
+      const persisted = await persistPendingCompany(item);
+      if (persisted?.reused) reusedKnown += 1;
+      else if (persisted?.row) queuedNow += 1;
+    }
+
     let classifiedNow = 0;
 
-    while (true) {
-      const pending = [...CONTRACTOR_SCAN_CANDIDATES.values()].find(
-        item => item.dailyScanDate === dateKey &&
-          (!item.verificationStatus || item.verificationStatus === "pending")
-      );
-
-      if (!pending) break;
-
-      await verifyNextContractorCandidate(item => item.dailyScanDate === dateKey);
-      classifiedNow += 1;
+    if (!openAiPaused()) {
+      const result = await classifyPersistedPendingCompanies(50);
+      classifiedNow = Number(result?.classified || 0);
     }
 
     refreshContractorScanSummary();
@@ -6488,7 +6653,10 @@ async function runDailyContractorScan(dateKey) {
     await persistDailyContractorScanMeta(dateKey, {
       dealsRead,
       uniqueCompanies: companyIds.size,
+      queuedNow,
+      reusedKnown,
       classifiedNow,
+      openAiPaused: openAiPaused(),
     });
 
     scan.lastDailyScanAt = new Date().toISOString();
@@ -6500,7 +6668,10 @@ async function runDailyContractorScan(dateKey) {
       date: dateKey,
       dealsRead,
       uniqueCompanies: companyIds.size,
+      queuedNow,
+      reusedKnown,
       classifiedNow,
+      openAiPaused: openAiPaused(),
     }));
 
     return { dealsRead, uniqueCompanies: companyIds.size, classifiedNow };
@@ -6518,7 +6689,11 @@ async function runDailyContractorScan(dateKey) {
 }
 
 async function dailyContractorScanTick() {
-  if (!dailyContractorScanEnabled() || openAiPaused() || DAILY_CONTRACTOR_SCAN_RUNNING) return;
+  if (!dailyContractorScanEnabled() || DAILY_CONTRACTOR_SCAN_RUNNING) return;
+
+  if (!openAiPaused() && PERSISTED_PENDING_COMPANIES.size) {
+    await classifyPersistedPendingCompanies(25);
+  }
 
   const nowMsk = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const today = moscowDateKey();
@@ -6828,6 +7003,7 @@ function dashboardStatus() {
       persistedContractors: PERSISTED_CONTRACTORS.size,
       persistentStoreConfigured: sheetStoreConfigured(),
       classifiedCompanyRegistry: PERSISTED_COMPANY_TYPES.size,
+      pendingCompanyRegistry: PERSISTED_PENDING_COMPANIES.size,
       lastDailyScanDate: scan.lastDailyScanDate || null,
       lastDailyScanAt: scan.lastDailyScanAt || null,
       dailyScanEnabled: dailyContractorScanEnabled(),
