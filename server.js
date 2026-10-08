@@ -4559,6 +4559,7 @@ async function processDeal(evt) {
 
 
 const CONTRACTOR_SCAN_CANDIDATES = new Map();
+const PERSISTED_CONTRACTORS = new Map();
 const CONTRACTOR_SCAN_COMPANY_CACHE = new Map();
 let CONTRACTOR_SCAN_RUNNING = false;
 let CONTRACTOR_SCAN_TIMER = null;
@@ -5455,6 +5456,7 @@ async function verifyNextContractorCandidate() {
       await hydrateContractorPurchasedProducts(next);
       await hydrateContractorRelationshipStatus(next);
       await hydrateContractorManagerQuality(next);
+      await persistContractorCandidate(next);
     }
   } catch (error) {
     next.verificationStatus = "error";
@@ -5708,6 +5710,7 @@ async function refreshOneContractorRelationshipStatus() {
   try {
     await hydrateContractorRelationshipStatus(candidate);
     await hydrateContractorManagerQuality(candidate);
+    await persistContractorCandidate(candidate);
   } catch {}
 }
 
@@ -5731,6 +5734,144 @@ function normalizedWebsiteHost(value) {
     return "";
   }
 }
+
+function contractorPersistenceKey(row) {
+  const inn = String(row?.inn || "").replace(/\D/g, "");
+  if (inn) return "inn:" + inn;
+
+  const host = normalizedWebsiteHost(row?.website);
+  if (host) return "site:" + host;
+
+  const companyId = String(row?.companyId || "").trim();
+  return companyId ? "b24:" + companyId : "";
+}
+
+function sameContractorEntity(a, b) {
+  const aInn = String(a?.inn || "").replace(/\D/g, "");
+  const bInn = String(b?.inn || "").replace(/\D/g, "");
+  if (aInn && bInn && aInn === bInn) return true;
+
+  const aHost = normalizedWebsiteHost(a?.website);
+  const bHost = normalizedWebsiteHost(b?.website);
+  if (aHost && bHost && aHost === bHost) return true;
+
+  const aId = String(a?.companyId || "").trim();
+  const bId = String(b?.companyId || "").trim();
+  return Boolean(aId && bId && aId === bId);
+}
+
+function sheetStoreConfigured() {
+  return Boolean(
+    String(process.env.GOOGLE_SHEET_STORE_URL || "").trim() &&
+    String(process.env.GOOGLE_SHEET_STORE_SECRET || "").trim()
+  );
+}
+
+async function sheetStoreRequest(action, rows = null) {
+  if (!sheetStoreConfigured()) return null;
+
+  const url = String(process.env.GOOGLE_SHEET_STORE_URL || "").trim();
+  const secret = String(process.env.GOOGLE_SHEET_STORE_SECRET || "").trim();
+
+  const body = { action, secret };
+  if (rows) body.rows = rows;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify(body),
+    redirect: "follow",
+    signal: AbortSignal.timeout(20000),
+  });
+
+  const text = await response.text();
+  let payload = {};
+  try { payload = JSON.parse(text); } catch {}
+
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(
+      "Google Sheet store failed: " +
+      (payload?.error || ("HTTP " + response.status))
+    );
+  }
+
+  return payload;
+}
+
+async function loadPersistedContractors() {
+  if (!sheetStoreConfigured()) {
+    console.log(JSON.stringify({
+      source: "contractor-store",
+      action: "load-skipped",
+      reason: "Google Sheet store is not configured",
+    }));
+    return;
+  }
+
+  try {
+    const payload = await sheetStoreRequest("load");
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+
+    PERSISTED_CONTRACTORS.clear();
+
+    for (const entry of rows) {
+      const row = entry?.payload;
+      if (!row || row.verificationStatus !== "confirmed") continue;
+
+      const key = String(entry?.key || contractorPersistenceKey(row) || "").trim();
+      if (!key) continue;
+      PERSISTED_CONTRACTORS.set(key, row);
+    }
+
+    console.log(JSON.stringify({
+      source: "contractor-store",
+      action: "load-ok",
+      count: PERSISTED_CONTRACTORS.size,
+    }));
+
+    refreshContractorScanSummary();
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "contractor-store",
+      action: "load-failed",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
+async function persistContractorCandidate(item) {
+  if (!item || item.verificationStatus !== "confirmed") return;
+
+  const row = publicCandidate(item);
+  const key = contractorPersistenceKey(row);
+  if (!key) return;
+
+  PERSISTED_CONTRACTORS.set(key, row);
+
+  if (!sheetStoreConfigured()) return;
+
+  try {
+    await sheetStoreRequest("upsert", [{ key, payload: row }]);
+    console.log(JSON.stringify({
+      source: "contractor-store",
+      action: "upsert-ok",
+      key,
+      company: row.company || "",
+    }));
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "contractor-store",
+      action: "upsert-failed",
+      key,
+      company: row.company || "",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
 
 function combinePurchasedProducts(a = [], b = []) {
   const map = new Map();
@@ -5833,7 +5974,15 @@ function mergeConfirmedContractorRows(rows) {
 function refreshContractorScanSummary() {
   const all = [...CONTRACTOR_SCAN_CANDIDATES.values()].map(publicCandidate);
   const confirmedCards = all.filter(x => x.verificationStatus === "confirmed");
-  const confirmed = mergeConfirmedContractorRows(confirmedCards);
+
+  const persistedRows = [...PERSISTED_CONTRACTORS.values()]
+    .filter(x => x && x.verificationStatus === "confirmed")
+    .filter(persisted => !confirmedCards.some(live => sameContractorEntity(persisted, live)));
+
+  const confirmed = mergeConfirmedContractorRows([
+    ...persistedRows,
+    ...confirmedCards,
+  ]);
 
   confirmed.sort((a,b) =>
     b.score - a.score ||
@@ -6231,6 +6380,8 @@ function dashboardStatus() {
       lastCompletedPassAt: scan.lastCompletedPassAt || null,
       topCandidates: Array.isArray(scan.topCandidates) ? scan.topCandidates : [],
       recentDiscoveries: Array.isArray(scan.recentDiscoveries) ? scan.recentDiscoveries : [],
+      persistedContractors: PERSISTED_CONTRACTORS.size,
+      persistentStoreConfigured: sheetStoreConfigured(),
     },
     similarContractors: DASHBOARD_STATE.similarContractors || {
       status: "scanning-bitrix",
@@ -6536,8 +6687,9 @@ server.listen(PORT, "0.0.0.0", () => {
     });
   }, 4000);
 
-  // Start continuous read-only contractor mining from the full Bitrix24 deal history.
-  setTimeout(() => {
+  // Load persistent contractor registry first, then continue live Bitrix scanning.
+  setTimeout(async () => {
+    await loadPersistedContractors();
     startContractorContinuousScan();
   }, 6500);
 
