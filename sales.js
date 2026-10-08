@@ -316,7 +316,8 @@ async function snapshotDeal(deal, source = "event") {
     categoryId: String(deal.CATEGORY_ID || "0"),
     stageId: String(deal.STAGE_ID || ""),
     currency: String(deal.CURRENCY_ID || "RUB"),
-    updatedAt: new Date().toISOString(),
+    updatedAt: isoOrNull(deal.DATE_MODIFY) || new Date().toISOString(),
+    observedAt: new Date().toISOString(),
     observedFrom: source,
     ...scored,
   };
@@ -342,8 +343,16 @@ async function snapshotDeal(deal, source = "event") {
   row.scoreHistory = history.slice(-MAX_HISTORY);
   row.alerts = addAlert(row, previous);
 
+  const changed = !previous || [
+    "title","managerId","sourceId","categoryId","stageId","semantic","amount",
+    "prospectScore","riskScore","qualificationIssue","qualificationStatus",
+    "clientType","lastActivityAt","nextActivityAt","hasNext","nextOverdue",
+    "stageEnteredAt","nextStep"
+  ].some(key => String(previous?.[key] ?? "") !== String(row?.[key] ?? "")) ||
+    JSON.stringify(previous?.alerts || []) !== JSON.stringify(row.alerts || []);
+
   SALES.deals.set(id, row);
-  markDirty(id);
+  if (changed) markDirty(id);
   return row;
 }
 
