@@ -4564,6 +4564,10 @@ const CONTRACTOR_SCAN_COMPANY_CACHE = new Map();
 let CONTRACTOR_SCAN_RUNNING = false;
 let CONTRACTOR_SCAN_TIMER = null;
 
+function contractorScanPaused() {
+  return String(process.env.CONTRACTOR_SCAN_PAUSED || "").trim() === "1";
+}
+
 function asText(value) {
   if (Array.isArray(value)) return value.map(asText).filter(Boolean).join(" ");
   if (value && typeof value === "object") return Object.values(value).map(asText).filter(Boolean).join(" ");
@@ -6116,6 +6120,13 @@ function recomputeContractorDealMetrics(item) {
 }
 
 async function contractorScanStep() {
+  if (contractorScanPaused()) {
+    DASHBOARD_STATE.contractorScan.status = "paused";
+    CONTRACTOR_SCAN_RUNNING = false;
+    CONTRACTOR_SCAN_TIMER = null;
+    return;
+  }
+
   if (CONTRACTOR_SCAN_RUNNING) return;
 
   CONTRACTOR_SCAN_RUNNING = true;
@@ -6326,11 +6337,26 @@ async function contractorScanStep() {
   } finally {
     CONTRACTOR_SCAN_RUNNING = false;
     clearTimeout(CONTRACTOR_SCAN_TIMER);
-    CONTRACTOR_SCAN_TIMER = setTimeout(contractorScanStep, nextDelay);
+
+    if (contractorScanPaused()) {
+      DASHBOARD_STATE.contractorScan.status = "paused";
+      CONTRACTOR_SCAN_TIMER = null;
+    } else {
+      CONTRACTOR_SCAN_TIMER = setTimeout(contractorScanStep, nextDelay);
+    }
   }
 }
 
 function startContractorContinuousScan() {
+  if (contractorScanPaused()) {
+    DASHBOARD_STATE.contractorScan.status = "paused";
+    console.log(JSON.stringify({
+      source: "contractor-scan",
+      action: "paused-by-env",
+    }));
+    return;
+  }
+
   if (CONTRACTOR_SCAN_TIMER || CONTRACTOR_SCAN_RUNNING) return;
   DASHBOARD_STATE.contractorScan.status = "running";
   contractorScanStep().catch(error => {
