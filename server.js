@@ -7046,6 +7046,11 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function bitrixCompanyUrl(companyId) {
+  const id = String(companyId || "").trim();
+  return id ? "https://topsense.bitrix24.ru/crm/company/details/" + encodeURIComponent(id) + "/" : "";
+}
+
 function dashboardHtml(status = dashboardStatus()) {
   const scan = status.contractorScan || {};
   const totalDeals = Number(scan.totalDeals || 0);
@@ -7092,7 +7097,7 @@ function dashboardHtml(status = dashboardStatus()) {
     const cls = score >= 70 ? "ok" : score >= 50 ? "warn" : "";
     return `<tr>
       <td>${idx + 1}</td>
-      <td><b>${escapeHtml(item.company || "—")}</b>${visibleNameCounts.get(normalizedCompanyTitle(item.company)) > 1 ? '<span class="mini">ИНН ' + escapeHtml(item.inn || "не найден") + '</span>' : ''}</td>
+      <td><b>${bitrixCompanyUrl(item.companyId) ? `<a class="companylink" href="${escapeHtml(bitrixCompanyUrl(item.companyId))}" target="_blank" rel="noopener">${escapeHtml(item.company || "—")}</a>` : escapeHtml(item.company || "—")}</b>${visibleNameCounts.get(normalizedCompanyTitle(item.company)) > 1 ? '<span class="mini">ИНН ' + escapeHtml(item.inn || "не найден") + '</span>' : ''}</td>
       <td><span class="badge ${cls}">${score}/100</span></td>
       <td class="compact"><span class="badge">${Number(item.strategicScore || 0)}</span><span class="mini">${escapeHtml(strategicShort(item) || "—")}</span></td>
       <td class="center">${Number(item.dealCount || 0)}${Number(item.openDeals || 0) ? " / " + Number(item.openDeals || 0) : ""}</td>
@@ -7122,7 +7127,7 @@ function dashboardHtml(status = dashboardStatus()) {
       : "Ждёт AI-проверки";
     return `<tr>
       <td>${idx + 1}</td>
-      <td><b>${escapeHtml(item.company || "—")}</b></td>
+      <td><b>${bitrixCompanyUrl(item.companyId) ? `<a class="companylink" href="${escapeHtml(bitrixCompanyUrl(item.companyId))}" target="_blank" rel="noopener">${escapeHtml(item.company || "—")}</a>` : escapeHtml(item.company || "—")}</b></td>
       <td class="nowrap">${escapeHtml(inn || "—")}</td>
       <td class="nowrap">${escapeHtml(item.companyId || "—")}</td>
       <td>${escapeHtml(latestDeal)}</td>
@@ -7164,7 +7169,7 @@ th{color:#9aa7bd;font-size:12px;text-transform:uppercase;position:sticky;top:0;b
 th:first-child,td:first-child{text-align:center;padding-left:2px;padding-right:2px}
 th:nth-child(3),td:nth-child(3){text-align:center;padding-left:3px;padding-right:3px}
 th:nth-child(8),td:nth-child(8){padding-left:4px;padding-right:4px}
-.badge{display:inline-block;padding:3px 6px;border-radius:999px;background:#263653;font-size:13px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}
+.badge{display:inline-block;padding:3px 6px;border-radius:999px;background:#263653;font-size:13px}.ok{background:#173b2b;color:#9ce4bd}.warn{background:#4a3718;color:#ffd37a}.err{background:#4a2027;color:#ff9aa7}.companylink{color:#e8edf7;text-decoration:none;border-bottom:1px dotted #667895}.companylink:hover{color:#fff;border-bottom-color:#fff}
 .scroll{overflow:auto;max-height:calc(100vh - 235px);border-radius:10px}.note{margin-top:6px;color:#8290a7;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{color:#9ce4bd}
 .productcell{white-space:normal;overflow:visible;line-height:1.2}.statuscell{white-space:normal;overflow:visible;line-height:1.24}.compact{white-space:normal;overflow:visible}.mini{display:block;font-size:13px;color:#b7c2d6;margin-top:3px;white-space:normal;line-height:1.22;overflow:visible}
 .nowrap{white-space:nowrap}.center{text-align:center}.moneycell{white-space:nowrap;font-size:13px}.managercell{white-space:normal;line-height:1.25}.qualbadge{display:inline-block;margin-top:4px;font-size:18px;font-weight:800}.qualsummary{display:block;margin-top:3px;font-size:14px;color:#d3dced}.auditbadge{display:inline-block;margin-top:6px;font-size:15px;font-weight:700}.audittags{display:block;margin-top:3px;font-size:13px;color:#aebbd0}
@@ -7173,11 +7178,11 @@ th:nth-child(8),td:nth-child(8){padding-left:4px;padding-right:4px}
 </head>
 <body><div class="wrap">
 <h1>ДАШБОРД — ПОДРЯДЧИКИ</h1>
-<div class="sub">ИНН/сайт → B24. <span class="live">● live</span></div>
+<div class="sub">Новые компании из CRM → очередь → однократная AI-классификация → постоянный реестр. <span class="live">● live</span></div>
 
 <div class="grid">
-  <div class="card"><div class="k">Сделок в B24</div><div class="v">${totalDeals || "…"}</div><div class="small">проход №${Number(scan.pass || 1)}</div></div>
-  <div class="card"><div class="k">Проверено в проходе</div><div class="v">${scanned}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div><div class="small">${pct}%</div></div>
+  <div class="card"><div class="k">Режим</div><div class="v">${scan.openAiPaused ? "Без AI" : "AI включён"}</div><div class="small">${scan.openAiPaused ? "кредиты не расходуются" : "новые компании классифицируются"}</div></div>
+  <div class="card"><div class="k">Последний проход</div><div class="v">${escapeHtml(scan.lastDailyScanDate || "—")}</div><div class="small">${scan.lastDailyScanAt ? "завершён " + escapeHtml(dateOnly(scan.lastDailyScanAt)) : "ежедневный сбор новых компаний"}</div></div>
   <div class="card"><div class="k">Подтверждённых подрядчиков</div><div class="v">${Number(scan.verifiedContractors || 0)}</div><div class="small">после внешней проверки</div></div>
   <div class="card"><div class="k">Ждут AI-проверки</div><div class="v">${Number(scan.pendingCompanyRegistry || 0)}</div><div class="small">новые компании сохранены в Google Таблице</div></div>
   <div class="card"><div class="k">Прямая закупка</div><div class="v">${Number(scan.directPurchaseCompanies || 0)}</div><div class="small">включая смешанный формат</div></div>
