@@ -2322,6 +2322,10 @@ function dealForAI(deal, context = {}) {
 }
 
 async function callOpenAI(body) {
+  if (openAiPaused()) {
+    throw new Error("OpenAI calls are paused by OPENAI_PAUSED=1");
+  }
+
   const apiKey = (process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
@@ -4560,12 +4564,21 @@ async function processDeal(evt) {
 
 const CONTRACTOR_SCAN_CANDIDATES = new Map();
 const PERSISTED_CONTRACTORS = new Map();
+const PERSISTED_COMPANY_TYPES = new Map();
 const CONTRACTOR_SCAN_COMPANY_CACHE = new Map();
 let CONTRACTOR_SCAN_RUNNING = false;
 let CONTRACTOR_SCAN_TIMER = null;
 
 function contractorScanPaused() {
   return String(process.env.CONTRACTOR_SCAN_PAUSED || "").trim() === "1";
+}
+
+function openAiPaused() {
+  return String(process.env.OPENAI_PAUSED || "").trim() === "1";
+}
+
+function dailyContractorScanEnabled() {
+  return String(process.env.DAILY_CONTRACTOR_SCAN_ENABLED || "").trim() === "1";
 }
 
 function asText(value) {
@@ -4904,7 +4917,67 @@ async function contractorCorrespondence(item) {
   return result;
 }
 
+async function persistedClassificationForItem(item) {
+  const companyId = String(item?.companyId || "").trim();
+
+  if (companyId) {
+    const byId = PERSISTED_COMPANY_TYPES.get("b24:" + companyId);
+    if (byId) return byId;
+  }
+
+  let company = null;
+  try { company = await contractorCompanyForVerification(companyId); } catch {}
+  if (!company) return null;
+
+  const inn = await contractorCompanyInn(companyId, company);
+  const domain = contractorCompanyDomain(company);
+
+  if (inn) {
+    const byInn = PERSISTED_COMPANY_TYPES.get("inn:" + inn);
+    if (byInn) return byInn;
+  }
+
+  if (domain) {
+    const bySite = PERSISTED_COMPANY_TYPES.get("site:" + domain);
+    if (bySite) return bySite;
+  }
+
+  return null;
+}
+
+function applyPersistedClassification(item, row) {
+  if (!item || !row) return;
+
+  item.verificationStatus = row.verificationStatus || item.verificationStatus;
+  item.verificationConfidence = Number(row.verificationConfidence || 0);
+  item.contractorType = row.contractorType || "";
+  item.strategicScore = Number(row.strategicScore || 0);
+  item.strategicReason = row.strategicReason || "";
+  item.industrialRelevance = row.industrialRelevance || "unknown";
+  item.hazardousIndustrialSites = Boolean(row.hazardousIndustrialSites);
+  item.relevantWorkTypes = Array.isArray(row.relevantWorkTypes) ? row.relevantWorkTypes : [];
+  item.scaleLevel = row.scaleLevel || "unknown";
+  item.gasDetectionNeed = row.gasDetectionNeed || "unknown";
+  item.verificationReason = Array.isArray(row.evidence) ? (row.evidence[0] || "") : "";
+  item.verifiedInn = row.inn || "";
+  item.verifiedWebsite = row.website || "";
+
+  console.log(JSON.stringify({
+    source: "contractor-store",
+    action: "classification-reused",
+    companyId: String(item.companyId || ""),
+    company: item.company || row.company || "",
+    verificationStatus: item.verificationStatus,
+  }));
+}
+
 async function verifyContractorCompany(item) {
+  const persisted = await persistedClassificationForItem(item);
+  if (persisted) {
+    applyPersistedClassification(item, persisted);
+    return;
+  }
+
   const cached = CONTRACTOR_VERIFICATION_CACHE.get(item.companyId);
   if (cached && Date.now() - cached.checkedAt < 12 * 60 * 60 * 1000) {
     Object.assign(item, cached.result);
@@ -5448,9 +5521,11 @@ async function hydrateContractorPurchasedProducts(item) {
     .slice(0, 12);
 }
 
-async function verifyNextContractorCandidate() {
+async function verifyNextContractorCandidate(filterFn = null) {
   const next = [...CONTRACTOR_SCAN_CANDIDATES.values()].find(
-    item => !item.verificationStatus || item.verificationStatus === "pending"
+    item =>
+      (!item.verificationStatus || item.verificationStatus === "pending") &&
+      (!filterFn || filterFn(item))
   );
   if (!next) return;
 
@@ -5460,6 +5535,9 @@ async function verifyNextContractorCandidate() {
       await hydrateContractorPurchasedProducts(next);
       await hydrateContractorRelationshipStatus(next);
       await hydrateContractorManagerQuality(next);
+    }
+
+    if (next.verificationStatus === "confirmed" || next.verificationStatus === "rejected") {
       await persistContractorCandidate(next);
     }
   } catch (error) {
@@ -5820,20 +5898,37 @@ async function loadPersistedContractors() {
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
 
     PERSISTED_CONTRACTORS.clear();
+    PERSISTED_COMPANY_TYPES.clear();
+
+    let lastDailyScanDate = "";
 
     for (const entry of rows) {
       const row = entry?.payload;
-      if (!row || row.verificationStatus !== "confirmed") continue;
-
       const key = String(entry?.key || contractorPersistenceKey(row) || "").trim();
-      if (!key) continue;
-      PERSISTED_CONTRACTORS.set(key, row);
+      if (!row || !key) continue;
+
+      if (key === "meta:daily-contractor-scan") {
+        lastDailyScanDate = String(row.lastCompletedDate || "");
+        continue;
+      }
+
+      if (row.verificationStatus === "confirmed" || row.verificationStatus === "rejected") {
+        PERSISTED_COMPANY_TYPES.set(key, row);
+      }
+
+      if (row.verificationStatus === "confirmed") {
+        PERSISTED_CONTRACTORS.set(key, row);
+      }
     }
+
+    DASHBOARD_STATE.contractorScan.lastDailyScanDate = lastDailyScanDate || null;
 
     console.log(JSON.stringify({
       source: "contractor-store",
       action: "load-ok",
-      count: PERSISTED_CONTRACTORS.size,
+      contractorCount: PERSISTED_CONTRACTORS.size,
+      classifiedCompanyCount: PERSISTED_COMPANY_TYPES.size,
+      lastDailyScanDate: lastDailyScanDate || null,
     }));
 
     refreshContractorScanSummary();
@@ -5847,13 +5942,19 @@ async function loadPersistedContractors() {
 }
 
 async function persistContractorCandidate(item) {
-  if (!item || item.verificationStatus !== "confirmed") return;
+  if (!item || !["confirmed", "rejected"].includes(item.verificationStatus)) return;
 
   const row = publicCandidate(item);
   const key = contractorPersistenceKey(row);
   if (!key) return;
 
-  PERSISTED_CONTRACTORS.set(key, row);
+  PERSISTED_COMPANY_TYPES.set(key, row);
+
+  if (row.verificationStatus === "confirmed") {
+    PERSISTED_CONTRACTORS.set(key, row);
+  } else {
+    PERSISTED_CONTRACTORS.delete(key);
+  }
 
   if (!sheetStoreConfigured()) return;
 
@@ -5861,16 +5962,41 @@ async function persistContractorCandidate(item) {
     await sheetStoreRequest("upsert", [{ key, payload: row }]);
     console.log(JSON.stringify({
       source: "contractor-store",
-      action: "upsert-ok",
+      action: "classification-upsert-ok",
       key,
       company: row.company || "",
+      verificationStatus: row.verificationStatus || "",
     }));
   } catch (error) {
     console.warn(JSON.stringify({
       source: "contractor-store",
-      action: "upsert-failed",
+      action: "classification-upsert-failed",
       key,
       company: row.company || "",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
+async function persistDailyContractorScanMeta(dateKey, stats = {}) {
+  DASHBOARD_STATE.contractorScan.lastDailyScanDate = dateKey;
+
+  if (!sheetStoreConfigured()) return;
+
+  try {
+    await sheetStoreRequest("upsert", [{
+      key: "meta:daily-contractor-scan",
+      payload: {
+        recordType: "meta",
+        lastCompletedDate: dateKey,
+        completedAt: new Date().toISOString(),
+        stats,
+      },
+    }]);
+  } catch (error) {
+    console.warn(JSON.stringify({
+      source: "contractor-store",
+      action: "daily-meta-upsert-failed",
       error: error instanceof Error ? error.message : String(error),
     }));
   }
@@ -6117,6 +6243,299 @@ function recomputeContractorDealMetrics(item) {
         : "",
       lastActivity: x.lastActivity,
     }));
+}
+
+async function ingestDailyContractorDeal(deal, dateKey) {
+  const companyId = String(deal.COMPANY_ID || "");
+  if (!companyId || companyId === "0") {
+    DASHBOARD_STATE.contractorScan.unlinkedCandidateDeals += 1;
+    return null;
+  }
+
+  const sig = dealContractorSignals(deal);
+
+  let item = CONTRACTOR_SCAN_CANDIDATES.get(companyId);
+  const isNew = !item;
+
+  if (!item) {
+    item = {
+      companyId,
+      company: "",
+      dealCount: 0,
+      openDeals: 0,
+      directCount: 0,
+      tenderCount: 0,
+      totalOpportunity: 0,
+      wonOpportunity: 0,
+      openOpportunity: 0,
+      lostOpportunity: 0,
+      unclassifiedOpportunity: 0,
+      lastActivityMs: 0,
+      lastActivity: "",
+      maxSignalWeight: 0,
+      managers: new Set(),
+      managerNames: new Map(),
+      currentWork: [],
+      dealSnapshots: new Map(),
+      purchasedProducts: [],
+      relationshipStatus: "",
+      managerQualityScore: 0,
+      managerQualityLevel: "",
+      managerQualitySummary: "",
+      managerQualificationScore: 0,
+      managerQualificationSummary: "",
+      managerProcessIssue: "",
+      managerAuditCheckedAt: 0,
+      evidence: new Set(),
+      sampleDeals: [],
+      sampleDealContexts: [],
+      verificationStatus: "pending",
+      verificationConfidence: 0,
+      contractorType: "",
+      strategicScore: 0,
+      strategicReason: "",
+      industrialRelevance: "unknown",
+      hazardousIndustrialSites: false,
+      relevantWorkTypes: [],
+      scaleLevel: "unknown",
+      gasDetectionNeed: "unknown",
+      verificationReason: "",
+      identityEvidence: "",
+      websiteEvidence: "",
+      correspondenceEvidence: "",
+      verifiedInn: "",
+      verifiedWebsite: "",
+      dailyScanDate: dateKey,
+    };
+    CONTRACTOR_SCAN_CANDIDATES.set(companyId, item);
+  } else {
+    item.dailyScanDate = dateKey;
+  }
+
+  if (!item.company) item.company = await contractorCompanyName(companyId);
+
+  const opportunity = Number(deal.OPPORTUNITY || 0) || 0;
+  const semantic = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
+  const isOpen = String(deal.CLOSED || "").toUpperCase() !== "Y";
+  const ps = purchaseSignals(deal);
+  const activity = deal.LAST_ACTIVITY_TIME || deal.DATE_MODIFY || deal.DATE_CREATE || "";
+  const dealKey = String(deal.ID || "");
+
+  if (dealKey) {
+    item.dealSnapshots.set(dealKey, {
+      id: dealKey,
+      title: String(deal.TITLE || "").trim(),
+      opportunity,
+      semantic,
+      isOpen,
+      direct: Boolean(ps.direct),
+      tender: Boolean(ps.tender),
+      signalWeight: Number(sig.weight || 0),
+      stage: String(deal.STAGE_ID || ""),
+      assignedById: String(deal.ASSIGNED_BY_ID || ""),
+      lastActivity: activity,
+      comments: String(deal.COMMENTS || "").slice(0, 5000),
+      additionalInfo: String(deal.ADDITIONAL_INFO || "").slice(0, 3000),
+      purchaseFormatRaw: asText(deal.UF_CRM_1728208250222),
+      endCustomer: String(deal.UF_CRM_1728208529434 || ""),
+      deliveryDeadline: String(deal.UF_CRM_1728208560055 || ""),
+      brands: String(deal.UF_CRM_1728208353618 || ""),
+      competitorPrices: String(deal.UF_CRM_1728208500678 || ""),
+      analogs: asText(deal.UF_CRM_1728208192427),
+      qualificationText: String(deal.UF_CRM_1790850696723 || "").slice(0, 10000),
+      qualificationHistory: String(deal[AI_FIELDS.dealAnswers] || "").slice(0, 10000),
+      quoteFilesRaw: deal.UF_CRM_1728208597522 || null,
+      invoiceFilesRaw: deal.UF_CRM_1728208621363 || null,
+    });
+  }
+
+  sig.reasons.forEach(x => item.evidence.add(x));
+
+  if (deal.ASSIGNED_BY_ID) {
+    const managerId = String(deal.ASSIGNED_BY_ID);
+    item.managers.add(managerId);
+    if (!item.managerNames.get(managerId)) {
+      const resolvedSurname = await contractorUserName(managerId);
+      if (resolvedSurname) item.managerNames.set(managerId, resolvedSurname);
+    }
+  }
+
+  recomputeContractorDealMetrics(item);
+
+  const ms = dateMs(activity);
+  if (ms > item.lastActivityMs) {
+    item.lastActivityMs = ms;
+    item.lastActivity = activity;
+  }
+
+  const title = String(deal.TITLE || "").trim();
+  if (title && !item.sampleDeals.includes(title)) {
+    item.sampleDeals.unshift(title);
+    item.sampleDeals = item.sampleDeals.slice(0, 6);
+  }
+
+  if (deal.ID && !item.sampleDealContexts.some(x => String(x.id) === String(deal.ID))) {
+    item.sampleDealContexts.unshift({ id: String(deal.ID), title });
+    item.sampleDealContexts = item.sampleDealContexts.slice(0, 4);
+  }
+
+  if (isNew) {
+    DASHBOARD_STATE.contractorScan.recentDiscoveries.unshift({
+      at: new Date().toISOString(),
+      company: item.company || "Компания без названия",
+      reason: "Новая компания за день — проверяем тип один раз",
+    });
+    DASHBOARD_STATE.contractorScan.recentDiscoveries =
+      DASHBOARD_STATE.contractorScan.recentDiscoveries.slice(0, 20);
+  }
+
+  return item;
+}
+
+function moscowDateKey(value = Date.now()) {
+  const d = new Date(Number(value) + 3 * 60 * 60 * 1000);
+  return d.getUTCFullYear() + "-" +
+    String(d.getUTCMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getUTCDate()).padStart(2, "0");
+}
+
+function nextDateKey(dateKey) {
+  const d = new Date(dateKey + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function previousDateKey(dateKey) {
+  const d = new Date(dateKey + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+let DAILY_CONTRACTOR_SCAN_RUNNING = false;
+
+async function runDailyContractorScan(dateKey) {
+  if (!dailyContractorScanEnabled()) return { skipped: "disabled" };
+  if (openAiPaused()) return { skipped: "openai-paused" };
+  if (DAILY_CONTRACTOR_SCAN_RUNNING) return { skipped: "already-running" };
+
+  DAILY_CONTRACTOR_SCAN_RUNNING = true;
+  const scan = DASHBOARD_STATE.contractorScan;
+  scan.status = "daily-scan";
+  scan.dailyScanDate = dateKey;
+
+  const startDate = dateKey + "T00:00:00+03:00";
+  const endDate = nextDateKey(dateKey) + "T00:00:00+03:00";
+
+  let cursor = 0;
+  let dealsRead = 0;
+  const companyIds = new Set();
+
+  try {
+    while (true) {
+      const raw = await bitrixCallRaw("crm.deal.list", {
+        order: { ID: "DESC" },
+        filter: {
+          ">=DATE_CREATE": startDate,
+          "<DATE_CREATE": endDate,
+        },
+        select: [
+          "ID","TITLE","COMPANY_ID","CONTACT_ID","STAGE_ID","STAGE_SEMANTIC_ID","CLOSED",
+          "OPPORTUNITY","CURRENCY_ID","ASSIGNED_BY_ID",
+          "DATE_CREATE","DATE_MODIFY","LAST_ACTIVITY_TIME",
+          "COMMENTS","ADDITIONAL_INFO",
+          "UF_CRM_1739950675115","UF_CRM_1728208341819",
+          "UF_CRM_1728208250222","UF_CRM_1728208292193",
+          "UF_CRM_1728208353618","UF_CRM_1728208500678",
+          "UF_CRM_1728208529434","UF_CRM_1728208560055",
+          "UF_CRM_1728208192427","UF_CRM_1790850696723",
+          "UF_CRM_1728208597522","UF_CRM_1728208621363",
+          AI_FIELDS.dealAnswers,
+          AI_FIELDS.dealType,AI_FIELDS.dealRoles,AI_FIELDS.dealServices
+        ],
+        start: cursor,
+      });
+
+      const deals = Array.isArray(raw.result) ? raw.result : [];
+
+      for (const deal of deals) {
+        dealsRead += 1;
+        if (deal.COMPANY_ID && String(deal.COMPANY_ID) !== "0") {
+          companyIds.add(String(deal.COMPANY_ID));
+        }
+        await ingestDailyContractorDeal(deal, dateKey);
+      }
+
+      if (raw.next === undefined || raw.next === null || String(raw.next) === "") break;
+      cursor = Number(raw.next);
+    }
+
+    let classifiedNow = 0;
+
+    while (true) {
+      const pending = [...CONTRACTOR_SCAN_CANDIDATES.values()].find(
+        item => item.dailyScanDate === dateKey &&
+          (!item.verificationStatus || item.verificationStatus === "pending")
+      );
+
+      if (!pending) break;
+
+      await verifyNextContractorCandidate(item => item.dailyScanDate === dateKey);
+      classifiedNow += 1;
+    }
+
+    refreshContractorScanSummary();
+
+    await persistDailyContractorScanMeta(dateKey, {
+      dealsRead,
+      uniqueCompanies: companyIds.size,
+      classifiedNow,
+    });
+
+    scan.lastDailyScanAt = new Date().toISOString();
+    scan.status = "daily-scan-complete";
+
+    console.log(JSON.stringify({
+      source: "contractor-daily-scan",
+      action: "complete",
+      date: dateKey,
+      dealsRead,
+      uniqueCompanies: companyIds.size,
+      classifiedNow,
+    }));
+
+    return { dealsRead, uniqueCompanies: companyIds.size, classifiedNow };
+  } catch (error) {
+    scan.status = "daily-scan-error";
+    DASHBOARD_STATE.lastError = {
+      at: new Date().toISOString(),
+      source: "contractor-daily-scan",
+      message: error instanceof Error ? error.message : String(error),
+    };
+    throw error;
+  } finally {
+    DAILY_CONTRACTOR_SCAN_RUNNING = false;
+  }
+}
+
+async function dailyContractorScanTick() {
+  if (!dailyContractorScanEnabled() || openAiPaused() || DAILY_CONTRACTOR_SCAN_RUNNING) return;
+
+  const nowMsk = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const today = moscowDateKey();
+  const yesterday = previousDateKey(today);
+  const hour = nowMsk.getUTCHours();
+  const last = String(DASHBOARD_STATE.contractorScan.lastDailyScanDate || "");
+
+  // If yesterday was missed because Render slept, recover it on the next wake.
+  if (!last || last < yesterday) {
+    await runDailyContractorScan(yesterday);
+    return;
+  }
+
+  // End-of-day run: first wake/check at or after 19:00 MSK.
+  if (hour >= 19 && last < today) {
+    await runDailyContractorScan(today);
+  }
 }
 
 async function contractorScanStep() {
@@ -6408,6 +6827,11 @@ function dashboardStatus() {
       recentDiscoveries: Array.isArray(scan.recentDiscoveries) ? scan.recentDiscoveries : [],
       persistedContractors: PERSISTED_CONTRACTORS.size,
       persistentStoreConfigured: sheetStoreConfigured(),
+      classifiedCompanyRegistry: PERSISTED_COMPANY_TYPES.size,
+      lastDailyScanDate: scan.lastDailyScanDate || null,
+      lastDailyScanAt: scan.lastDailyScanAt || null,
+      dailyScanEnabled: dailyContractorScanEnabled(),
+      openAiPaused: openAiPaused(),
     },
     similarContractors: DASHBOARD_STATE.similarContractors || {
       status: "scanning-bitrix",
@@ -6694,35 +7118,47 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`TOP-SENSE Bitrix receiver listening on port ${PORT}`);
 
-  // Reconcile missed Bitrix events after wake/redeploy.
-  setTimeout(() => {
-    reconcileRecentTestDeals().catch(error => {
-      console.error("Unexpected reconciliation error", error);
-    });
-    cleanupDuplicateRoutingTestDeals().catch(error => {
-      console.error("Unexpected test routing cleanup error", error);
-    });
-    rollbackMistakenTest16Target().catch(error => {
-      console.error("Unexpected TEST16 rollback error", error);
-    });
-    reprocessCurrentTitleFormatTest().catch(error => {
-      console.error("Unexpected title-format test reprocess error", error);
-    });
-    migrateKnownTestDealTitles().catch(error => {
-      console.error("Unexpected test title migration error", error);
-    });
-  }, 4000);
+  // Old test maintenance is opt-in only. It must not silently consume API credits.
+  if (String(process.env.TEST_MAINTENANCE_ENABLED || "").trim() === "1") {
+    setTimeout(() => {
+      reconcileRecentTestDeals().catch(error => {
+        console.error("Unexpected reconciliation error", error);
+      });
+      cleanupDuplicateRoutingTestDeals().catch(error => {
+        console.error("Unexpected test routing cleanup error", error);
+      });
+      rollbackMistakenTest16Target().catch(error => {
+        console.error("Unexpected TEST16 rollback error", error);
+      });
+      reprocessCurrentTitleFormatTest().catch(error => {
+        console.error("Unexpected title-format test reprocess error", error);
+      });
+      migrateKnownTestDealTitles().catch(error => {
+        console.error("Unexpected test title migration error", error);
+      });
+    }, 4000);
+  }
 
-  // Load persistent contractor registry first, then continue live Bitrix scanning.
+  // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
     await loadPersistedContractors();
     startContractorContinuousScan();
+    dailyContractorScanTick().catch(error => {
+      console.error("Unexpected daily contractor scan error", error);
+    });
   }, 6500);
 
-  // While the free instance is awake, re-check periodically.
+  // Check periodically while awake. If Render slept through the evening,
+  // the next wake catches up the missed previous day.
   setInterval(() => {
-    reconcileRecentTestDeals().catch(error => {
-      console.error("Unexpected reconciliation error", error);
+    dailyContractorScanTick().catch(error => {
+      console.error("Unexpected daily contractor scan error", error);
     });
-  }, 5 * 60 * 1000);
+
+    if (String(process.env.TEST_MAINTENANCE_ENABLED || "").trim() === "1") {
+      reconcileRecentTestDeals().catch(error => {
+        console.error("Unexpected reconciliation error", error);
+      });
+    }
+  }, 15 * 60 * 1000);
 });
