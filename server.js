@@ -1839,7 +1839,7 @@ async function downloadBitrixAttachment(file) {
           const response = await fetch(target, {
             method: "GET",
             redirect: "follow",
-            signal: AbortSignal.timeout(20000),
+            signal: AbortSignal.timeout(60000),
           });
 
           if (!response.ok) {
