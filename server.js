@@ -7369,6 +7369,19 @@ server.listen(PORT, "0.0.0.0", () => {
     }, 10000);
   }
 
+  // Independently authorized follow-on classification with cumulative $5 cap.
+  if (String(process.env.TOPSENSE_PILOT2_ENABLED || "").trim() === "1") {
+    setTimeout(() => {
+      require("./pilot2").runPilot().catch((error) => {
+        console.error(JSON.stringify({
+          component:"topsense-pilot-v2",event:"fatal",
+          error:error instanceof Error?error.message:String(error),
+          at:new Date().toISOString(),
+        }));
+      });
+    }, 16000);
+  }
+
   // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
     await loadPersistedContractors();
