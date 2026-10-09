@@ -165,7 +165,7 @@ async function loadPilot(){
   const entries=Array.isArray(d.rows)?d.rows:[];
   const x=new Map();
   for(const e of entries){
-    if(!/^pilot:v[12]:result:/.test(String(e.key||"")))continue;
+    if(!/^pilot:v[123]:result:/.test(String(e.key||"")))continue;
     const item=e.payload||{};
     if(item.companyId&&item.recordType==="topsense-pilot-result")x.set(String(item.companyId),item);
   }
