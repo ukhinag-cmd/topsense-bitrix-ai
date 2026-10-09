@@ -1,6 +1,12 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
 const state={status:"starting",updatedAt:null,error:null,companies:[],refreshing:false,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false};
+function analyticSeeds(){
+ try{
+   const arr=JSON.parse(String(process.env.TOPSENSE_ANALYTIC_SEED_JSON||"[]"));
+   return Array.isArray(arr)?new Map(arr.filter(x=>x&&x.id).map(x=>[String(x.id),x])):new Map();
+ }catch{return new Map()}
+}
 const ORG_TYPES=require("./company-types").types;
 const sections=["Подрядчики","Конечные потребители","Сервис и метрология","Партнёрские продажи","Проектные продажи","Конкуренты","Смежные организации","Не определены"];
 const freeDomains=new Set(["mail.ru","bk.ru","list.ru","inbox.ru","gmail.com","yandex.ru","ya.ru","yahoo.com","rambler.ru","outlook.com","hotmail.com","icloud.com","topsense.su","detector-gaza.ru"]);
@@ -64,6 +70,8 @@ function initialHtml(payload){
    '<nav id="nav"></nav><div class="subbrand" style="margin-top:24px">45 типов организаций · полный справочник</div><div style="padding-bottom:20px">'+groupHtml+'</div>');
  text=text.replace('const categories=["Обзор","Подрядчики","Предприятия","Интеграторы и проекты","Дистрибьюторы","Сервис и метрология","Конкуренты","Не определены"];',
    'const categories=["Обзор","Подрядчики","Конечные потребители","Проектные продажи","Партнёрские продажи","Сервис и метрология","Конкуренты","Смежные организации","Не определены"];');
+ text=text.replace('Отдельная аналитическая база уже содержит 49 подтверждённых карточек, но пока ещё не синхронизирована с этим веб-реестром. Здесь — прямое чтение Битрикс24 и подтверждения действующего реестра подрядчиков.',
+ 'Веб-дашборд показывает '+payload.analyticTyped+' проверенных и требующих сверки карточек из аналитики (подтверждено: '+payload.analyticConfirmed+'). Основные данные CRM загружаются непосредственно из Битрикс24.');
  text=text.replace('<div class="notice" id="notice">',
  '<div class="notice" style="background:#e9f6f2;color:#126957;border-color:#b8e7d7">Пилот AI: '+payload.aiResults+
  ' CRM-карточек обработано; '+payload.aiCalls+' запросов к модели, '+payload.aiNoSite+
@@ -179,9 +187,29 @@ function data(known){
  for(const x of (typeof known==="function"?known():[])){
   if(x&&x.companyId&&["confirmed","rejected"].includes(x.verificationStatus))registry.set(String(x.companyId),x);
  }
+ const seeds=analyticSeeds();
  const records=state.companies.map(c=>{
   const r=registry.get(c.id);
   const ai=state.pilot.get(c.id);
+  const seed=seeds.get(c.id);
+  if(seed){
+    const checked=seed.status==="confirmed";
+    const sub=String(seed.type||"").slice(0,190);
+    const dir=String(seed.direction||"");
+    return {...c,
+      category:sections.includes(dir)?dir:c.category,
+      type:checked?sub:"",
+      organizationType:sub,
+      proposedType:!checked?sub:"",
+      verification:checked?"Подтверждено официальным сайтом":"На сверке подразделения / реквизитов",
+      siteVerified:checked?String(seed.site||""):"",
+      parent: String(seed.parent||""),
+      typeSource:"аналитический реестр ТОП-СЕНС",
+      aiStatus:ai?String(ai.status||""):"",
+      delivery:"Не подтверждена",
+      strategy:ai?String(ai.proposedStrategy||"").slice(0,200):""
+    };
+  }
   if(!r){
     if(!ai)return c;
     const orgType=String(ai.primaryType||"");
@@ -207,7 +235,7 @@ function data(known){
  });
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  records.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
