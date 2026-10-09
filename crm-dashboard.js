@@ -50,7 +50,20 @@ function loginPage(error){
 function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]))}
 function initialHtml(payload){
  const subset=payload.companies.slice(0,12);
+
  let text=html;
+ // Two independent dimensions: commercial dashboard and detailed organization type.
+ // Keep all approved types visible, including those without verified assignments.
+ const groups=[...new Set(ORG_TYPES.map(t=>t.family))];
+ const groupHtml=groups.map(f=>{
+   const items=ORG_TYPES.filter(t=>t.family===f);
+   return '<details style="border-top:1px solid #315269;padding:6px 0"><summary style="cursor:pointer;padding:9px;color:#d7e8f0;font-size:12px">'+escapeHtml(f)+' · '+items.length+'</summary>'+
+     items.map(t=>'<div style="font-size:11px;color:#a9c5d1;padding:7px 10px 8px 17px;line-height:1.35" title="'+escapeHtml(t.description)+'">'+escapeHtml(t.name)+'</div>').join("")+'</details>';
+ }).join("");
+ text=text.replace('<nav id="nav"></nav>',
+   '<nav id="nav"></nav><div class="subbrand" style="margin-top:24px">45 типов организаций · полный справочник</div><div style="padding-bottom:20px">'+groupHtml+'</div>');
+ text=text.replace('const categories=["Обзор","Подрядчики","Предприятия","Интеграторы и проекты","Дистрибьюторы","Сервис и метрология","Конкуренты","Не определены"];',
+   'const categories=["Обзор","Подрядчики","Конечные потребители","Проектные продажи","Партнёрские продажи","Сервис и метрология","Конкуренты","Смежные организации","Не определены"];');
  const cards=subset.map(c=>{
    const verified=Boolean(c.type);
    return '<article class="item"><div class="top"><div class="itemname">'+escapeHtml(c.name)+'</div><span class="num">CRM '+escapeHtml(c.id)+'</span></div>'+
