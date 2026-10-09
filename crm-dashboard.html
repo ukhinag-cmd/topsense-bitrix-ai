@@ -88,12 +88,16 @@ e("nav").innerHTML=categories.map(c=>'<button class="'+(c===current?'active':'')
 e("nav").querySelectorAll("button").forEach(b=>b.onclick=()=>{current=b.dataset.name;limit=24;drawNav();render()});
 }
 function makeCard(c){
-const good=Boolean(c.type);
+const good=Boolean(c.type)&&!String(c.verification||"").startsWith("AI —");
 return '<article class="item"><div class="top"><div class="itemname">'+safe(c.name)+'</div><span class="num">CRM '+safe(c.id)+'</span></div>'+
 '<div class="labels"><span class="flag '+(good?'verified':'')+'">'+(good?'Подтверждено':'Не подтверждено')+'</span><span class="flag">'+safe(c.category)+'</span></div>'+
 '<div class="itemdesc">'+safe(c.type||'Группа предположительно определена по названию. Проверка сайта ещё требуется.')+'</div>'+
 (c.corporateDomain?'<div class="itemdesc">Домен: '+safe(c.corporateDomain)+'</div>':'')+
 (c.strategy?'<div class="itemdesc">'+safe(c.strategy)+'</div>':'')+
+(c.relatedCards&&c.relatedCards.length?
+ '<div class="itemdesc"><b>Похожие карточки:</b> '+
+ c.relatedCards.map(x=>'<a href="'+safe(x.crmUrl)+'" target="_blank" rel="noopener noreferrer" style="color:#16828e;text-decoration:underline">CRM №'+safe(x.id)+'</a>').join(", ")+
+ '<div style="font-size:11px;color:#778e9b">'+safe(c.relatedStatus||"Связь ещё проверяется")+'</div></div>':'')+
 '<div class="links"><a href="'+safe(c.crmUrl)+'" target="_blank" rel="noopener noreferrer">Открыть в Битрикс24 ↗</a>'+
 (c.siteVerified?'<a href="'+safe(c.siteVerified)+'" target="_blank" rel="noopener noreferrer">Официальный сайт ↗</a>':'')+'</div></article>';
 }
