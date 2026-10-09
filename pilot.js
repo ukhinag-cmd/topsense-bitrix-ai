@@ -247,16 +247,22 @@ async function runPilot() {
   const reserved = [...existing.keys()].filter(x => x.startsWith(NS + "reservation:"));
   // Hard ceiling derived from reservations, not uncertain API usage.
   let reservedCount = reserved.length;
-  const phaseLimit = Math.min(10, Math.max(1, Number(readEnv("TOPSENSE_PILOT_PHASE_LIMIT") || 10)));
+  const phaseLimit = Math.min(MAX_QUEUE, Math.max(1, Number(readEnv("TOPSENSE_PILOT_PHASE_LIMIT") || 10)));
   let processed = 0, aiCalls = 0, skip = 0, errors = 0, cost = 0;
   log("start", { queue: 200, alreadyReserved: reservedCount, phaseLimit,
     committedCapUsd: reservedCount * RESERVE_USD });
-  for (const id of config.ids.map(Number).slice(0, MAX_QUEUE)) {
-    if (processed >= phaseLimit) break;
-    const k = NS + "result:" + id;
-    const reservationKey = NS + "reservation:" + id;
-    if (existing.has(k) || existing.has(reservationKey)) continue;
-    processed += 1;
+  const queue=config.ids.map(Number).filter(id=>
+    !existing.has(NS + "result:" + id)&&!existing.has(NS + "reservation:" + id)
+  ).slice(0,phaseLimit);
+  let cursor=0, stop=false;
+  async function worker(){
+    while(!stop){
+      const idx=cursor++;
+      if(idx>=queue.length)return;
+      const id=queue[idx];
+      const k=NS+"result:"+id;
+      const reservationKey=NS+"reservation:"+id;
+      processed+=1;
     try {
       const company = await b24Company(id);
       const host1 = candidateHost(firstField(company.WEB));
@@ -277,12 +283,12 @@ async function runPilot() {
       }
       if ((reservedCount + 1) * RESERVE_USD > Math.min(PILOT_BUDGET_USD, config.approvedBudgetUsd) - 0.000001) {
         log("budget-stop", { reservations: reservedCount, reservationUsd: RESERVE_USD });
-        break;
+        stop=true;break;
       }
-      // Write BEFORE consuming any money; reservations are NEVER automatically retried.
+      // Reserve before any await, so parallel workers cannot exceed $5.
+      reservedCount += 1;
       await upsert(reservationKey, { recordType: "topsense-pilot-reservation",
         companyId: id, reservedUsd: RESERVE_USD, at: iso() });
-      reservedCount += 1;
       aiCalls += 1;
       try {
         const answer = await classify(company, evidence);
@@ -305,17 +311,23 @@ async function runPilot() {
           website: evidence.url, possibleChargeUsd: RESERVE_USD, verifiedAt: iso() }); }
         catch (inner) { log("storage-failed", { id, error: String(inner.message).slice(0,180) }); }
         log("classify-error", { id, error: String(e.message).slice(0,220) });
+        stop=true;
         // A credential failure or rate-limit should NOT create multiple paid retries.
         break;
       }
     } catch (e) {
       errors += 1;
       log("company-error", { id, error: String(e.message).slice(0,220) });
+      stop=true;
       // If storage/Bitrix fails, fail closed without additional paid requests.
       break;
     }
-    await pause(250);
+    await pause(120);
+    }
   }
+  // Four independent workers increase throughput, while reservations are
+  // serialized synchronously before any awaited network call.
+  await Promise.all(Array.from({length:4},()=>worker()));
   const summary = { recordType: "topsense-pilot-summary", phaseLimit, processed,
     aiCalls, noSite: skip, errors, estimatedModelSpendUsd: cost,
     totalReservedCalls: reservedCount, conservativeReservedUsd: reservedCount * RESERVE_USD,
