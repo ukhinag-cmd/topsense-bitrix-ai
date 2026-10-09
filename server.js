@@ -7382,6 +7382,20 @@ server.listen(PORT, "0.0.0.0", () => {
     }, 16000);
   }
 
+  // Authorized next cohort, subject to the existing cumulative $5 spending ceiling.
+  if (String(process.env.TOPSENSE_PILOT3_ENABLED || "").trim() === "1") {
+    setTimeout(() => {
+      require("./pilot3").runPilot().catch((error) => {
+        console.error(JSON.stringify({
+          component: "topsense-pilot-v3",
+          event: "fatal",
+          error: error instanceof Error ? error.message : String(error),
+          at: new Date().toISOString(),
+        }));
+      });
+    }, 19000);
+  }
+
   // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
     await loadPersistedContractors();
