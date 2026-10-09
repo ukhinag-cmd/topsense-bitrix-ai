@@ -7223,6 +7223,10 @@ const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url || "/", "http://localhost");
   const pathname = requestUrl.pathname.replace(/\/+$/, "") || "/";
 
+  // Secure visual analytics; CRM data is read on demand from the existing Bitrix integration.
+  if (require("./crm-dashboard").route(req, res, pathname, () => [...PERSISTED_COMPANY_TYPES.values()])) return;
+
+
   if (
     req.method === "GET" &&
     (
