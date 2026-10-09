@@ -78,10 +78,14 @@ function initialHtml(payload){
  ' без пригодного сайта. Подробные организационные типы должны подтверждаться по источникам.</div>'+
  '<div class="notice" id="notice">');
  const cards=subset.map(c=>{
-   const verified=Boolean(c.type);
+   const verified=Boolean(c.type)&&!String(c.verification||"").startsWith("AI —");
    return '<article class="item"><div class="top"><div class="itemname">'+escapeHtml(c.name)+'</div><span class="num">CRM '+escapeHtml(c.id)+'</span></div>'+
    '<div class="labels"><span class="flag '+(verified?'verified':'')+'">'+(verified?'Подтверждено':'Ожидает проверки')+'</span><span class="flag">'+escapeHtml(c.category)+'</span></div>'+
-   '<div class="itemdesc">'+escapeHtml(c.type||'Классификация по названию — предварительная')+'</div>'+
+   '<div class="itemdesc">'+escapeHtml(c.type||c.organizationType||'Классификация по названию — предварительная')+'</div>'+
+   (c.relatedCards?.length?
+     '<div class="itemdesc"><b>Связанные по названию карточки:</b> '+
+      c.relatedCards.map(x=>'<a style="color:#147983;text-decoration:underline" href="'+escapeHtml(x.crmUrl)+'" target="_blank" rel="noopener noreferrer">CRM №'+escapeHtml(x.id)+'</a>').join(", ")+
+     '<div style="font-size:11px;color:#7d8e98">'+escapeHtml(c.relatedStatus||"Связь требует проверки")+'</div></div>':"")+
    '<div class="links"><a href="'+escapeHtml(c.crmUrl)+'" target="_blank" rel="noopener noreferrer">Открыть в Битрикс24 ↗</a></div></article>'
  }).join("");
  const metrics=[["total",payload.total],["verified",payload.confirmed],["sites",payload.companies.filter(x=>x.siteCandidate).length],["pending",payload.total-payload.confirmed]];
@@ -233,9 +237,33 @@ function data(known){
   else if(/завод|комбинат|потребител|эксплуатир|теплоснабж/i.test(type))group="Конечные потребители";
   return {...c,category:group,type,organizationType:type,verificationStatus:r.verificationStatus,siteVerified:String(r.website||""),strategy:String(r.strategicReason||"").slice(0,260),verification:"Проверено по реестру подрядчиков"};
  });
+ // Similar names are CRM relationships to REVIEW, never automatic duplicates.
+ // Do not infer legal identity, branch status, contacts, shipments, or ownership.
+ function normalizedName(value){
+   return String(value||"").toLowerCase().replace(/[«»"']/g,"")
+     .replace(/^(?:ооо|ао|пао|зао|оао|ип)\s+/,"")
+     .replace(/[^а-яёa-z0-9]/g,"").trim();
+ }
+ const named=new Map();
+ for(const c of records){
+   const key=normalizedName(c.name);
+   if(key.length<7||key==="безназвания")continue;
+   if(!named.has(key))named.set(key,[]);
+   named.get(key).push(c);
+ }
+ for(const c of records){
+   const match=named.get(normalizedName(c.name))||[];
+   if(match.length>1){
+     c.relatedCards=match.filter(x=>x.id!==c.id).slice(0,15)
+       .map(x=>({id:x.id,name:x.name,crmUrl:x.crmUrl}));
+     c.relatedStatus=["198","324"].includes(c.id)?"Вероятно одно юрлицо: проверить ИНН/КПП и назначение каждой CRM-карточки"
+       :["62","2790","2842","3682","3684","3690","3692"].includes(c.id)?"Группа карточек ГСП Ремонт: филиалы/подразделения уточняются; CRM №3692 — филиал"
+       :"Совпало название; связь между юридическими лицами не проверена";
+   }
+ }
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  records.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,relatedGroups:[...named.values()].filter(x=>x.length>1).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
