@@ -327,7 +327,7 @@ async function runPilot() {
   }
   // Four independent workers increase throughput, while reservations are
   // serialized synchronously before any awaited network call.
-  await Promise.all(Array.from({length:4},()=>worker()));
+  await Promise.all(Array.from({length:Math.min(4,Math.max(1,Number(readEnv("TOPSENSE_PILOT_CONCURRENCY")||4)))},()=>worker()));
   const summary = { recordType: "topsense-pilot-summary", phaseLimit, processed,
     aiCalls, noSite: skip, errors, estimatedModelSpendUsd: cost,
     totalReservedCalls: reservedCount, conservativeReservedUsd: reservedCount * RESERVE_USD,
