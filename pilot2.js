@@ -250,8 +250,22 @@ async function runPilot() {
   }
   const existing = new Map(entries.filter(x => String(x.key || "").startsWith(NS)).map(x => [x.key, x.payload]));
   const allReservations=entries.filter(x=>/^pilot:v[12]:reservation:/.test(String(x.key||"")));
-  // Cumulative $5 budget includes every past v1 reservation and every new v2 reservation.
-  let reservedTotalUsd=allReservations.reduce((sum,x)=>sum+Number(x.payload?.reservedUsd||0.024),0);
+  const resultMap=new Map(entries.filter(x=>/^pilot:v[12]:result:/.test(String(x.key||""))).map(x=>[String(x.key),x.payload||{}]));
+  // Conservative settled-cost ledger: 30% surcharge on measured model/tool usage.
+  // Unresolved calls keep their FULL prepaid reservation, including errors.
+  const SETTLED_MULTIPLIER=1.30;
+  let reservedTotalUsd=0;
+  for(const entry of allReservations){
+    const key=String(entry.key||"");
+    const targetKey=key.replace(":reservation:",":result:");
+    const settled=resultMap.get(targetKey);
+    const charge=Number(settled?.estimatedCostUsd);
+    if(settled&&Number.isFinite(charge)&&charge>0&&settled.tokenUsage){
+      reservedTotalUsd+=charge*SETTLED_MULTIPLIER;
+    }else{
+      reservedTotalUsd+=Number(entry.payload?.reservedUsd||0.024);
+    }
+  }
   let reservedCount=allReservations.length;
   const phaseLimit = Math.min(MAX_QUEUE, Math.max(1, Number(readEnv("TOPSENSE_PILOT_PHASE_LIMIT") || 10)));
   let processed = 0, aiCalls = 0, skip = 0, errors = 0, cost = 0;
@@ -304,6 +318,12 @@ async function runPilot() {
           researchMode:searchMode?"paid_web_search":"corporate_website",
           estimatedCostUsd: answer.usage.estimatedUsd, verifiedAt: iso()
         });
+        // Only release the full reservation AFTER the actual charge is safely
+        // saved. When usage is absent, retain the full reservation.
+        const usageKnown=answer.usage.input>0&&answer.usage.output>0&&answer.usage.estimatedUsd>0;
+        if(usageKnown){
+          reservedTotalUsd=reservedTotalUsd-reserveUsd+answer.usage.estimatedUsd*SETTLED_MULTIPLIER;
+        }
         log("classified", { id, searchMode, siteOwnership: answer.parsed.siteOwnership,
           type: answer.parsed.clientType, estimatedCostUsd: answer.usage.estimatedUsd });
       } catch (e) {
@@ -333,7 +353,7 @@ async function runPilot() {
   const summary = { recordType: "topsense-pilot-summary", phaseLimit, processed,
     aiCalls, noSite: skip, errors, estimatedModelSpendUsd: cost,
     totalReservedCalls: reservedCount, conservativeReservedUsd: reservedTotalUsd,
-    approvedLimitUsd: PILOT_BUDGET_USD, updatedAt: iso() };
+    approvedLimitUsd: PILOT_BUDGET_USD, ledgerMode:"settled-cost-times-1.30-plus-inflight-reservations",updatedAt: iso() };
   await upsert(NS + "summary", summary);
   log("complete", summary);
 }
