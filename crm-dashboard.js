@@ -1,7 +1,8 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
 const state={status:"starting",updatedAt:null,error:null,companies:[],refreshing:false};
-const sections=["Подрядчики","Предприятия","Интеграторы и проекты","Дистрибьюторы","Сервис и метрология","Конкуренты","Не определены"];
+const ORG_TYPES=require("./company-types").types;
+const sections=["Подрядчики","Конечные потребители","Сервис и метрология","Партнёрские продажи","Проектные продажи","Конкуренты","Смежные организации","Не определены"];
 const freeDomains=new Set(["mail.ru","bk.ru","list.ru","inbox.ru","gmail.com","yandex.ru","ya.ru","yahoo.com","rambler.ru","outlook.com","hotmail.com","icloud.com","topsense.su","detector-gaza.ru"]);
 const html=fs.readFileSync(path.join(__dirname,"crm-dashboard.html"),"utf8");
 function write(res,status,body,type="application/json; charset=utf-8",headers={}) {
@@ -71,12 +72,12 @@ function website(x){const raw=value(x).split(/[;,\s]+/)[0].trim();if(!raw)return
 function category(name){
  const n=String(name||"").toLowerCase();
  if(/газоаналит|анкат|газоизмер|хроматэк|газсигнал/.test(n))return "Конкуренты";
- if(/асу.?тп|автоматизац|интеграт|автоматик|кипиа|кпиа/.test(n))return "Интеграторы и проекты";
+ if(/асу.?тп|автоматизац|интеграт|автоматик|кипиа|кпиа/.test(n))return "Проектные продажи";
  if(/ремонт|строй|монтаж|пусконалад|строитель|промфин|подряд|буров/.test(n))return "Подрядчики";
  if(/метролог|поверк|калибров|лаборатор|испытательн/.test(n))return "Сервис и метрология";
- if(/торг|снаб|дистриб|постав|трейд|комплект/.test(n))return "Дистрибьюторы";
- if(/нефт|газпром|лукойл|роснефт|газперераб|завод|комбинат|хим|металлург|горно|энергетик|цбк/.test(n))return "Предприятия";
- if(/проект|инжиниринг|проектир/.test(n))return "Интеграторы и проекты";
+ if(/торг|снаб|дистриб|постав|трейд|комплект/.test(n))return "Партнёрские продажи";
+ if(/нефт|газпром|лукойл|роснефт|газперераб|завод|комбинат|хим|металлург|горно|энергетик|цбк/.test(n))return "Конечные потребители";
+ if(/проект|инжиниринг|проектир/.test(n))return "Проектные продажи";
  return "Не определены";
 }
 function company(x){const id=String(x.ID||"");return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:website(x.WEB),corporateDomain:domain(x.EMAIL),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
@@ -128,12 +129,12 @@ function data(known){
   const type=String(r.contractorType||"").slice(0,160);
   let group=c.category;
   if(r.verificationStatus==="confirmed")group="Подрядчики";
-  else if(/завод|комбинат|потребител|эксплуатир|теплоснабж/i.test(type))group="Предприятия";
-  return {...c,category:group,type,siteVerified:String(r.website||""),strategy:String(r.strategicReason||"").slice(0,260),verification:"Проверено по реестру подрядчиков"};
+  else if(/завод|комбинат|потребител|эксплуатир|теплоснабж/i.test(type))group="Конечные потребители";
+  return {...c,category:group,type,organizationType:type,verificationStatus:r.verificationStatus,siteVerified:String(r.website||""),strategy:String(r.strategicReason||"").slice(0,260),verification:"Проверено по реестру подрядчиков"};
  });
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  records.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,counts,companies:records};
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
