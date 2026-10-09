@@ -10,15 +10,60 @@ function write(res,status,body,type="application/json; charset=utf-8",headers={}
  res.end(value);
 }
 function equals(a,b){const x=crypto.createHash("sha256").update(String(a)).digest(),y=crypto.createHash("sha256").update(String(b)).digest();return crypto.timingSafeEqual(x,y)}
+function sessionKey(){return String(process.env.TOPSENSE_DASHBOARD_PASSWORD||"")}
+function cookieValid(req){
+ const key=sessionKey();if(key.length<16)return false;
+ const raw=String(req.headers.cookie||"").split(";").map(x=>x.trim()).find(x=>x.startsWith("ts_crm_auth="));
+ if(!raw)return false;
+ const token=raw.slice("ts_crm_auth=".length),parts=token.split(".");
+ if(parts.length!==2||!/^[0-9]+$/.test(parts[0]))return false;
+ const ts=Number(parts[0]),age=Date.now()-ts;
+ if(!Number.isSafeInteger(ts)||age<0||age>8*3600*1000)return false;
+ const sig=crypto.createHmac("sha256",key).update(parts[0]).digest("hex");
+ return equals(parts[1],sig);
+}
 function authorised(req){
- const pass=String(process.env.TOPSENSE_DASHBOARD_PASSWORD||"");
- if(pass.length<16)return false;
+ const pass=sessionKey();if(pass.length<16)return false;
+ if(cookieValid(req))return true;
  try{
    const raw=req.headers.authorization||"";
    if(!raw.startsWith("Basic "))return false;
    const d=Buffer.from(raw.slice(6),"base64").toString("utf8"),idx=d.indexOf(":");
    return idx>0&&equals(d.slice(0,idx),"topsense")&&equals(d.slice(idx+1),pass);
  }catch{return false}
+}
+function loginPage(error){
+ const note=error?"<p style='color:#b84132'>Проверьте логин и пароль.</p>":"";
+ return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ТОП-СЕНС — вход</title><style>
+ body{margin:0;min-height:100vh;background:#f3f7fa;font:16px system-ui;color:#16364c;display:grid;place-items:center}
+ main{max-width:400px;width:calc(100% - 38px);background:white;border:1px solid #dfeaf0;box-shadow:0 12px 40px #16364c17;border-radius:20px;padding:32px}
+ h1{font-size:27px;margin:0 0 9px}p{color:#66808e;font-size:14px;line-height:1.5}
+ label{font-size:12px;font-weight:700;display:block;margin-top:17px}
+ input{padding:14px;border:1px solid #cddce5;border-radius:10px;width:100%;box-sizing:border-box;margin-top:7px;font:inherit}
+ button{background:#135b6c;color:white;border:0;border-radius:10px;padding:14px;width:100%;margin-top:22px;font:700 15px system-ui}
+ </style></head><body><main><h1>ТОП-СЕНС</h1><p>Закрытая аналитика клиентской базы</p>${note}
+ <form method="POST" action="/intel/login"><label>Логин<input name="username" value="topsense" required></label>
+ <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
+ <button type="submit">Открыть дашборд</button></form></main></body></html>`;
+}
+function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]))}
+function initialHtml(payload){
+ const subset=payload.companies.slice(0,12);
+ let text=html;
+ const cards=subset.map(c=>{
+   const verified=Boolean(c.type);
+   return '<article class="item"><div class="top"><div class="itemname">'+escapeHtml(c.name)+'</div><span class="num">CRM '+escapeHtml(c.id)+'</span></div>'+
+   '<div class="labels"><span class="flag '+(verified?'verified':'')+'">'+(verified?'Подтверждено':'Ожидает проверки')+'</span><span class="flag">'+escapeHtml(c.category)+'</span></div>'+
+   '<div class="itemdesc">'+escapeHtml(c.type||'Классификация по названию — предварительная')+'</div>'+
+   '<div class="links"><a href="'+escapeHtml(c.crmUrl)+'" target="_blank" rel="noopener noreferrer">Открыть в Битрикс24 ↗</a></div></article>'
+ }).join("");
+ const metrics=[["total",payload.total],["verified",payload.confirmed],["sites",payload.companies.filter(x=>x.siteCandidate).length],["pending",payload.total-payload.confirmed]];
+ for(const [id,val] of metrics){
+   text=text.replace('id="'+id+'">—</div>','id="'+id+'">'+Number(val).toLocaleString("ru-RU")+'</div>');
+ }
+ text=text.replace('id="cards"></div>','id="cards">'+(cards||'<div class="empty">Компании загружаются</div>')+'</div>');
+ text=text.replace('id="count">—</span>','id="count">'+payload.total+' компаний</span>');
+ return text;
 }
 function value(x){if(Array.isArray(x))return x.map(value).filter(Boolean).join("; ");if(x&&typeof x==="object")return String(x.VALUE||x.value||"");return String(x||"")}
 function domain(x){const m=value(x).match(/[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})/i);const d=m?m[1].toLowerCase():"";return d&&!freeDomains.has(d)?d:""}
@@ -92,11 +137,35 @@ function data(known){
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
- if(!authorised(req)){write(res,401,"Доступ к аналитике требует авторизации","text/plain; charset=utf-8",{"www-authenticate":'Basic realm="TOP-SENSE CRM", charset="UTF-8"'});return true}
+ if(pathname==="/intel/login"&&req.method==="POST"){
+   let body="",length=0;
+   req.on("data",chunk=>{
+     length+=chunk.length;
+     if(length>4096){req.destroy();return}
+     body+=chunk.toString("utf8");
+   });
+   req.on("end",()=>{
+     const p=new URLSearchParams(body),username=p.get("username")||"",password=p.get("password")||"";
+     const key=sessionKey();
+     if(key.length>=16&&equals(username,"topsense")&&equals(password,key)){
+       const ts=String(Date.now()),sig=crypto.createHmac("sha256",key).update(ts).digest("hex");
+       res.writeHead(303,{"location":"/contractors","set-cookie":"ts_crm_auth="+ts+"."+sig+"; Path=/; Max-Age=28800; Secure; HttpOnly; SameSite=Lax","cache-control":"no-store"});
+       res.end();return;
+     }
+     write(res,401,loginPage(true),"text/html; charset=utf-8");
+   });
+   return true;
+ }
+ if(!authorised(req)){
+   if(req.method==="GET"&&!pathname.endsWith("/api")&&!pathname.endsWith("/status")){
+     write(res,200,loginPage(false),"text/html; charset=utf-8");return true;
+   }
+   write(res,401,{error:"Авторизация необходима"});return true;
+ }
  if(req.method!=="GET"){write(res,405,{error:"Read-only"});return true}
  if(!state.refreshing&&(!state.updatedAt||Date.now()-Date.parse(state.updatedAt)>30*60*1000))refresh().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
- if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,html,"text/html; charset=utf-8");return true}
+ if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,initialHtml(data(known)),"text/html; charset=utf-8");return true}
  write(res,404,{error:"Not found"});return true;
 }
 // Preload the read-only snapshot when the dashboard module is first requested.
