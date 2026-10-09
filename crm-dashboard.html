@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TOP-SENSE — Дашборд клиентской базы</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#23374c;background:#f4f7fa}
+*{box-sizing:border-box}body{margin:0}button,input{font:inherit}a{color:inherit;text-decoration:none}
+.shell{display:grid;grid-template-columns:247px 1fr;min-height:100vh}
+aside{background:#10293f;color:#d3e3e9;position:sticky;top:0;height:100vh;padding:23px 15px;overflow:auto}
+.brand{font-size:20px;font-weight:850;color:white;letter-spacing:.04em;margin:2px 10px 34px}
+.brand span{color:#52d6c4}.subbrand{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#7baabb;margin:9px 10px 20px}
+nav{display:grid;gap:5px}
+nav button{border:0;border-radius:11px;padding:13px 15px;background:transparent;color:#b4c9d6;cursor:pointer;text-align:left;font-size:13px}
+nav button:hover,nav button.active{background:#26485e;color:#fff}
+.foot{font-size:11px;color:#86a5b9;line-height:1.75;margin:35px 12px;border-top:1px solid #2f5267;padding-top:16px}
+main{width:100%;max-width:1500px;margin:0 auto;padding:32px 37px 60px}
+header{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.eyebrow{font-size:11px;color:#2d8190;text-transform:uppercase;letter-spacing:.14em;font-weight:800}
+h1{font-size:31px;letter-spacing:-.05em;line-height:1.15;margin:8px 0}p{margin:0;color:#758b9b;font-size:13px}
+.live{font-size:11px;color:#157d70;background:#e2f5ee;border:1px solid #c4ecdf;padding:10px 12px;border-radius:30px;white-space:nowrap}
+.live:before{content:"";width:7px;height:7px;background:#19a78c;display:inline-block;border-radius:50%;margin-right:7px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:28px 0 16px}
+.metric,.panel,.item{background:#fff;border:1px solid #e0e9ef;border-radius:17px;box-shadow:0 4px 17px #172c4310}
+.metric{padding:19px}.metric .label{font-size:12px;color:#798d9e}.metric .number{font-size:35px;font-weight:800;letter-spacing:-.07em;margin:8px 0;color:#1d4056}.metric .caption{font-size:11px;color:#8c9ca8;line-height:1.5}
+.panels{display:grid;grid-template-columns:1.3fr .8fr;gap:15px;margin-bottom:18px}
+.panel{padding:22px}h2{font-size:17px;letter-spacing:-.025em;margin:0 0 13px}
+.help{color:#8195a3;font-size:12px;line-height:1.5}.bars{display:grid;gap:13px;margin-top:20px}
+.bar{display:grid;grid-template-columns:minmax(125px,1.1fr) minmax(100px,2fr) 37px;gap:12px;align-items:center;font-size:12px}
+.track{height:8px;border-radius:6px;overflow:hidden;background:#edf2f6}
+.fill{height:100%;background:#2da9a4;border-radius:6px}
+.progress{background:#eff4f5;border-radius:20px;height:14px;overflow:hidden;margin:22px 0 10px}
+.progress b{display:block;background:#26b6a4;width:0;height:100%}
+.notice{background:#fff7e9;color:#806330;padding:15px 17px;border:1px solid #f2e1bf;border-radius:13px;font-size:12px;line-height:1.55;margin-bottom:20px}
+.controls{display:flex;gap:8px;margin-bottom:19px;align-items:center;flex-wrap:wrap}
+input{min-width:220px;flex:1;background:white;padding:13px 15px;border:1px solid #dee8ee;border-radius:12px;outline:none}
+input:focus{border-color:#4bb5af;box-shadow:0 0 0 3px #4bb5af22}
+.pill{border:1px solid #deebef;background:white;padding:11px 12px;border-radius:32px;font-size:12px;color:#63808b;cursor:pointer}
+.pill.active{background:#143e53;color:#fff}
+.sectionhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.results{font-size:12px;font-weight:700;color:#698294}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.item{padding:19px;display:flex;flex-direction:column;gap:13px;min-height:172px}
+.item:hover{border-color:#91cfc5;box-shadow:0 6px 20px #1836481a}
+.top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.itemname{font-size:14px;font-weight:800;color:#254558;line-height:1.4}
+.num{font-size:10px;white-space:nowrap;border-radius:7px;padding:5px 7px;color:#8c9fac;background:#f2f5f6}
+.labels{display:flex;gap:7px;flex-wrap:wrap}
+.flag{font-size:10px;padding:6px 9px;border-radius:7px;background:#edf3f6;color:#66808e}
+.flag.verified{background:#def4eb;color:#177860}
+.itemdesc{font-size:12px;color:#6b8190;line-height:1.5}
+.links{display:flex;gap:15px;flex-wrap:wrap;font-size:12px;font-weight:750;color:#14848c;margin-top:auto}
+.empty{grid-column:1/-1;text-align:center;color:#7d909b;padding:27px}
+.more{display:block;padding:13px 25px;margin:20px auto;background:white;color:#2e6371;border-radius:10px;border:1px solid #d5e4e9;cursor:pointer}
+@media(max-width:1100px){.metrics{grid-template-columns:repeat(2,1fr)}.panels{grid-template-columns:1fr}}
+@media(max-width:740px){.shell{display:block}aside{height:auto;position:static;padding:12px}.brand{margin:2px 9px 12px}.subbrand,.foot{display:none}nav{display:flex;overflow:auto;white-space:nowrap}nav button{flex:none}main{padding:23px 15px}.cards{grid-template-columns:1fr}header{flex-direction:column;align-items:flex-start}.metrics{gap:8px}.metric .number{font-size:30px}}
+</style></head>
+<body><div class="shell"><aside>
+<div class="brand">◈ TOP-<span>SENSE</span></div>
+<div class="subbrand">Аналитика клиентов</div>
+<nav id="nav"></nav>
+<div class="foot">Данные из Битрикс24 — только чтение.<br>Никаких автоматических изменений карточек, сделок и контактов.</div>
+</aside><main>
+<header><div><div class="eyebrow">CRM Intelligence / TOP-SENSE</div>
+<h1 id="title">Обзор клиентской базы</h1><p id="subtitle">Реальные компании, направления и статус проверки</p></div>
+<div class="live" id="sync">Подключение к Битрикс24</div></header>
+<div class="metrics">
+<section class="metric"><div class="label">Компаний в CRM</div><div class="number" id="total">—</div><div class="caption">Живые данные Битрикс24, без новых карточек</div></section>
+<section class="metric"><div class="label">Тип подтверждён в веб-реестре</div><div class="number" id="verified">—</div><div class="caption">Не путать с предварительным поиском</div></section>
+<section class="metric"><div class="label">Сайт указан в CRM</div><div class="number" id="sites">—</div><div class="caption">Принадлежность сайта ещё нужно подтвердить</div></section>
+<section class="metric"><div class="label">Тип требует проверки</div><div class="number" id="pending">—</div><div class="caption">Не выдумываем категории и историю покупок</div></section>
+</div>
+<div class="panels">
+<section class="panel"><h2>Потенциальные направления</h2><div class="help">Группировка по признакам названия — не подтверждённый тип компании.</div><div class="bars" id="bars"></div></section>
+<section class="panel"><h2>Покрытие реестра</h2><div class="progress"><b id="progressBar"></b></div><div class="help" id="progressText">Проверяем состояние данных…</div><div class="help" style="margin-top:16px">Поставка считается подтверждённой только по первичным документам. Заявка или счёт сами по себе поставку не доказывают.</div></section>
+</div>
+<div class="notice" id="notice">Отдельная аналитическая база уже содержит 49 подтверждённых карточек, но пока ещё не синхронизирована с этим веб-реестром. Здесь — прямое чтение Битрикс24 и подтверждения действующего реестра подрядчиков.</div>
+<div class="controls"><input id="search" type="search" placeholder="Название, CRM ID, домен или тип…">
+<button class="pill active" data-mode="all">Все</button><button class="pill" data-mode="verified">Подтверждённые</button><button class="pill" data-mode="unverified">Ожидают проверки</button></div>
+<div class="sectionhead"><h2 id="listTitle">Компании</h2><span class="results" id="count">—</span></div>
+<div class="cards" id="cards"></div><button id="more" class="more" hidden>Показать ещё</button>
+</main></div>
+<script>
+const categories=["Обзор","Подрядчики","Предприятия","Интеграторы и проекты","Дистрибьюторы","Сервис и метрология","Конкуренты","Не определены"];
+let data={companies:[],counts:{}},current="Обзор",mode="all",limit=24;
+const e=id=>document.getElementById(id);
+function safe(t){return String(t||"").replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]))}
+function drawNav(){
+e("nav").innerHTML=categories.map(c=>'<button class="'+(c===current?'active':'')+'" data-name="'+safe(c)+'">'+safe(c)+(data.counts[c]===undefined?'':' · '+data.counts[c])+'</button>').join("");
+e("nav").querySelectorAll("button").forEach(b=>b.onclick=()=>{current=b.dataset.name;limit=24;drawNav();render()});
+}
+function makeCard(c){
+const good=Boolean(c.type);
+return '<article class="item"><div class="top"><div class="itemname">'+safe(c.name)+'</div><span class="num">CRM '+safe(c.id)+'</span></div>'+
+'<div class="labels"><span class="flag '+(good?'verified':'')+'">'+(good?'Подтверждено':'Не подтверждено')+'</span><span class="flag">'+safe(c.category)+'</span></div>'+
+'<div class="itemdesc">'+safe(c.type||'Группа предположительно определена по названию. Проверка сайта ещё требуется.')+'</div>'+
+(c.corporateDomain?'<div class="itemdesc">Домен: '+safe(c.corporateDomain)+'</div>':'')+
+(c.strategy?'<div class="itemdesc">'+safe(c.strategy)+'</div>':'')+
+'<div class="links"><a href="'+safe(c.crmUrl)+'" target="_blank" rel="noopener noreferrer">Открыть в Битрикс24 ↗</a>'+
+(c.siteVerified?'<a href="'+safe(c.siteVerified)+'" target="_blank" rel="noopener noreferrer">Официальный сайт ↗</a>':'')+'</div></article>';
+}
+function render(){
+const q=e("search").value.trim().toLowerCase();
+e("title").textContent=current==="Обзор"?"Обзор клиентской базы":current;
+e("subtitle").textContent=current==="Обзор"?"Реальные компании, направления и статус проверки":current+" · коммерческий разрез";
+e("total").textContent=Number(data.total||0).toLocaleString("ru-RU");
+e("verified").textContent=Number(data.confirmed||0).toLocaleString("ru-RU");
+e("sites").textContent=data.companies.filter(c=>c.siteCandidate).length;
+e("pending").textContent=Math.max(0,(data.total||0)-(data.confirmed||0)).toLocaleString("ru-RU");
+e("sync").textContent=data.updatedAt?"Обновлено "+new Date(data.updatedAt).toLocaleString("ru-RU"):(data.status==="error"?"Ошибка CRM":"Загрузка CRM");
+e("progressBar").style.width=(data.total?(100*data.confirmed/data.total):0)+"%";
+e("progressText").textContent="В веб-реестре подтверждено "+Number(data.confirmed||0)+" из "+Number(data.total||0)+" карточек. Для остальных тип пока не доказан.";
+e("bars").innerHTML=Object.entries(data.counts||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div class="bar"><span>'+safe(k)+'</span><div class="track"><div class="fill" style="width:'+Math.round(100*v/(data.total||1))+'%"></div></div><b>'+v+'</b></div>').join("");
+const filtered=data.companies.filter(c=>(current==="Обзор"||c.category===current)&&
+(mode==="all"||(mode==="verified"?Boolean(c.type):!c.type))&&
+(!q||[c.name,c.id,c.corporateDomain,c.category,c.type].join(" ").toLowerCase().includes(q)));
+e("listTitle").textContent=current==="Обзор"?"Компании":current;
+e("count").textContent=filtered.length+" найдено";
+e("cards").innerHTML=filtered.length?filtered.slice(0,limit).map(makeCard).join(""):'<div class="empty">Нет компаний по выбранным фильтрам</div>';
+e("more").hidden=filtered.length<=limit;
+}
+e("more").onclick=()=>{limit+=28;render()};
+e("search").oninput=()=>{limit=24;render()};
+document.querySelectorAll(".pill").forEach(b=>b.onclick=()=>{mode=b.dataset.mode;limit=24;document.querySelectorAll(".pill").forEach(x=>x.classList.toggle("active",x===b));render()});
+async function poll(){
+try{
+const response=await fetch("/intel/api",{cache:"no-store"});
+if(!response.ok)throw Error("HTTP "+response.status);
+const json=await response.json();if(!json.ok)throw Error(json.error||"Ошибка ответа");data=json;drawNav();render();
+if(json.status==="error"||json.status==="stale")e("notice").textContent="Проблема синхронизации: "+(json.error||"Неизвестная ошибка")+". Проверяем, данные CRM не изменяются.";
+}catch(err){e("sync").textContent="Нет связи";e("notice").textContent="Ошибка получения данных: "+err.message;}
+}
+drawNav();render();poll();setInterval(poll,15000);
+</script></body></html>
