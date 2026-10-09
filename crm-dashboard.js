@@ -1,6 +1,6 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
-const state={status:"starting",updatedAt:null,error:null,companies:[],refreshing:false};
+const state={status:"starting",updatedAt:null,error:null,companies:[],refreshing:false,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false};
 const ORG_TYPES=require("./company-types").types;
 const sections=["Подрядчики","Конечные потребители","Сервис и метрология","Партнёрские продажи","Проектные продажи","Конкуренты","Смежные организации","Не определены"];
 const freeDomains=new Set(["mail.ru","bk.ru","list.ru","inbox.ru","gmail.com","yandex.ru","ya.ru","yahoo.com","rambler.ru","outlook.com","hotmail.com","icloud.com","topsense.su","detector-gaza.ru"]);
@@ -131,6 +131,44 @@ async function refresh(){
  }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
  finally{state.refreshing=false}
 }
+
+// Pull the authorized, private model-classification checkpoint from the existing store.
+// This creates no OpenAI calls and never writes to the CRM.
+async function loadPilot(){
+ if(state.pilotLoading)return;
+ const endpoint=String(process.env.GOOGLE_SHEET_STORE_URL||"");
+ const secret=String(process.env.GOOGLE_SHEET_STORE_SECRET||"");
+ if(!endpoint||!secret)return;
+ state.pilotLoading=true;
+ try{
+  const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},
+    body:JSON.stringify({action:"load",secret}),signal:AbortSignal.timeout(18000)});
+  const d=await r.json();
+  if(!r.ok||d.ok===false)throw Error("private AI store read error");
+  const entries=Array.isArray(d.rows)?d.rows:[];
+  const x=new Map();
+  for(const e of entries){
+    if(!String(e.key||"").startsWith("pilot:v1:result:"))continue;
+    const item=e.payload||{};
+    if(item.companyId&&item.recordType==="topsense-pilot-result")x.set(String(item.companyId),item);
+  }
+  state.pilot=x;state.pilotUpdatedAt=new Date().toISOString();
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"ai-results-loaded",count:x.size}));
+ }catch(error){
+  console.warn(JSON.stringify({component:"topsense-dashboard",event:"ai-results-unavailable",error:String(error.message).slice(0,100)}));
+ }finally{state.pilotLoading=false}
+}
+function commercialFromOrgType(t){
+ const x=ORG_TYPES.find(z=>z.name===t);if(!x)return "";
+ if(x.family==="Интеграторы"||x.family==="Проектирование")return "Проектные продажи";
+ if(x.family==="Подрядчики")return "Подрядчики";
+ if(x.family==="Торговля")return "Партнёрские продажи";
+ if(x.family==="Сервис")return "Сервис и метрология";
+ if(x.family==="Эксплуатация")return "Конечные потребители";
+ if(x.family==="Смежные")return "Смежные организации";
+ if(x.family==="Производители")return t.includes("газоаналитических")?"Конкуренты":"Проектные продажи";
+ return "";
+}
 function data(known){
  const registry=new Map();
  for(const x of (typeof known==="function"?known():[])){
@@ -138,7 +176,24 @@ function data(known){
  }
  const records=state.companies.map(c=>{
   const r=registry.get(c.id);
-  if(!r)return c;
+  const ai=state.pilot.get(c.id);
+  if(!r){
+    if(!ai)return c;
+    const orgType=String(ai.primaryType||"");
+    const validType=ORG_TYPES.some(x=>x.name===orgType)&&ai.status==="classified";
+    return {...c,
+      category:validType?commercialFromOrgType(orgType)||c.category:c.category,
+      type:validType?orgType:"",
+      organizationType:validType?orgType:"",
+      aiExplanation:String(ai.clientType||"").slice(0,180),
+      siteVerified:ai.status==="classified"?String(ai.website||""):"",
+      verification:ai.status==="classified"?"AI — требует проверки":String(ai.status||"").slice(0,50),
+      aiStatus:String(ai.status||""),
+      strategy:String(ai.proposedStrategy||"").slice(0,240),
+      evidence:ai.source?[String(ai.source)]:[],
+      delivery:"Не подтверждена"
+    };
+  }
   const type=String(r.contractorType||"").slice(0,160);
   let group=c.category;
   if(r.verificationStatus==="confirmed")group="Подрядчики";
@@ -147,7 +202,7 @@ function data(known){
  });
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  records.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,aiResults:state.pilot.size,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
@@ -178,10 +233,12 @@ function route(req,res,pathname,known){
  }
  if(req.method!=="GET"){write(res,405,{error:"Read-only"});return true}
  if(!state.refreshing&&(!state.updatedAt||Date.now()-Date.parse(state.updatedAt)>30*60*1000))refresh().catch(()=>{});
+ if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,initialHtml(data(known)),"text/html; charset=utf-8");return true}
  write(res,404,{error:"Not found"});return true;
 }
 // Preload the read-only snapshot when the dashboard module is first requested.
 setTimeout(() => refresh().catch(() => {}), 1100);
+setTimeout(() => loadPilot().catch(() => {}), 1500);
 module.exports={route,refresh,data};
