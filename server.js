@@ -7350,6 +7350,21 @@ server.listen(PORT, "0.0.0.0", () => {
     }, 4000);
   }
 
+  // Isolated read-only pilot: only if deliberately enabled on Render.
+  // The legacy contractor automation retains its independent OPENAI_PAUSED setting.
+  if (String(process.env.TOPSENSE_PILOT_ENABLED || "").trim() === "1") {
+    setTimeout(() => {
+      require("./pilot").runPilot().catch((error) => {
+        console.error(JSON.stringify({
+          component: "topsense-pilot",
+          event: "fatal",
+          error: error instanceof Error ? error.message : String(error),
+          at: new Date().toISOString(),
+        }));
+      });
+    }, 10000);
+  }
+
   // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
     await loadPersistedContractors();
