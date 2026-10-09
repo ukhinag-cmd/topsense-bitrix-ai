@@ -77,7 +77,22 @@ const gateway = http.createServer((req, res) => {
     port: APP_PORT,
     path: req.url,
     method: req.method,
-    headers: Object.fromEntries(Object.entries(req.headers).filter(([key]) => key.toLowerCase() !== "authorization")),
+    headers: (() => {
+      const headers = { ...req.headers };
+      const auth = String(headers.authorization || "");
+      if (auth.startsWith("Basic ")) {
+        try {
+          const credentials = Buffer.from(auth.slice(6), "base64").toString("utf8");
+          if (credentials.startsWith("sales:") ||
+              credentials.slice(credentials.indexOf(":") + 1) === String(process.env.SALES_DASHBOARD_TOKEN || "")) {
+            delete headers.authorization;
+          }
+        } catch {
+          delete headers.authorization;
+        }
+      }
+      return headers;
+    })(),
   }, upstream => {
     res.writeHead(upstream.statusCode || 502, upstream.headers);
     upstream.pipe(res);
