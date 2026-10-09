@@ -99,4 +99,6 @@ function route(req,res,pathname,known){
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,html,"text/html; charset=utf-8");return true}
  write(res,404,{error:"Not found"});return true;
 }
+// Preload the read-only snapshot when the dashboard module is first requested.
+setTimeout(() => refresh().catch(() => {}), 1100);
 module.exports={route,refresh,data};
