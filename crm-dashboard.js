@@ -64,6 +64,11 @@ function initialHtml(payload){
    '<nav id="nav"></nav><div class="subbrand" style="margin-top:24px">45 типов организаций · полный справочник</div><div style="padding-bottom:20px">'+groupHtml+'</div>');
  text=text.replace('const categories=["Обзор","Подрядчики","Предприятия","Интеграторы и проекты","Дистрибьюторы","Сервис и метрология","Конкуренты","Не определены"];',
    'const categories=["Обзор","Подрядчики","Конечные потребители","Проектные продажи","Партнёрские продажи","Сервис и метрология","Конкуренты","Смежные организации","Не определены"];');
+ text=text.replace('<div class="notice" id="notice">',
+ '<div class="notice" style="background:#e9f6f2;color:#126957;border-color:#b8e7d7">Пилот AI: '+payload.aiResults+
+ ' CRM-карточек обработано; '+payload.aiCalls+' запросов к модели, '+payload.aiNoSite+
+ ' без пригодного сайта. Подробные организационные типы должны подтверждаться по источникам.</div>'+
+ '<div class="notice" id="notice">');
  const cards=subset.map(c=>{
    const verified=Boolean(c.type);
    return '<article class="item"><div class="top"><div class="itemname">'+escapeHtml(c.name)+'</div><span class="num">CRM '+escapeHtml(c.id)+'</span></div>'+
@@ -202,7 +207,7 @@ function data(known){
  });
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  records.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,aiResults:state.pilot.size,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:records.length,confirmed:records.filter(x=>x.type).length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:records};
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
