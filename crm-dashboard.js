@@ -157,6 +157,7 @@ async function refresh(){
   require("./website-profiler").enqueue(state.companies);
   enqueueLinkedContactSites();
   enqueuePreviousPilotSites();
+  if(state.contactsAt)enqueueMissingSiteNameSearch();
   state.status="ready";state.updatedAt=new Date().toISOString();state.error=null;
   console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:state.companies.length,excludedOwnCompanies:map.size-state.companies.length}));
  }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
