@@ -76,9 +76,14 @@ async function one(c){
   const tokens=String(c.name||"").toLowerCase().replace(/(?:ооо|ао|оао|пао|зао|пкф|нпп|тд|филиал)/g," ").split(/[^а-яёa-z0-9]+/i).filter(t=>t.length>=5);
   const target=[result.meta.title,result.meta.description,...result.meta.headings].join(" ").toLowerCase();
   const checkedName=tokens.some(t=>target.includes(t));
+  const orphanSource=c.siteSource==="Непривязанные CRM-контакты: совпали название и корпоративный домен";
+  const fullCompanyName=String(c.name||"").toLowerCase().replace(/ё/g,"е")
+    .replace(/^(?:ооо|ао|пао|оао|зао|ип)[\\s\\W]+/i,"").replace(/[^а-яa-z0-9]/g,"");
+  const pageIdentity=target.replace(/ё/g,"е").replace(/[^а-яa-z0-9]/g,"");
+  const orphanNameConfirmed=fullCompanyName.length>=11&&pageIdentity.includes(fullCompanyName);
   const redirectedToOtherDomain=new URL(candidates[0].url).hostname.replace(/^www\\./i,"")!==new URL(result.url).hostname.replace(/^www\\./i,"");
-  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||redirectedToOtherDomain;
-  const trusted=!thirdParty||checkedName;
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain;
+  const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   profiles.set(c.id,{status:!trusted?"site_identity_unclear":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:result.meta.headings,siteType:trusted?(found?.type||null):null,siteConfidence:trusted&&found?"Предварительная по сайту":"Не определена",checkedAt:new Date().toISOString()});
  }catch(error){if(evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"))<(sourcePriority.get(String(c.id))||0))return;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
@@ -94,6 +99,7 @@ function evidenceRank(source){
  if(source==="Сайт из карточки компании, присланной письмом")return 6;
  if(source==="Корпоративный домен e-mail CRM")return 4;
  if(source==="Домен привязанного контакта")return 3;
+ if(source==="Непривязанные CRM-контакты: совпали название и корпоративный домен")return 3;
  if(source==="Сайт из CRM")return 2;
  if(source==="Кандидат из прежнего AI-пилота")return 1;
  return 2;
