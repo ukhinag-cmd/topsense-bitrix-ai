@@ -1,7 +1,7 @@
 "use strict";
 const dns=require("dns").promises,net=require("net");
 const {infer}=require("./client-type-inference");
-const profiles=new Map(),visited=new Set(),queue=[];
+const profiles=new Map(),visited=new Set(),queue=[],sourcePriority=new Map();
 let active=0,lastAt=0;
 function publicIPv4(ip){
  const x=ip.split(".").map(Number);
@@ -68,7 +68,9 @@ async function one(c){
  const candidates=urls(c);
  if(!candidates.length){profiles.set(c.id,{status:"site_absent",source:"Карточка CRM не содержит сайт или корпоративный домен"});return}
  try{
+  const currentRank=evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"));
   const result=await fetchPage(candidates[0].url);
+  if(currentRank<(sourcePriority.get(String(c.id))||0))return;
   const text=[result.meta.title,result.meta.description,...result.meta.headings,result.meta.body.slice(0,1600)].join(". ");
   const found=infer(text);
   const tokens=String(c.name||"").toLowerCase().replace(/(?:ооо|ао|оао|пао|зао|пкф|нпп|тд|филиал)/g," ").split(/[^а-яёa-z0-9]+/i).filter(t=>t.length>=5);
@@ -78,7 +80,7 @@ async function one(c){
   const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||redirectedToOtherDomain;
   const trusted=!thirdParty||checkedName;
   profiles.set(c.id,{status:!trusted?"site_identity_unclear":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:result.meta.headings,siteType:trusted?(found?.type||null):null,siteConfidence:trusted&&found?"Предварительная по сайту":"Не определена",checkedAt:new Date().toISOString()});
- }catch(error){profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
+ }catch(error){if(evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"))<(sourcePriority.get(String(c.id))||0))return;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
 function pump(){
  while(active<2&&queue.length){
@@ -87,13 +89,32 @@ function pump(){
   one(c).finally(()=>{active--;setTimeout(pump,1300)});
  }
 }
+function evidenceRank(source){
+ if(source==="Сайт из подписи входящего письма")return 7;
+ if(source==="Сайт из карточки компании, присланной письмом")return 6;
+ if(source==="Корпоративный домен e-mail CRM")return 4;
+ if(source==="Домен привязанного контакта")return 3;
+ if(source==="Сайт из CRM")return 2;
+ if(source==="Кандидат из прежнего AI-пилота")return 1;
+ return 2;
+}
 function enqueue(companies){
  for(const c of companies){
-  if(visited.has(c.id)){if(profiles.get(c.id)?.status==="site_absent"&&urls(c).length){visited.delete(c.id);profiles.delete(c.id);}else continue;}
-  visited.add(c.id);if(!urls(c).length){profiles.set(c.id,{status:"site_absent",source:"В CRM нет сайта или корпоративного домена"});}else queue.push(c);
+  const id=String(c.id||"");
+  const newRank=evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"));
+  if(visited.has(id)){
+   if(newRank<=(sourcePriority.get(id)||0))continue;
+   sourcePriority.set(id,newRank);
+   if(!urls(c).length)continue;
+   queue.push(c);
+   continue;
+  }
+  visited.add(id);sourcePriority.set(id,newRank);
+  if(!urls(c).length){profiles.set(id,{status:"site_absent",source:"Нет подтверждённого сайта или корпоративного домена"});}
+  else queue.push(c);
  }
  pump();
- console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",queued:queue.length,known:profiles.size}));
+ if(companies.length>25)console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",queued:queue.length,known:profiles.size}));
 }
 function get(id){return profiles.get(String(id))||{status:"site_pending"}}
 function stats(){const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;return {queued:queue.length,active,processed:profiles.size,byStatus:by}}
