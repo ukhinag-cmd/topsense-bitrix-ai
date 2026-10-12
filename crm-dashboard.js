@@ -116,14 +116,14 @@ const REVIEWED_PUBLIC_SITES=new Map([
  ["4",{url:"https://ndt-innovation.ru/",name:"НК-ИННОВАЦИИ ЮГ",primaryType:"Дилер промышленного оборудования",source:"Официальный сайт: /contacts и /information/informacziya/o-kompanii, юридическое наименование и ОГРН"}],
  ["1016",{url:"https://ndt-innovation.ru/",name:"НК-ИННОВАЦИИ ЮГ",primaryType:"Дилер промышленного оборудования",source:"Официальный сайт: /contacts и /information/informacziya/o-kompanii, юридическое наименование и ОГРН"}]
 ]);
-function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB),siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":(website(x.WEB)?"Сайт из CRM":""),verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
+function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB),siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":(website(x.WEB)?"Сайт из CRM":""),verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
  const endpoint=new URL("crm.company.list.json",base.endsWith("/")?base:base+"/");
  for(let attempt=0;attempt<2;attempt++){
   try{
-   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
+   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","PHONE","ADDRESS_CITY","ADDRESS_REGION","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
    const j=await r.json();
    if(!r.ok||j.error||!Array.isArray(j.result))throw Error(j.error_description||j.error||"Bad CRM response "+r.status);
    return j;
@@ -174,6 +174,15 @@ function enqueueLinkedContactSites(){
   suggested.push({...c,corporateDomain:domains[0],siteSource:"Домен привязанного контакта"});
  }
  if(suggested.length)require("./website-profiler").enqueue(suggested);
+}
+function enqueueMissingSiteNameSearch(){
+ const missing=[];
+ for(const c of state.companies){
+  if(c.siteCandidate||c.corporateDomain||c.verifiedOrgType)continue;
+  const linked=state.linkedContacts.get(c.id);
+  missing.push({...c,contactEmails:linked?[...linked.emails]:[]});
+ }
+ require("./name-site-search").enqueue(missing);
 }
 function enqueuePreviousPilotSites(){
  const suggestions=[];
@@ -252,6 +261,7 @@ async function loadLinkedContacts(){
   console.log(JSON.stringify({component:"client-segments",event:"unlinked-contact-domain-candidates",
    unlinkedContacts:orphanContacts.length,siteCandidates:websiteCandidates.length}));
   state.linkedContacts=by;state.contactsAt=new Date().toISOString();
+  enqueueMissingSiteNameSearch();
   enqueueLinkedContactSites();
   console.log(JSON.stringify({component:"client-segments",event:"linked-contacts-loaded",contacts:all.length,companies:by.size}));
  }catch(e){console.warn(JSON.stringify({component:"client-segments",event:"linked-contacts-error",error:String(e.message||e).slice(0,150)}))}
@@ -301,7 +311,7 @@ function data(known){
   if(x&&x.companyId&&["confirmed","rejected"].includes(x.verificationStatus))registry.set(String(x.companyId),x);
  }
  const seeds=analyticSeeds();
- const records=state.companies.map(base=>{ const linked=state.linkedContacts.get(base.id);const c={...base,contactEmails:linked?[...linked.emails]:[],contactNames:linked?linked.names:[],mailEvidence:require("./crm-mail-evidence").get(base.id),saleInfo:require("./crm-sales-audit").get(base.id)};
+ const records=state.companies.map(base=>{ const linked=state.linkedContacts.get(base.id);const c={...base,contactEmails:linked?[...linked.emails]:[],contactNames:linked?linked.names:[],mailEvidence:require("./crm-mail-evidence").get(base.id),saleInfo:require("./crm-sales-audit").get(base.id),nameSearch:require("./name-site-search").get(base.id)};
   const r=registry.get(c.id);
   const ai=state.pilot.get(c.id);
   const seed=seeds.get(c.id);
@@ -369,6 +379,7 @@ function data(known){
   siteCrawl:require("./website-profiler").stats(),
   mailAudit:require("./crm-mail-evidence").stats(),
   salesAudit:require("./crm-sales-audit").stats(),
+  nameSiteSearch:require("./name-site-search").stats(),
   companies:virtual.companies.map(c=>({...c,name:format(c.name).name}))
  };
 }
