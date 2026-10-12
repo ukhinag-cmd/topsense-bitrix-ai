@@ -144,12 +144,39 @@ async function refresh(){
   if(map.size<total)throw Error("Incomplete CRM snapshot "+map.size+"/"+total);
   state.companies=[...map.values()].sort((a,b)=>Number(a.id)-Number(b.id));
   require("./website-profiler").enqueue(state.companies);
+  enqueueLinkedContactSites();
+  enqueuePreviousPilotSites();
   state.status="ready";state.updatedAt=new Date().toISOString();state.error=null;
   console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:map.size}));
  }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
  finally{state.refreshing=false}
 }
 
+function enqueueLinkedContactSites(){
+ const suggested=[];
+ for(const c of state.companies){
+  if(c.siteCandidate||c.corporateDomain)continue;
+  const linked=state.linkedContacts.get(c.id);
+  if(!linked||!linked.emails.size)continue;
+  const domains=[...new Set([...linked.emails].map(domain).filter(Boolean))];
+  if(domains.length!==1)continue;
+  suggested.push({...c,corporateDomain:domains[0],siteSource:"Домен привязанного контакта"});
+ }
+ if(suggested.length)require("./website-profiler").enqueue(suggested);
+}
+function enqueuePreviousPilotSites(){
+ const suggestions=[];
+ for(const c of state.companies){
+  if(c.siteCandidate||c.corporateDomain)continue;
+  const ai=state.pilot.get(c.id);
+  if(!ai)continue;
+  const raw=typeof ai.siteCandidate==="object"?(ai.siteCandidate?.url||""):(ai.siteCandidate||ai.website||"");
+  const url=website(raw);
+  if(!url)continue;
+  suggestions.push({...c,siteCandidate:url,siteSource:"Кандидат из прежнего AI-пилота"});
+ }
+ if(suggestions.length)require("./website-profiler").enqueue(suggestions);
+}
 // Fetch linked CRM contacts read-only. No contacts are sent to public source control.
 async function loadLinkedContacts(){
  if(state.contactsLoading||!process.env.BITRIX_WEBHOOK_BASE)return;
@@ -178,6 +205,7 @@ async function loadLinkedContacts(){
    if(target.names.length<20){const name=[c.NAME,c.LAST_NAME].filter(Boolean).join(" ").trim();if(name)target.names.push(name)}
   }
   state.linkedContacts=by;state.contactsAt=new Date().toISOString();
+  enqueueLinkedContactSites();
   console.log(JSON.stringify({component:"client-segments",event:"linked-contacts-loaded",contacts:all.length,companies:by.size}));
  }catch(e){console.warn(JSON.stringify({component:"client-segments",event:"linked-contacts-error",error:String(e.message||e).slice(0,150)}))}
  finally{state.contactsLoading=false}
@@ -203,6 +231,7 @@ async function loadPilot(){
     if(item.companyId&&item.recordType==="topsense-pilot-result")x.set(String(item.companyId),item);
   }
   state.pilot=x;state.pilotUpdatedAt=new Date().toISOString();
+  enqueuePreviousPilotSites();
   console.log(JSON.stringify({component:"topsense-dashboard",event:"ai-results-loaded",count:x.size}));
  }catch(error){
   console.warn(JSON.stringify({component:"topsense-dashboard",event:"ai-results-unavailable",error:String(error.message).slice(0,100)}));
