@@ -91,10 +91,10 @@ q.addEventListener("input",()=>{showEverything=false;draw()});
  document.getElementById("fastBuyers").onclick=()=>{purchase.value="yes";showEverything=false;draw()};
  document.getElementById("fastEmail").onclick=()=>{emailFilter.value="yes";showEverything=false;draw()};
  document.getElementById("fastDups").onclick=()=>{location.href="/contractors/duplicates"};
- for(const b of document.querySelectorAll(".quickType"))b.addEventListener("click",()=>{t.value=b.dataset.type;showEverything=false;draw()});
+ for(const b of document.querySelectorAll(".quickType"))b.addEventListener("click",()=>{t.value=b.dataset.type;showEverything=false;draw();panel.scrollIntoView({block:"start",behavior:"smooth"})});
  for(const b of document.querySelectorAll(".subtypeButton"))b.addEventListener("click",()=>{
    t.value=t.value===b.dataset.type?"":b.dataset.type;showEverything=false;draw();
-   document.getElementById("starter").scrollIntoView({block:"nearest",behavior:"smooth"});
+   panel.scrollIntoView({block:"start",behavior:"smooth"});
  });
  document.getElementById("openFamilies").onclick=()=>document.querySelectorAll(".typeFamily").forEach(f=>f.open=true);
  document.getElementById("closeFamilies").onclick=()=>document.querySelectorAll(".typeFamily").forEach(f=>f.open=false);
