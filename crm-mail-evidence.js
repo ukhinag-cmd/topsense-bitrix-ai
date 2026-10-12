@@ -116,7 +116,7 @@ async function scan(c){
   start=Number(out.next);
  }
  const inbound=acts.filter(x=>String(x.PROVIDER_ID||"").toUpperCase()==="CRM_EMAIL"||String(x.TYPE_ID||"")==="4")
-  .filter(x=>String(x.DIRECTION||"")!=="2").slice(0,60);
+  .filter(x=>String(x.DIRECTION||"")==="1").slice(0,60);
  const domainCandidates=new Set([c.corporateDomain,...(c.crmEmails||[]).map(emailDomain)].filter(Boolean));
  const evidence={status:"no_incoming_company_email",inboundCount:inbound.length,attachments:0,signatureWebsite:"",signatureTrust:"",source:"CRM inbound activity scan",checkedAt:new Date().toISOString()};
  const cards=attachmentCandidates(inbound);
