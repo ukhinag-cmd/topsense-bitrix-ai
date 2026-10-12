@@ -1,6 +1,6 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
-const state={status:"starting",updatedAt:null,error:null,companies:[],refreshing:false,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false};
+const state={status:"starting",updatedAt:null,error:null,companies:[],refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false};
 function analyticSeeds(){
  try{
    const arr=JSON.parse(String(process.env.TOPSENSE_ANALYTIC_SEED_JSON||"[]"));
@@ -149,6 +149,38 @@ async function refresh(){
  finally{state.refreshing=false}
 }
 
+// Fetch linked CRM contacts read-only. No contacts are sent to public source control.
+async function loadLinkedContacts(){
+ if(state.contactsLoading||!process.env.BITRIX_WEBHOOK_BASE)return;
+ state.contactsLoading=true;
+ try{
+  const endpoint=new URL("crm.contact.list.json",String(process.env.BITRIX_WEBHOOK_BASE).replace(/\\/?$/,"/"));
+  async function chunk(start){
+   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","NAME","LAST_NAME","COMPANY_ID","EMAIL"],start}),signal:AbortSignal.timeout(18000)});
+   const p=await r.json();if(!r.ok||p.error||!Array.isArray(p.result))throw Error(p.error||"CRM contacts read error");return p;
+  }
+  const first=await chunk(0),all=[...first.result],total=Number(first.total||0),size=Math.max(1,first.result.length);
+  if(total>80000)throw Error("Contacts safety limit");
+  if(total>size){
+   const starts=[];for(let i=size;i<total;i+=size)starts.push(i);
+   for(let j=0;j<starts.length;j+=5){
+    const group=await Promise.all(starts.slice(j,j+5).map(chunk));
+    group.forEach(g=>all.push(...g.result));
+   }
+  }
+  const by=new Map();
+  for(const c of all){
+   const id=String(c.COMPANY_ID||"");if(!id||id==="0")continue;
+   if(!by.has(id))by.set(id,{emails:new Set(),names:[]});
+   const target=by.get(id);
+   for(const e of Array.isArray(c.EMAIL)?c.EMAIL:[]){const addr=String(e.VALUE||"").trim().toLowerCase();if(/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(addr))target.emails.add(addr)}
+   if(target.names.length<20){const name=[c.NAME,c.LAST_NAME].filter(Boolean).join(" ").trim();if(name)target.names.push(name)}
+  }
+  state.linkedContacts=by;state.contactsAt=new Date().toISOString();
+  console.log(JSON.stringify({component:"client-segments",event:"linked-contacts-loaded",contacts:all.length,companies:by.size}));
+ }catch(e){console.warn(JSON.stringify({component:"client-segments",event:"linked-contacts-error",error:String(e.message||e).slice(0,150)}))}
+ finally{state.contactsLoading=false}
+}
 // Pull the authorized, private model-classification checkpoint from the existing store.
 // This creates no OpenAI calls and never writes to the CRM.
 async function loadPilot(){
@@ -192,7 +224,7 @@ function data(known){
   if(x&&x.companyId&&["confirmed","rejected"].includes(x.verificationStatus))registry.set(String(x.companyId),x);
  }
  const seeds=analyticSeeds();
- const records=state.companies.map(c=>{
+ const records=state.companies.map(base=>{ const linked=state.linkedContacts.get(base.id);const c={...base,contactEmails:linked?[...linked.emails]:[],contactNames:linked?linked.names:[]};
   const r=registry.get(c.id);
   const ai=state.pilot.get(c.id);
   const seed=seeds.get(c.id);
@@ -295,6 +327,7 @@ function route(req,res,pathname,known){
  if(req.method!=="GET"){write(res,405,{error:"Read-only"});return true}
  if(!state.refreshing&&(!state.updatedAt||Date.now()-Date.parse(state.updatedAt)>30*60*1000))refresh().catch(()=>{});
  if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
+ if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
  if(pathname==="/contractors"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,initialHtml(data(known)),"text/html; charset=utf-8");return true}
@@ -303,4 +336,5 @@ function route(req,res,pathname,known){
 // Preload the read-only snapshot when the dashboard module is first requested.
 setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
+setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
 module.exports={route,refresh,data};
