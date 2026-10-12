@@ -20,7 +20,7 @@ async function safeUrl(value){
  const host=u.hostname.toLowerCase();
  if(!host.includes(".")||host.endsWith(".local")||host.endsWith(".internal")||host.endsWith(".localhost")||host.endsWith(".test")||host.endsWith(".arpa")||net.isIP(host))return null;
  const ips=await dns.lookup(host,{all:true,verbatim:true});
- if(!ips.length||ips.some(a=>a.family!==4||!publicIPv4(a.address)))return null;
+ if(!ips.length||ips.some(a=>a.family===4?!publicIPv4(a.address):a.family===6?!/^[23][0-9a-f]{3}:/i.test(a.address):true))return null;
  return u;
 }
 function urls(c){
@@ -84,7 +84,7 @@ function pump(){
 function enqueue(companies){
  for(const c of companies){
   if(visited.has(c.id))continue;
-  visited.add(c.id);queue.push(c);
+  visited.add(c.id);if(!urls(c).length){profiles.set(c.id,{status:"site_absent",source:"В CRM нет сайта или корпоративного домена"});}else queue.push(c);
  }
  pump();
 }
