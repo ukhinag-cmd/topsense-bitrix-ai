@@ -110,7 +110,13 @@ function category(name){
  if(/проект|инжиниринг|проектир/.test(n))return "Проектные продажи";
  return "Не определены";
 }
-function company(x){const id=String(x.ID||"");return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:website(x.WEB),corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
+// Public official-site evidence established from the provider's own legal-details page.
+// Two CRM cards share the same organization name; never merge their CRM records.
+const REVIEWED_PUBLIC_SITES=new Map([
+ ["4",{url:"https://ndt-innovation.ru/",name:"НК-ИННОВАЦИИ ЮГ",primaryType:"Дилер промышленного оборудования",source:"Официальный сайт: /contacts и /information/informacziya/o-kompanii, юридическое наименование и ОГРН"}],
+ ["1016",{url:"https://ndt-innovation.ru/",name:"НК-ИННОВАЦИИ ЮГ",primaryType:"Дилер промышленного оборудования",source:"Официальный сайт: /contacts и /information/informacziya/o-kompanii, юридическое наименование и ОГРН"}]
+]);
+function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB),siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":(website(x.WEB)?"Сайт из CRM":""),verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
