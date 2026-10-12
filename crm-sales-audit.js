@@ -3,8 +3,8 @@
 // Deal success ("won") alone is NEVER proof of shipment or payment.
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const state={status:"not_started",totalDeals:0,scannedDeals:0,wonDeals:0,productRowsChecked:0,
- shipmentStages:[],paymentStages:[],stageHistoryRecords:0,stageHistoryStatus:"not_started",
- shippedDeals:0,paidDeals:0,companiesWithPurchaseEvidence:0,
+ shipmentStages:[],paymentStages:[],commercialStages:[],stageHistoryRecords:0,stageHistoryStatus:"not_started",
+ shippedDeals:0,paidDeals:0,qualifiedDeals:0,companiesWithPurchaseEvidence:0,
  error:null,startedAt:null,finishedAt:null,refreshAfter:null};
 let summary=new Map(),busy=false;
 async function call(method,params){
@@ -21,17 +21,14 @@ async function call(method,params){
   }catch(e){if(a)throw e;await sleep(650)}
  }
 }
-function amount(d){
- const n=Number(d.OPPORTUNITY),currency=String(d.CURRENCY_ID||"RUB").toUpperCase();
- return {amount:Number.isFinite(n)&&n>=0?n:null,currency};
-}
 function won(d){
  return String(d.STAGE_SEMANTIC_ID||"").toUpperCase()==="S"||String(d.STAGE_ID||"").toUpperCase().endsWith("WON");
 }
 function typeOfStage(name){
  const n=String(name||"").toLowerCase().replace(/ё/g,"е").replace(/\s+/g," ").trim();
- // A combined alternative "invoice paid OR contract signed" is not payment evidence.
- if(/договор/.test(n)&&/(?:оплат|оплач)/.test(n))return "";
+ // Commercial success stage, but combined wording is NOT proof of payment.
+ if(/договор/.test(n)&&/(?:оплат|оплач)/.test(n))return "qualified";
+ if(/ожидает\s+отправк/.test(n))return "qualified";
  if(/(?:оплат[аыуы]?\s+(?:получен[аоы]?|поступил[аоы]?)|(?:получен[аоы]?|поступил[аоы]?)\s+оплат[аы]|счет\s+оплачен|средства\s+поступил)/i.test(n))return "paid";
  if(/(?:приборы?\s+получен[ыао]?\s*\/?\s*упд|упд\s+подписан)/i.test(n))return "shipped";
  if(/(?:(?:товар|продукц|оборудован|заказ|груз)\S*(?:[\s\S]{0,32})(?:отгруж|отправлен|отправк[аыу] заверш)|(?:отгруж|отправлен)[\s\S]{0,24}(?:товар|заказ|оборудован|продукц))/i.test(n))return "shipped";
@@ -59,6 +56,7 @@ async function stages(){
  }
  // Full stage catalog inspected once; do not continuously log it.
  state.shipmentStages=[...found.values()].filter(v=>v.kind==="shipped");
+ state.commercialStages=[...found.values()].filter(v=>v.kind==="qualified");
  state.paymentStages=[...found.values()].filter(v=>v.kind==="paid");
  console.log(JSON.stringify({component:"sales-audit",event:"stage-mapping",
    shipments:state.shipmentStages,payments:state.paymentStages}));
@@ -157,8 +155,8 @@ async function run(companies){
  if(busy)return;
  busy=true;summary=new Map();
  Object.assign(state,{status:"scanning",totalDeals:0,scannedDeals:0,wonDeals:0,productRowsChecked:0,
- shipmentStages:[],paymentStages:[],stageHistoryRecords:0,stageHistoryStatus:"not_started",
- shippedDeals:0,paidDeals:0,companiesWithPurchaseEvidence:0,error:null,
+ shipmentStages:[],paymentStages:[],commercialStages:[],stageHistoryRecords:0,stageHistoryStatus:"not_started",
+ shippedDeals:0,paidDeals:0,qualifiedDeals:0,companiesWithPurchaseEvidence:0,error:null,
  startedAt:new Date().toISOString(),finishedAt:null});
  try{
   const allowed=new Set((companies||[]).map(x=>String(x.id)));
@@ -175,17 +173,17 @@ async function run(companies){
    const hist=viaHistory.get(dealId),current=stageMap.get(String(d.STAGE_ID||""));
    const shipped=Boolean(hist?.shipped||current?.kind==="shipped");
    const paid=Boolean(hist?.paid||current?.kind==="paid");
-   if(!shipped&&!paid)continue;
+   const qualified=Boolean(hist?.qualified||current?.kind==="qualified");
+   if(!shipped&&!paid&&!qualified)continue;
+   if(qualified)state.qualifiedDeals++;
    if(shipped)state.shippedDeals++;
    if(paid)state.paidDeals++;
-   if(!accum.has(companyId))accum.set(companyId,{shipped:false,paid:false,
+   if(!accum.has(companyId))accum.set(companyId,{shipped:false,paid:false,qualified:false,
     purchaseItems:[],purchaseAmount:null,purchaseCurrency:"",purchaseDealCount:0,
-    purchaseBasis:"Стадии отгрузки/оплаты в Bitrix24 (не бухгалтерские документы)",
-    currencies:new Map(),stageEvidence:[],productEvidence:"pending"});
+    purchaseBasis:"Одна из пяти согласованных стадий Bitrix24; сумма только из документов",
+    documentCount:0,documentAmountsKnown:0,documentTotal:0,documentSources:[],stageEvidence:[],productEvidence:"pending"});
    const rec=accum.get(companyId);
-   rec.shipped||=shipped;rec.paid||=paid;rec.purchaseDealCount++;
-   const sum=amount(d);
-   if(sum.amount!==null)rec.currencies.set(sum.currency,(rec.currencies.get(sum.currency)||0)+sum.amount);
+   rec.shipped||=shipped;rec.paid||=paid;rec.qualified||=qualified;rec.purchaseDealCount++;
    for(const src of hist?.sources||[]){
     if(rec.stageEvidence.length<8&&!rec.stageEvidence.some(x=>x.code===src.code))
       rec.stageEvidence.push(src);
@@ -195,13 +193,7 @@ async function run(companies){
    eligible.push({id:dealId,companyId});
   }
   for(const [companyId,rec] of accum){
-   const sums=[...rec.currencies.entries()];
-   if(sums.length===1){rec.purchaseAmount=sums[0][1];rec.purchaseCurrency=sums[0][0]}
-   else if(sums.length>1){rec.purchaseAmount=null;rec.purchaseCurrency="Разные валюты"}
-   rec.currencies=undefined;
-   rec.purchaseStatus=rec.shipped&&rec.paid?"БЫЛА — есть стадии отгрузки и оплаты":
-    rec.paid?"БЫЛА — отмечена оплата в CRM":"БЫЛА — отмечена отгрузка в CRM";
-   rec.purchaseBasis+=". Сумма = поле суммы сделки CRM, не фактически оплаченная сумма";
+   rec.purchaseStatus="БЫЛА";
    summary.set(companyId,rec);
   }
   for(const companyId of success)if(!summary.has(companyId))summary.set(companyId,{
@@ -211,8 +203,13 @@ async function run(companies){
   state.companiesWithPurchaseEvidence=accum.size;
   // Product rows only for deals reaching shipment or payment stages.
   let n=0;
+  const docAudit=require("./deal-document-amount");
   for(const deal of eligible){
    const rows=await productRows(deal.id),rec=summary.get(deal.companyId);
+   const doc=await docAudit.forDeal(deal.id);
+   rec.documentCount+=(doc.documentCount||0);
+   if(doc.amount!==null){rec.documentAmountsKnown++;rec.documentTotal+=doc.amount;
+    if(rec.documentSources.length<12)rec.documentSources.push({dealId:deal.id,source:doc.source});}
    state.productRowsChecked++;
    if(rows===null)rec.productEvidence="unavailable";
    else{
@@ -222,14 +219,25 @@ async function run(companies){
      if(name&&!rec.purchaseItems.includes(name)&&rec.purchaseItems.length<35)rec.purchaseItems.push(name);
     }
    }
-   if(++n%30===0)await sleep(200);
+   if(++n%25===0)await sleep(180);
   }
+  for(const rec of accum.values()){
+   if(rec.documentAmountsKnown===rec.purchaseDealCount&&rec.documentAmountsKnown>0){
+     rec.purchaseAmount=rec.documentTotal;rec.purchaseCurrency="RUB";
+     rec.amountStatus="Сумма подтверждена счетами/договорами";
+   }else{
+     rec.purchaseAmount=null;rec.purchaseCurrency="";
+     rec.amountStatus="Не удалось подтвердить суммы всех сделок документами";
+   }
+   delete rec.documentTotal;
+  }
+  state.documentAudit=docAudit.stats();
   state.status=state.stageHistoryStatus==="complete"?"complete":"partial";
   state.finishedAt=new Date().toISOString();
   console.log(JSON.stringify({component:"sales-audit",event:"fulfilment-audit-complete",
    status:state.status,scannedDeals:state.scannedDeals,shippedDeals:state.shippedDeals,
    paidDeals:state.paidDeals,companiesWithEvidence:state.companiesWithPurchaseEvidence,
-   stageHistoryStatus:state.stageHistoryStatus,productRowsChecked:state.productRowsChecked}));
+   stageHistoryStatus:state.stageHistoryStatus,productRowsChecked:state.productRowsChecked,documentAudit:state.documentAudit}));
  }catch(e){
   state.status="incomplete";state.error=String(e.message||e).slice(0,170);
   console.warn(JSON.stringify({component:"sales-audit",event:"audit-incomplete",
