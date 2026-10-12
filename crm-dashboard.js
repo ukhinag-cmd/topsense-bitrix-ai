@@ -110,14 +110,14 @@ function category(name){
  if(/проект|инжиниринг|проектир/.test(n))return "Проектные продажи";
  return "Не определены";
 }
-function company(x){const id=String(x.ID||"");return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:website(x.WEB),corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmIndustry:String(x.INDUSTRY||""),crmCompanyType:String(x.COMPANY_TYPE||""),crmComments:String(x.COMMENTS||"").replace(/<[^>]+>/g," ").slice(0,3400),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
+function company(x){const id=String(x.ID||"");return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:website(x.WEB),corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
  const endpoint=new URL("crm.company.list.json",base.endsWith("/")?base:base+"/");
  for(let attempt=0;attempt<2;attempt++){
   try{
-   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","COMMENTS","INDUSTRY","COMPANY_TYPE","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
+   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
    const j=await r.json();
    if(!r.ok||j.error||!Array.isArray(j.result))throw Error(j.error_description||j.error||"Bad CRM response "+r.status);
    return j;
@@ -169,7 +169,7 @@ function enqueuePreviousPilotSites(){
  for(const c of state.companies){
   if(c.siteCandidate||c.corporateDomain)continue;
   const ai=state.pilot.get(c.id);
-  if(!ai)continue;
+  if(!ai||ai.status!=="classified"||!["verified","confirmed","official","owned"].includes(String(ai.siteOwnership||"").toLowerCase()))continue;
   const raw=typeof ai.siteCandidate==="object"?(ai.siteCandidate?.url||""):(ai.siteCandidate||ai.website||"");
   const url=website(raw);
   if(!url)continue;
