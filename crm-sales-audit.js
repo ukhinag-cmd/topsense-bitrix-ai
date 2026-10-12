@@ -30,6 +30,8 @@ function won(d){
 }
 function typeOfStage(name){
  const n=String(name||"").toLowerCase().replace(/ё/g,"е").replace(/\s+/g," ").trim();
+ // A combined alternative "invoice paid OR contract signed" is not payment evidence.
+ if(/договор/.test(n)&&/оплат/.test(n))return "";
  if(/(?:оплат[аыуы]?\s+(?:получен[аоы]?|поступил[аоы]?)|(?:получен[аоы]?|поступил[аоы]?)\s+оплат[аы]|счет\s+оплачен|средства\s+поступил)/i.test(n))return "paid";
  if(/(?:(?:товар|продукц|оборудован|заказ|груз)\S*(?:[\s\S]{0,32})(?:отгруж|отправлен|отправк[аыу] заверш)|(?:отгруж|отправлен)[\s\S]{0,24}(?:товар|заказ|оборудован|продукц))/i.test(n))return "shipped";
  return "";
@@ -39,7 +41,7 @@ async function stages(){
  const cats=Array.isArray(c.result?.categories)?c.result.categories:[];
  if(!cats.length)cats.push({id:0,name:"Основная воронка"});
  if(!cats.some(x=>Number(x.id)===0))cats.push({id:0,name:"Основная воронка"});
- const found=new Map();
+ const found=new Map(),catalog=[];
  for(let k=0;k<cats.length;k+=3){
   const chunk=await Promise.all(cats.slice(k,k+3).map(async cat=>{
    const categoryId=Number(cat.id)||0;
@@ -48,11 +50,13 @@ async function stages(){
    return {categoryId,pipeline:String(cat.name||""),data:Array.isArray(s.result)?s.result:[]};
   }));
   for(const {categoryId,pipeline,data} of chunk)for(const v of data){
+   catalog.push({pipeline,categoryId,name:String(v.NAME||""),code:String(v.STATUS_ID||"")});
    const code=String(v.STATUS_ID||"");
    const kind=typeOfStage(v.NAME);
    if(code&&kind)found.set(code,{code,kind,categoryId,pipeline,stageName:String(v.NAME||"")});
   }
  }
+ console.log(JSON.stringify({component:"sales-audit",event:"stage-catalog",stages:catalog}));
  state.shipmentStages=[...found.values()].filter(v=>v.kind==="shipped");
  state.paymentStages=[...found.values()].filter(v=>v.kind==="paid");
  console.log(JSON.stringify({component:"sales-audit",event:"stage-mapping",
