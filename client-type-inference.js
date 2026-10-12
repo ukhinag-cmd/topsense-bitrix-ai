@@ -65,6 +65,7 @@ function apply(records){
   const site=sites.get(c.id);
   const previous=valid.has(c.organizationType)?c.organizationType:(valid.has(c.type)?c.type:"");
   const byName=infer(c.name);
+  const officiallyVerifiedType=valid.has(c.verifiedOrgType)?c.verifiedOrgType:"";
   const bySite=site?.status==="site_profiled"&&valid.has(site.siteType)?{type:site.siteType}:null;
   const siteBelongs=site?.status==="site_profiled"||site?.status==="site_read_no_clear_type";
   const websiteEvidence={
@@ -73,6 +74,7 @@ function apply(records){
    siteProfileTitle:siteBelongs?(site?.siteTitle||""):"",
    siteProfileDescription:siteBelongs?(site?.siteDescription||""):""
   };
+  if(officiallyVerifiedType)return {...c,...websiteEvidence,siteStatus:"official_site_verified",siteProfileUrl:c.siteCandidate||websiteEvidence.siteProfileUrl,organizationType:officiallyVerifiedType,segmentConfidence:"Высокая — официальный сайт",segmentSource:c.verifiedOrgEvidence||"Юридическое наименование и описание деятельности на официальном сайте"};
   if(previous)return {...c,...websiteEvidence,organizationType:previous,segmentConfidence:c.verification||"Ранее назначен",segmentSource:"Ранее сохранённая аналитика / классификация"};
   let selected=null,confidence="",basis="";
   if(bySite&&byName&&bySite.type===byName.type){
@@ -82,7 +84,7 @@ function apply(records){
   }else if(byName){
    selected=byName.type;confidence=byName.confidence;basis="Название CRM, без подтверждения сайтом";
   }
-  if(!selected)return {...c,...websiteEvidence,organizationType:"",segmentConfidence:"Недостаточно данных",segmentSource:"Проверены название, домен и доступные сайты; тип не установлен"};
+  if(!selected)return {...c,...websiteEvidence,organizationType:"",segmentConfidence:"Недостаточно данных",segmentSource:site?.status==="site_absent"?"Сайт и домен в CRM отсутствуют; внешняя идентификация ещё требуется":site?.status==="site_unavailable"?"Сайт не открылся; деятельность не подтверждена":site?.status==="site_pending"?"Сайт ещё не проверен":"На доступных страницах нет достаточных данных для выбора типа"};
   return {...c,...websiteEvidence,organizationType:selected,proposedType:selected,segmentConfidence:confidence,segmentSource:basis,verification:"Предварительная классификация"};
  });
 }
