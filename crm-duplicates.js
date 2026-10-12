@@ -64,7 +64,7 @@ function merge(members,certainty){
  const rawEmails=distinct(sorted.flatMap(c=>[...(c.crmEmails||[]),...(c.contactEmails||[])])
   .map(v=>String(v||"").trim().toLowerCase()));
  const contacts=distinct(sorted.flatMap(c=>c.contactNames||[]).map(blank));
- const reviewed=sorted.some(c=>Boolean(c.verifiedOrgType));
+ const reviewed=sorted.every(c=>Boolean(c.verifiedOrgType))&&websites.length===1;
  const groupId="G-"+sorted.map(c=>c.id).join("-");
  return {
   ...lead,id:groupId,name:display(lead.name).name,
@@ -86,7 +86,7 @@ function consolidate(companies){
  const byExact=new Map(),byBase=new Map();
  for(const c of rows){
   const id=identity(c);
-  if(id.base.length<7)continue;
+  if(id.base.length<7||/^(?:безназвания|неизвестно|нетназвания|неназвано|безимени|неопределено|тест|названиенетуказано)$/i.test(id.base))continue;
   if(!byBase.has(id.base))byBase.set(id.base,[]);
   byBase.get(id.base).push(c);
   if(!id.opf)continue;
