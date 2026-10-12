@@ -15,7 +15,7 @@ function eligible(c){
  const name=normalized(cleanName(c.name));
  if(name.length<9||/^(?:безназвания|неизвестно|безимени|неопределено|физлицо|частноелицо|тестоваякомпания|нетназвания)$/.test(name))return false;
  if(c.siteCandidate||c.corporateDomain||c.verifiedOrgType)return false;
- const free=/^(?:gmail\.com|mail\.ru|list\.ru|bk\.ru|yandex\.ru|ya\.ru|outlook\.com|rambler\.ru|hotmail\.com|icloud\.com)$/i;
+ const free=/^(?:gmail\.com|mail\.ru|list\.ru|bk\.ru|yandex\.ru|ya\.ru|outlook\.com|rambler\.ru|hotmail\.com|icloud\.com|topsense\.su|detector-gaza\.ru)$/i;
  return ![...(c.crmEmails||[]),...(c.contactEmails||[])].some(e=>{
   const d=String(e||"").split("@");return d.length>1&&d[d.length-1].includes(".")&&!free.test(d[d.length-1]);
  });
