@@ -15,7 +15,8 @@ function problem(value){
  if(/(?:https?:\/\/|www\.|[a-z0-9-]+\.(?:ru|su|com|net|org)\b)/i.test(s))return "В названии указан сайт вместо названия";
  if(s.length>230)return "Слишком длинное поле названия";
  const letters=(s.match(/[а-яёa-z]/gi)||[]).length;
- if(letters<3)return "Недостаточно букв для названия организации";
+ if(letters===0)return "Нет буквенного названия организации";
+ // Genuine short brands/acronyms (e.g. «НК», «ТТ», «ИС-16») must remain in the registry.
  if(/^(?:!!!+|\?{2,}|[-=_*.]{3,})$/.test(s))return "Техническая запись вместо названия";
  return "";
 }
