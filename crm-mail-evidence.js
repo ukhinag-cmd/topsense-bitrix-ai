@@ -107,10 +107,12 @@ async function readPdfCompanyCard(items,c){
 async function scan(c){
  const acts=[];let start=0;
  for(let n=0;n<MAX_ACTIVITY_PAGES;n++){
-  const out=await bitrix("crm.activity.list",{
-   order:{ID:"DESC"},filter:{OWNER_TYPE_ID:4,OWNER_ID:Number(c.id)},
-   select:["ID","TYPE_ID","DIRECTION","PROVIDER_ID","DESCRIPTION","COMMUNICATIONS","FILES","STORAGE_ELEMENT_IDS"],start
-  });
+  const options={order:{ID:"DESC"},filter:{BINDINGS:[{OWNER_TYPE_ID:4,OWNER_ID:Number(c.id)}]},
+   select:["ID","TYPE_ID","DIRECTION","PROVIDER_ID","DESCRIPTION","COMMUNICATIONS","FILES","STORAGE_ELEMENT_IDS"],start};
+  let out;
+  try{out=await bitrix("crm.activity.list",options)}
+  catch{options.filter={OWNER_TYPE_ID:4,OWNER_ID:Number(c.id)};out=await bitrix("crm.activity.list",options)}
+
   acts.push(...out.result);
   if(out.next==null||acts.length>=100)break;
   start=Number(out.next);
