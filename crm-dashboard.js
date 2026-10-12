@@ -142,14 +142,15 @@ async function refresh(){
   }
   const map=new Map(parts.flat().filter(x=>x&&x.ID).map(x=>[String(x.ID),company(x)]));
   if(map.size<total)throw Error("Incomplete CRM snapshot "+map.size+"/"+total);
-  state.companies=[...map.values()].sort((a,b)=>Number(a.id)-Number(b.id));
+  state.companies=[...map.values()].filter(c=>c.id!=="2").sort((a,b)=>Number(a.id)-Number(b.id));
+  // CRM #2 = ООО «ПКФ ТОП-СЕНС» (our own entity), do not include it in client analytics.
   if(require("./crm-sales-audit").stats().status==="not_started")require("./crm-sales-audit").run(state.companies).catch(()=>{});
   require("./crm-mail-evidence").enqueue(state.companies);
   require("./website-profiler").enqueue(state.companies);
   enqueueLinkedContactSites();
   enqueuePreviousPilotSites();
   state.status="ready";state.updatedAt=new Date().toISOString();state.error=null;
-  console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:map.size}));
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:state.companies.length,excludedOwnCompanies:map.size-state.companies.length}));
  }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
  finally{state.refreshing=false}
 }
