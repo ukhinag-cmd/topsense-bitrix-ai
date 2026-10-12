@@ -345,33 +345,30 @@ function data(known){
   return {...c,category:group,type,organizationType:type,verificationStatus:r.verificationStatus,siteVerified:String(r.website||""),strategy:String(r.strategicReason||"").slice(0,260),verification:"Проверено по реестру подрядчиков"};
  });
  const typedRecords=require("./client-type-inference").apply(records);
- // Similar names are CRM relationships to REVIEW, never automatic duplicates.
- // Do not infer legal identity, branch status, contacts, shipments, or ownership.
- function normalizedName(value){
-   return String(value||"").toLowerCase().replace(/[«»"']/g,"")
-     .replace(/^(?:ооо|ао|пао|зао|оао|ип)\s+/,"")
-     .replace(/[^а-яёa-z0-9]/g,"").trim();
- }
- const named=new Map();
- for(const c of typedRecords){
-   const key=normalizedName(c.name);
-   if(key.length<7||key==="безназвания")continue;
-   if(!named.has(key))named.set(key,[]);
-   named.get(key).push(c);
- }
- for(const c of typedRecords){
-   const match=named.get(normalizedName(c.name))||[];
-   if(match.length>1){
-     c.relatedCards=match.filter(x=>x.id!==c.id).slice(0,15)
-       .map(x=>({id:x.id,name:x.name,crmUrl:x.crmUrl}));
-     c.relatedStatus=["198","324"].includes(c.id)?"Вероятно одно юрлицо: проверить ИНН/КПП и назначение каждой CRM-карточки"
-       :["62","2790","2842","3682","3684","3690","3692"].includes(c.id)?"Группа карточек ГСП Ремонт: филиалы/подразделения уточняются; CRM №3692 — филиал"
-       :"Совпало название; связь между юридическими лицами не проверена";
-   }
- }
+ const virtual=require("./crm-duplicates").consolidate(typedRecords);
+
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
- typedRecords.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:typedRecords.length,confirmed:typedRecords.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,relatedGroups:[...named.values()].filter(x=>x.length>1).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,siteCrawl:require("./website-profiler").stats(),mailAudit:require("./crm-mail-evidence").stats(),salesAudit:require("./crm-sales-audit").stats(),companies:typedRecords.map(c=>({...c,name:require("./company-name-format").display(c.name).name}))};
+ virtual.companies.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
+ const format=require("./company-name-format").display;
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,
+  total:virtual.stats.customerCardCount,
+  crmCardTotal:virtual.stats.rawCompanyCount,
+  virtualCustomerTotal:virtual.stats.customerCardCount,
+  confirmed:virtual.companies.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,
+  relatedGroups:virtual.stats.groupedCount,
+  duplicateStats:virtual.stats,
+  duplicateGroups:virtual.duplicates,
+  duplicateReview:virtual.review,
+  analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,
+  aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,
+  aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,
+  aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,
+  organizationTypeCount:ORG_TYPES.length,
+  siteCrawl:require("./website-profiler").stats(),
+  mailAudit:require("./crm-mail-evidence").stats(),
+  salesAudit:require("./crm-sales-audit").stats(),
+  companies:virtual.companies.map(c=>({...c,name:format(c.name).name}))
+ };
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
@@ -405,6 +402,7 @@ function route(req,res,pathname,known){
  if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
+ if(pathname==="/contractors/duplicates"){write(res,200,require("./client-duplicates").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,initialHtml(data(known)),"text/html; charset=utf-8");return true}
  write(res,404,{error:"Not found"});return true;
