@@ -154,7 +154,7 @@ async function loadLinkedContacts(){
  if(state.contactsLoading||!process.env.BITRIX_WEBHOOK_BASE)return;
  state.contactsLoading=true;
  try{
-  const endpoint=new URL("crm.contact.list.json",String(process.env.BITRIX_WEBHOOK_BASE).replace(/\\/?$/,"/"));
+  const endpoint=new URL("crm.contact.list.json",String(process.env.BITRIX_WEBHOOK_BASE).replace(/\/?$/,"/"));
   async function chunk(start){
    const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","NAME","LAST_NAME","COMPANY_ID","EMAIL"],start}),signal:AbortSignal.timeout(18000)});
    const p=await r.json();if(!r.ok||p.error||!Array.isArray(p.result))throw Error(p.error||"CRM contacts read error");return p;
@@ -173,7 +173,7 @@ async function loadLinkedContacts(){
    const id=String(c.COMPANY_ID||"");if(!id||id==="0")continue;
    if(!by.has(id))by.set(id,{emails:new Set(),names:[]});
    const target=by.get(id);
-   for(const e of Array.isArray(c.EMAIL)?c.EMAIL:[]){const addr=String(e.VALUE||"").trim().toLowerCase();if(/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(addr))target.emails.add(addr)}
+   for(const e of Array.isArray(c.EMAIL)?c.EMAIL:[]){const addr=String(e.VALUE||"").trim().toLowerCase();if(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr))target.emails.add(addr)}
    if(target.names.length<20){const name=[c.NAME,c.LAST_NAME].filter(Boolean).join(" ").trim();if(name)target.names.push(name)}
   }
   state.linkedContacts=by;state.contactsAt=new Date().toISOString();
