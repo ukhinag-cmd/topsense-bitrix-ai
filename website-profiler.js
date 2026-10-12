@@ -100,6 +100,7 @@ function evidenceRank(source){
  if(source==="Корпоративный домен e-mail CRM")return 4;
  if(source==="Домен привязанного контакта")return 3;
  if(source==="Непривязанные CRM-контакты: совпали название и корпоративный домен")return 3;
+ if(source==="Поиск по названию — подтверждено независимыми реквизитами")return 5;
  if(source==="Сайт из CRM")return 2;
  if(source==="Кандидат из прежнего AI-пилота")return 1;
  return 2;
@@ -107,7 +108,7 @@ function evidenceRank(source){
 function enqueue(companies){
  for(const c of companies){
   const id=String(c.id||"");
-  const newRank=evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"));
+  const newRank=urls(c).length?evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM")):0;
   if(visited.has(id)){
    if(newRank<=(sourcePriority.get(id)||0))continue;
    sourcePriority.set(id,newRank);
@@ -124,4 +125,4 @@ function enqueue(companies){
 }
 function get(id){return profiles.get(String(id))||{status:"site_pending"}}
 function stats(){const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;return {queued:queue.length,active,processed:profiles.size,byStatus:by}}
-module.exports={enqueue,get,stats};
+module.exports={enqueue,get,stats,fetchPage};
