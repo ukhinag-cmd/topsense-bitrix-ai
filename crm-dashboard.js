@@ -213,6 +213,42 @@ async function loadLinkedContacts(){
    for(const e of Array.isArray(c.EMAIL)?c.EMAIL:[]){const addr=String(e.VALUE||"").trim().toLowerCase();if(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr))target.emails.add(addr)}
    if(target.names.length<20){const name=[c.NAME,c.LAST_NAME].filter(Boolean).join(" ").trim();if(name)target.names.push(name)}
   }
+  // Orphan CRM contacts are NOT assigned to a company automatically. Their
+  // corporate domains may only act as candidate website clues if the company
+  // name occurs in the contact label and multiple contacts agree on the domain.
+  function compact(value){
+   return String(value||"").toLowerCase().replace(/ё/g,"е")
+    .replace(/^(?:ооо|ао|пао|оао|зао|нко|ип)[\\s\\W]+/i,"")
+    .replace(/[^а-яa-z0-9]/g,"");
+  }
+  const eligible=state.companies.filter(c=>!c.siteCandidate&&!c.corporateDomain)
+   .map(c=>({company:c,key:compact(c.name)})).filter(c=>c.key.length>=11);
+  const proposals=new Map(),orphanContacts=all.filter(c=>!c.COMPANY_ID||String(c.COMPANY_ID)==="0");
+  for(const person of orphanContacts){
+   const label=compact([person.NAME,person.LAST_NAME].filter(Boolean).join(" "));
+   if(label.length<11)continue;
+   const validDomains=[...new Set((Array.isArray(person.EMAIL)?person.EMAIL:[])
+    .map(e=>domain(e.VALUE||"")).filter(Boolean))];
+   if(validDomains.length!==1)continue;
+   for(const cand of eligible){
+    if(!label.includes(cand.key))continue;
+    if(!proposals.has(cand.company.id))proposals.set(cand.company.id,new Map());
+    const counts=proposals.get(cand.company.id);
+    counts.set(validDomains[0],(counts.get(validDomains[0])||0)+1);
+   }
+  }
+  const websiteCandidates=[];
+  for(const cand of eligible){
+   const options=proposals.get(cand.company.id);
+   if(!options||options.size!==1)continue;
+   const [corporateDomain,observations]=[...options.entries()][0];
+   if(observations<2)continue;
+   websiteCandidates.push({...cand.company,corporateDomain,
+    siteSource:"Непривязанные CRM-контакты: совпали название и корпоративный домен"});
+  }
+  if(websiteCandidates.length)require("./website-profiler").enqueue(websiteCandidates);
+  console.log(JSON.stringify({component:"client-segments",event:"unlinked-contact-domain-candidates",
+   unlinkedContacts:orphanContacts.length,siteCandidates:websiteCandidates.length}));
   state.linkedContacts=by;state.contactsAt=new Date().toISOString();
   enqueueLinkedContactSites();
   console.log(JSON.stringify({component:"client-segments",event:"linked-contacts-loaded",contacts:all.length,companies:by.size}));
