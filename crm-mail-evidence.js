@@ -55,6 +55,55 @@ async function bitrix(method,params){
  const j=await r.json();if(!r.ok||j.error||!Array.isArray(j.result))throw Error("CRM read unavailable");
  return j;
 }
+// PDF company-card extraction is text-only. Scans and image-only documents stay
+// explicitly pending; no legal, financial or shipment fields are inferred.
+async function readPdfCompanyCard(items,c){
+ const seen=new Set();
+ const relevant=[];
+ for(const a of items){
+  for(const file of Array.isArray(a.FILES)?a.FILES:[]){
+   const id=Number(file.ID||file.id||0),name=String(file.NAME||file.name||"");
+   if(!id||seen.has(id))continue;
+   seen.add(id);
+   relevant.push({id,name});
+  }
+ }
+ let unresolved=0,readCount=0;
+ for(const ref of relevant.slice(0,4)){
+  try{
+   const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
+   const url=new URL("disk.file.get.json",base.endsWith("/")?base:base+"/");
+   const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:ref.id}),signal:AbortSignal.timeout(12000)});
+   const j=await r.json();if(!r.ok||j.error||!j.result){unresolved++;continue}
+   const meta=j.result;
+   const filename=String(meta.NAME||ref.name||"");
+   if(!/карточк|реквизит|company.?card|counterparty|анкета/i.test(filename))continue;
+   if(!/\.pdf$/i.test(filename)){unresolved++;continue}
+   if(Number(meta.SIZE||0)>2*1024*1024){unresolved++;continue}
+   const downloadUrl=String(meta.DOWNLOAD_URL||"");
+   if(!downloadUrl){unresolved++;continue}
+   const target=new URL(downloadUrl,url);
+   if(target.hostname!==url.hostname||target.protocol!=="https:"){unresolved++;continue}
+   const fileResp=await fetch(target,{redirect:"manual",signal:AbortSignal.timeout(12000)});
+   if(!fileResp.ok||Number(fileResp.headers.get("content-length")||0)>2*1024*1024){unresolved++;continue}
+   const bytes=Buffer.from(await fileResp.arrayBuffer());
+   if(bytes.length>2*1024*1024){unresolved++;continue}
+   const parsed=await require("pdf-parse")(bytes);
+   const content=String(parsed.text||"").slice(0,10000);
+   if(!content){unresolved++;continue}
+   readCount++;
+   for(const website of siteLinks(content)){
+    const domain=normalDomain(website);
+    const known=[c.corporateDomain,...(c.crmEmails||[]).map(emailDomain)].filter(Boolean);
+    const domainMatch=known.includes(domain);
+    if(domainMatch||nameProof(c.name,content)){
+     return {website,readCount,unresolved,status:"pdf_card_website_candidate",source:"Сайт из карточки компании, присланной письмом (PDF, текстовый слой)"};
+    }
+   }
+  }catch{unresolved++}
+ }
+ return {website:"",readCount,unresolved,status:relevant.length?"card_documents_not_proven":"no_candidate_card_documents"};
+}
 async function scan(c){
  const acts=[];let start=0;
  for(let n=0;n<MAX_ACTIVITY_PAGES;n++){
@@ -91,7 +140,18 @@ async function scan(c){
   }
   if(evidence.signatureWebsite)break;
  }
- if(!evidence.signatureWebsite&&inbound.length)evidence.status="incoming_email_without_verified_signature_site";
+ if(!evidence.signatureWebsite&&inbound.length){
+  const cardsAudit=await readPdfCompanyCard(inbound,c);
+  evidence.cardDocumentsRead=cardsAudit.readCount;
+  evidence.cardDocumentsUnresolved=cardsAudit.unresolved;
+  evidence.cardStatus=cardsAudit.status;
+  if(cardsAudit.website){
+   evidence.signatureWebsite=cardsAudit.website;
+   evidence.signatureTrust="pdf_card_name_or_domain_match";
+   evidence.source=cardsAudit.source;
+   evidence.status="pdf_card_website_candidate";
+  }else evidence.status="incoming_email_without_verified_signature_site";
+ }
  return evidence;
 }
 async function loop(){
@@ -102,7 +162,7 @@ async function loop(){
   try{
    const record=await scan(c);results.set(c.id,record);checked++;
    if(record.signatureWebsite){
-    require("./website-profiler").enqueue([{...c,siteCandidate:record.signatureWebsite,siteSource:"Сайт из подписи входящего письма"}]);
+    require("./website-profiler").enqueue([{...c,siteCandidate:record.signatureWebsite,siteSource:record.source.startsWith("Сайт из карточки")?"Сайт из карточки компании, присланной письмом":"Сайт из подписи входящего письма"}]);
    }
   }catch(error){
    readErrors++;
