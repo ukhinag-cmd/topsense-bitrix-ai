@@ -25,9 +25,9 @@ async function safeUrl(value){
 }
 function urls(c){
  const out=[];
- if(c.siteCandidate)out.push({url:c.siteCandidate,origin:"Сайт из CRM"});
+ if(c.siteCandidate)out.push({url:c.siteCandidate,origin:c.siteSource||"Сайт из CRM"});
  else if(c.corporateDomain&&/^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$/i.test(c.corporateDomain))
-   out.push({url:"https://"+c.corporateDomain,origin:"Корпоративный домен e-mail CRM"});
+   out.push({url:"https://"+c.corporateDomain,origin:c.siteSource||"Корпоративный домен e-mail CRM"});
  return out;
 }
 function strip(s){
@@ -71,7 +71,12 @@ async function one(c){
   const result=await fetchPage(candidates[0].url);
   const text=[result.meta.title,result.meta.description,...result.meta.headings,result.meta.body.slice(0,1600)].join(". ");
   const found=infer(text);
-  profiles.set(c.id,{status:found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:result.meta.headings,siteType:found?.type||null,siteConfidence:found?"Предварительная по сайту":"Не определена",checkedAt:new Date().toISOString()});
+  const tokens=String(c.name||"").toLowerCase().replace(/(?:ооо|ао|оао|пао|зао|пкф|нпп|тд|филиал)/g," ").split(/[^а-яёa-z0-9]+/i).filter(t=>t.length>=5);
+  const target=[result.meta.title,result.meta.description,...result.meta.headings].join(" ").toLowerCase();
+  const checkedName=tokens.some(t=>target.includes(t));
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота";
+  const trusted=!thirdParty||checkedName;
+  profiles.set(c.id,{status:!trusted?"site_identity_unclear":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:result.meta.headings,siteType:trusted?(found?.type||null):null,siteConfidence:trusted&&found?"Предварительная по сайту":"Не определена",checkedAt:new Date().toISOString()});
  }catch(error){profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
 function pump(){
@@ -83,10 +88,11 @@ function pump(){
 }
 function enqueue(companies){
  for(const c of companies){
-  if(visited.has(c.id))continue;
+  if(visited.has(c.id)){if(profiles.get(c.id)?.status==="site_absent"&&urls(c).length){visited.delete(c.id);profiles.delete(c.id);}else continue;}
   visited.add(c.id);if(!urls(c).length){profiles.set(c.id,{status:"site_absent",source:"В CRM нет сайта или корпоративного домена"});}else queue.push(c);
  }
  pump();
+ console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",queued:queue.length,known:profiles.size}));
 }
 function get(id){return profiles.get(String(id))||{status:"site_pending"}}
 function stats(){const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;return {queued:queue.length,active,processed:profiles.size,byStatus:by}}
