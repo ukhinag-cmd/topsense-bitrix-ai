@@ -1,6 +1,6 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
-const state={status:"starting",updatedAt:null,error:null,companies:[],refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false};
+const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false};
 function analyticSeeds(){
  try{
    const arr=JSON.parse(String(process.env.TOPSENSE_ANALYTIC_SEED_JSON||"[]"));
@@ -148,7 +148,11 @@ async function refresh(){
   }
   const map=new Map(parts.flat().filter(x=>x&&x.ID).map(x=>[String(x.ID),company(x)]));
   if(map.size<total)throw Error("Incomplete CRM snapshot "+map.size+"/"+total);
-  state.companies=[...map.values()].filter(c=>c.id!=="2").sort((a,b)=>Number(a.id)-Number(b.id));
+  state.rawCrmTotal=map.size;
+  const registry=require("./client-registry-quality").split([...map.values()].filter(c=>c.id!=="2"));
+  state.companies=registry.valid.sort((a,b)=>Number(a.id)-Number(b.id));
+  state.excludedCompanies=registry.excluded;
+  console.log(JSON.stringify({component:"registry-quality",event:"client-names-screened",valid:registry.valid.length,excluded:registry.excluded.length}));
   const dupStats=require("./crm-duplicates").consolidate(state.companies).stats;
   console.log(JSON.stringify({component:"crm-duplicates",event:"reporting-group-snapshot",...dupStats}));
   // CRM #2 = ООО «ПКФ ТОП-СЕНС» (our own entity), do not include it in client analytics.
@@ -159,7 +163,7 @@ async function refresh(){
   enqueuePreviousPilotSites();
   if(state.contactsAt)enqueueMissingSiteNameSearch();
   state.status="ready";state.updatedAt=new Date().toISOString();state.error=null;
-  console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:state.companies.length,excludedOwnCompanies:map.size-state.companies.length}));
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:state.companies.length,excludedOwnCompanies:1,excludedInvalidTitles:state.excludedCompanies.length}));
  }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
  finally{state.refreshing=false}
 }
@@ -366,6 +370,9 @@ function data(known){
  return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,
   total:virtual.stats.customerCardCount,
   crmCardTotal:virtual.stats.rawCompanyCount,
+  excludedCompanyCount:state.excludedCompanies.length,
+  excludedCompanies:state.excludedCompanies.map(c=>({...c,name:format(c.name).name})),
+  sourceCrmCount:state.rawCrmTotal,
   virtualCustomerTotal:virtual.stats.customerCardCount,
   confirmed:virtual.companies.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,
   relatedGroups:virtual.stats.groupedCount,
@@ -416,6 +423,7 @@ function route(req,res,pathname,known){
  if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
+ if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/duplicates.csv"){write(res,200,require("./client-duplicates").csv(data(known)),"text/csv; charset=utf-8",{"content-disposition":"attachment; filename=TOPSENSE_CRM_duplicates.csv"});return true}
  if(pathname==="/contractors/duplicates"){write(res,200,require("./client-duplicates").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
