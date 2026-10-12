@@ -74,7 +74,8 @@ async function one(c){
   const tokens=String(c.name||"").toLowerCase().replace(/(?:ооо|ао|оао|пао|зао|пкф|нпп|тд|филиал)/g," ").split(/[^а-яёa-z0-9]+/i).filter(t=>t.length>=5);
   const target=[result.meta.title,result.meta.description,...result.meta.headings].join(" ").toLowerCase();
   const checkedName=tokens.some(t=>target.includes(t));
-  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота";
+  const redirectedToOtherDomain=new URL(candidates[0].url).hostname.replace(/^www\\./i,"")!==new URL(result.url).hostname.replace(/^www\\./i,"");
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||redirectedToOtherDomain;
   const trusted=!thirdParty||checkedName;
   profiles.set(c.id,{status:!trusted?"site_identity_unclear":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:result.meta.headings,siteType:trusted?(found?.type||null):null,siteConfidence:trusted&&found?"Предварительная по сайту":"Не определена",checkedAt:new Date().toISOString()});
  }catch(error){profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
