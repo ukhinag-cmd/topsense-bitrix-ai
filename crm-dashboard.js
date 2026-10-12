@@ -143,6 +143,7 @@ async function refresh(){
   const map=new Map(parts.flat().filter(x=>x&&x.ID).map(x=>[String(x.ID),company(x)]));
   if(map.size<total)throw Error("Incomplete CRM snapshot "+map.size+"/"+total);
   state.companies=[...map.values()].sort((a,b)=>Number(a.id)-Number(b.id));
+  require("./crm-mail-evidence").enqueue(state.companies);
   require("./website-profiler").enqueue(state.companies);
   enqueueLinkedContactSites();
   enqueuePreviousPilotSites();
@@ -254,7 +255,7 @@ function data(known){
   if(x&&x.companyId&&["confirmed","rejected"].includes(x.verificationStatus))registry.set(String(x.companyId),x);
  }
  const seeds=analyticSeeds();
- const records=state.companies.map(base=>{ const linked=state.linkedContacts.get(base.id);const c={...base,contactEmails:linked?[...linked.emails]:[],contactNames:linked?linked.names:[]};
+ const records=state.companies.map(base=>{ const linked=state.linkedContacts.get(base.id);const c={...base,contactEmails:linked?[...linked.emails]:[],contactNames:linked?linked.names:[],mailEvidence:require("./crm-mail-evidence").get(base.id)};
   const r=registry.get(c.id);
   const ai=state.pilot.get(c.id);
   const seed=seeds.get(c.id);
@@ -326,7 +327,7 @@ function data(known){
  }
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  typedRecords.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:typedRecords.length,confirmed:typedRecords.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,relatedGroups:[...named.values()].filter(x=>x.length>1).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,siteCrawl:require("./website-profiler").stats(),companies:typedRecords};
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:typedRecords.length,confirmed:typedRecords.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,relatedGroups:[...named.values()].filter(x=>x.length>1).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,siteCrawl:require("./website-profiler").stats(),mailAudit:require("./crm-mail-evidence").stats(),companies:typedRecords};
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
