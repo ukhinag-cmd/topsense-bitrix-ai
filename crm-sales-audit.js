@@ -245,7 +245,7 @@ function get(id){
  const record=summary.get(String(id));
  if(record){
   if(state.status==="complete")return record;
-  if(record.shipped||record.paid)return record;
+  if(record.shipped||record.paid||record.qualified)return record;
   return {...record,purchaseStatus:"НЕ ПОДТВЕРЖДЕНО — только успешная сделка (аудит продолжается)"};
  }
  return fallback(id);
