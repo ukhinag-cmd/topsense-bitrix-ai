@@ -65,30 +65,25 @@ function apply(records){
   const site=sites.get(c.id);
   const previous=valid.has(c.organizationType)?c.organizationType:(valid.has(c.type)?c.type:"");
   const byName=infer(c.name);
-  const comments=String(c.crmComments||"").slice(0,2400);
-  const context=String(c.crmIndustry||"")+" "+String(c.crmCompanyType||"")+" "+comments;
-  const byCard=context.trim().length>=18?infer(context):null;
   const bySite=site?.status==="site_profiled"&&valid.has(site.siteType)?{type:site.siteType}:null;
-  const websiteEvidence={siteStatus:site?.status||"site_pending",siteProfileUrl:site?.url||"",siteProfileTitle:site?.siteTitle||"",siteProfileDescription:site?.siteDescription||""};
-  if(previous){
-   return {...c,...websiteEvidence,organizationType:previous,segmentConfidence:c.verification||"Ранее назначен",segmentSource:"CRM / сохранённая аналитика"};
-  }
+  const siteBelongs=site?.status==="site_profiled"||site?.status==="site_read_no_clear_type";
+  const websiteEvidence={
+   siteStatus:site?.status||"site_pending",
+   siteProfileUrl:siteBelongs?(site?.url||""):"",
+   siteProfileTitle:siteBelongs?(site?.siteTitle||""):"",
+   siteProfileDescription:siteBelongs?(site?.siteDescription||""):""
+  };
+  if(previous)return {...c,...websiteEvidence,organizationType:previous,segmentConfidence:c.verification||"Ранее назначен",segmentSource:"Ранее сохранённая аналитика / классификация"};
   let selected=null,confidence="",basis="";
-  if(bySite&&byCard&&bySite.type===byCard.type){
-   selected=bySite.type;confidence="Выше средней";basis="Содержание сайта и описание в карточке CRM";
-  }else if(bySite&&byName&&bySite.type===byName.type){
-   selected=bySite.type;confidence="Выше средней";basis="Содержание сайта и название CRM";
-  }else if(bySite&&(site.source==="Сайт из CRM"||(!byName&&!byCard))){
-   selected=bySite.type;confidence=byCard&&bySite.type!==byCard.type?"Низкая":"Средняя";basis="Содержание корпоративного сайта; есть неоднозначность профиля";
-  }else if(byCard&&byName&&byCard.type===byName.type){
-   selected=byCard.type;confidence="Средняя";basis="Название и описание компании в карточке CRM";
-  }else if(byCard){
-   selected=byCard.type;confidence="Предварительная";basis="Описание деятельности в CRM";
+  if(bySite&&byName&&bySite.type===byName.type){
+   selected=bySite.type;confidence="Выше средней";basis="Содержимое сайта и название компании";
+  }else if(bySite){
+   selected=bySite.type;confidence="Предварительная";basis="Профиль доступного сайта, принадлежность требует проверки";
   }else if(byName){
-   selected=byName.type;confidence=byName.confidence;basis="Название в CRM, дополнительных подтверждений нет";
+   selected=byName.type;confidence=byName.confidence;basis="Название CRM, без подтверждения сайтом";
   }
-  if(!selected)return {...c,...websiteEvidence,organizationType:"",segmentConfidence:"Недостаточно данных",segmentSource:"Карточка/домен/сайт: достоверный профиль не установлен"};
-  return {...c,...websiteEvidence,organizationType:selected,proposedType:selected,segmentConfidence:confidence,segmentSource:basis,verification:"Предварительная классификация (не юридическая верификация)"};
+  if(!selected)return {...c,...websiteEvidence,organizationType:"",segmentConfidence:"Недостаточно данных",segmentSource:"Проверены название, домен и доступные сайты; тип не установлен"};
+  return {...c,...websiteEvidence,organizationType:selected,proposedType:selected,segmentConfidence:confidence,segmentSource:basis,verification:"Предварительная классификация"};
  });
 }
 module.exports={infer,apply};
