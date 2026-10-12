@@ -100,7 +100,7 @@ function evidenceRank(source){
  if(source==="Корпоративный домен e-mail CRM")return 4;
  if(source==="Домен привязанного контакта")return 3;
  if(source==="Непривязанные CRM-контакты: совпали название и корпоративный домен")return 3;
- if(source==="Поиск по названию — подтверждено независимыми реквизитами")return 5;
+ if(source==="Поиск по названию — подтверждено независимыми реквизитами")return 0.5;
  if(source==="Сайт из CRM")return 2;
  if(source==="Кандидат из прежнего AI-пилота")return 1;
  return 2;
