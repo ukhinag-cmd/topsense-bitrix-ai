@@ -31,8 +31,9 @@ function won(d){
 function typeOfStage(name){
  const n=String(name||"").toLowerCase().replace(/ё/g,"е").replace(/\s+/g," ").trim();
  // A combined alternative "invoice paid OR contract signed" is not payment evidence.
- if(/договор/.test(n)&&/оплат/.test(n))return "";
+ if(/договор/.test(n)&&/(?:оплат|оплач)/.test(n))return "";
  if(/(?:оплат[аыуы]?\s+(?:получен[аоы]?|поступил[аоы]?)|(?:получен[аоы]?|поступил[аоы]?)\s+оплат[аы]|счет\s+оплачен|средства\s+поступил)/i.test(n))return "paid";
+ if(/(?:приборы?\\s+получен[ыао]?\\s*\\/?\\s*упд|упд\\s+подписан)/i.test(n))return "shipped";
  if(/(?:(?:товар|продукц|оборудован|заказ|груз)\S*(?:[\s\S]{0,32})(?:отгруж|отправлен|отправк[аыу] заверш)|(?:отгруж|отправлен)[\s\S]{0,24}(?:товар|заказ|оборудован|продукц))/i.test(n))return "shipped";
  return "";
 }
@@ -56,7 +57,7 @@ async function stages(){
    if(code&&kind)found.set(code,{code,kind,categoryId,pipeline,stageName:String(v.NAME||"")});
   }
  }
- console.log(JSON.stringify({component:"sales-audit",event:"stage-catalog",stages:catalog}));
+ // Full stage catalog inspected once; do not continuously log it.
  state.shipmentStages=[...found.values()].filter(v=>v.kind==="shipped");
  state.paymentStages=[...found.values()].filter(v=>v.kind==="paid");
  console.log(JSON.stringify({component:"sales-audit",event:"stage-mapping",
