@@ -149,6 +149,8 @@ async function refresh(){
   const map=new Map(parts.flat().filter(x=>x&&x.ID).map(x=>[String(x.ID),company(x)]));
   if(map.size<total)throw Error("Incomplete CRM snapshot "+map.size+"/"+total);
   state.companies=[...map.values()].filter(c=>c.id!=="2").sort((a,b)=>Number(a.id)-Number(b.id));
+  const dupStats=require("./crm-duplicates").consolidate(state.companies).stats;
+  console.log(JSON.stringify({component:"crm-duplicates",event:"reporting-group-snapshot",...dupStats}));
   // CRM #2 = ООО «ПКФ ТОП-СЕНС» (our own entity), do not include it in client analytics.
   if(require("./crm-sales-audit").stats().status==="not_started")require("./crm-sales-audit").run(state.companies).catch(()=>{});
   require("./crm-mail-evidence").enqueue(state.companies);
