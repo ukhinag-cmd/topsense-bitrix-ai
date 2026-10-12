@@ -110,14 +110,14 @@ function category(name){
  if(/проект|инжиниринг|проектир/.test(n))return "Проектные продажи";
  return "Не определены";
 }
-function company(x){const id=String(x.ID||"");return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:website(x.WEB),corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
+function company(x){const id=String(x.ID||"");return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:website(x.WEB),corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmIndustry:String(x.INDUSTRY||""),crmCompanyType:String(x.COMPANY_TYPE||""),crmComments:String(x.COMMENTS||"").replace(/<[^>]+>/g," ").slice(0,3400),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
  const endpoint=new URL("crm.company.list.json",base.endsWith("/")?base:base+"/");
  for(let attempt=0;attempt<2;attempt++){
   try{
-   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
+   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","COMMENTS","INDUSTRY","COMPANY_TYPE","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
    const j=await r.json();
    if(!r.ok||j.error||!Array.isArray(j.result))throw Error(j.error_description||j.error||"Bad CRM response "+r.status);
    return j;
@@ -143,6 +143,7 @@ async function refresh(){
   const map=new Map(parts.flat().filter(x=>x&&x.ID).map(x=>[String(x.ID),company(x)]));
   if(map.size<total)throw Error("Incomplete CRM snapshot "+map.size+"/"+total);
   state.companies=[...map.values()].sort((a,b)=>Number(a.id)-Number(b.id));
+  require("./website-profiler").enqueue(state.companies);
   state.status="ready";state.updatedAt=new Date().toISOString();state.error=null;
   console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:map.size}));
  }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
@@ -296,7 +297,7 @@ function data(known){
  }
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  typedRecords.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
- return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:typedRecords.length,confirmed:typedRecords.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,relatedGroups:[...named.values()].filter(x=>x.length>1).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,companies:typedRecords};
+ return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,total:typedRecords.length,confirmed:typedRecords.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,relatedGroups:[...named.values()].filter(x=>x.length>1).length,analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,organizationTypeCount:ORG_TYPES.length,siteCrawl:require("./website-profiler").stats(),companies:typedRecords};
 }
 function route(req,res,pathname,known){
  if(!/^\/(contractors|dashboard|intel|company-intel)(\/|$)/.test(pathname))return false;
