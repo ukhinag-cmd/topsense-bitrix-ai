@@ -31,7 +31,7 @@ function legalOrPhoneMatch(c,site){
  const location=(city.length>=5&&content.includes(city))||(region.length>=6&&content.includes(region));
  const legal=String(c.crmInn||"").replace(/\D/g,"");
  const legalMatch=legal.length>=10&&content.includes(legal);
- return {matched:phone||location||legalMatch,proof:phone?"Совпадает телефон":legalMatch?"Совпадает ИНН":location?"Совпадает местонахождение":""};
+ return {matched:phone||legalMatch,proof:phone?"Совпадает телефон":legalMatch?"Совпадает ИНН":"",locationCorroboration:location};
 }
 function domainAllowed(raw){
  try{
@@ -69,7 +69,7 @@ async function inspect(c,hit){
  if(!nameMatch)return {url:site.url,title:hit.title,status:"other_company",note:"Название организации на сайте не совпало"};
  const proof=legalOrPhoneMatch(c,site);
  return {url:site.url,title:hit.title,status:proof.matched?"confirmed":"needs_review",
-  note:proof.matched?proof.proof:"Совпадает только название — принадлежность сайта не доказана"};
+  note:proof.matched?proof.proof:"Совпадает название, но не телефон или ИНН — принадлежность сайта не подтверждена"};
 }
 async function scan(c){
  let hits;
