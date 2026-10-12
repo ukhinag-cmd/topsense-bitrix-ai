@@ -31,6 +31,7 @@ function typeOfStage(name){
  if(/ожидает\s+отправк/.test(n))return "qualified";
  if(/(?:оплат[аыуы]?\s+(?:получен[аоы]?|поступил[аоы]?)|(?:получен[аоы]?|поступил[аоы]?)\s+оплат[аы]|счет\s+оплачен|средства\s+поступил)/i.test(n))return "paid";
  if(/(?:приборы?\s+получен[ыао]?\s*\/?\s*упд|упд\s+подписан)/i.test(n))return "shipped";
+ if(/(?:прибор[ыа]?\s+отгруж|прибор[ыа]?\s+отправлен)/i.test(n))return "shipped";
  if(/(?:(?:товар|продукц|оборудован|заказ|груз)\S*(?:[\s\S]{0,32})(?:отгруж|отправлен|отправк[аыу] заверш)|(?:отгруж|отправлен)[\s\S]{0,24}(?:товар|заказ|оборудован|продукц))/i.test(n))return "shipped";
  return "";
 }
@@ -64,7 +65,7 @@ async function stages(){
 }
 async function dealPage(start){
  return call("crm.deal.list",{order:{ID:"ASC"},filter:{},
- select:["ID","COMPANY_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID","OPPORTUNITY","CURRENCY_ID"],start});
+ select:["ID","COMPANY_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID","CURRENCY_ID"],start});
 }
 async function allDeals(){
  const first=await dealPage(0);
@@ -144,7 +145,7 @@ async function productRows(dealId){
 }
 function fallback(id){
  if(state.status==="complete")return {
-  purchaseStatus:"НЕ НАЙДЕНО — отгрузка/оплата не отмечены в доступных стадиях CRM",
+  purchaseStatus:"НЕ БЫЛО",
   shipped:false,paid:false,purchaseItems:[],purchaseAmount:null,purchaseCurrency:"",
   purchaseDealCount:0,purchaseBasis:"Аудит доступных сделок и истории стадий завершён"};
  return {purchaseStatus:"ПРОВЕРЯЕТСЯ — отгрузка/оплата ещё не установлены",
@@ -165,11 +166,11 @@ async function run(companies){
   const deals=await allDeals();
   const viaHistory=await stageHistory(stageMap,deals);
   const eligible=[];
-  const accum=new Map(),success=new Set();
+  const accum=new Map();
   for(const d of deals.values()){
    const companyId=String(d.COMPANY_ID||""),dealId=String(d.ID);
    if(!allowed.has(companyId))continue;
-   if(won(d)){state.wonDeals++;success.add(companyId)}
+   if(won(d))state.wonDeals++;
    const hist=viaHistory.get(dealId),current=stageMap.get(String(d.STAGE_ID||""));
    const shipped=Boolean(hist?.shipped||current?.kind==="shipped");
    const paid=Boolean(hist?.paid||current?.kind==="paid");
@@ -196,10 +197,6 @@ async function run(companies){
    rec.purchaseStatus="БЫЛА";
    summary.set(companyId,rec);
   }
-  for(const companyId of success)if(!summary.has(companyId))summary.set(companyId,{
-   purchaseStatus:"НЕ ПОДТВЕРЖДЕНО — только успешная сделка",
-   shipped:false,paid:false,purchaseItems:[],purchaseAmount:null,purchaseCurrency:"",
-   purchaseDealCount:0,purchaseBasis:"Сделка успешна, но стадия оплаты или отгрузки не найдена"});
   state.companiesWithPurchaseEvidence=accum.size;
   // Product rows only for deals reaching shipment or payment stages.
   let n=0;
