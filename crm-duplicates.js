@@ -75,7 +75,7 @@ function merge(members,certainty){
   organizationType:types.length===1?types[0]:lead.organizationType||"",
   segmentConfidence:types.length>1?"Есть расхождения типов в CRM":lead.segmentConfidence||"",
   category,
-  saleInfo:combineSale(sorted),mergedCrmCards:sorted.map(links),memberCount:sorted.length,
+  saleInfo:combineSale(sorted),finance2025:require("./financial-2025").forGroup(sorted),mergedCrmCards:sorted.map(links),memberCount:sorted.length,
   duplicateStatus:reviewed?"Найдено совпадение названия и официального сайта":"Объединено только в аналитике по точному имени и ОПФ; проверить юридическое совпадение",
   duplicateConfidence:certainty,
   duplicateGroupId:groupId,
