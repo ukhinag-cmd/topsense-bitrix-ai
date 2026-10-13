@@ -1,6 +1,6 @@
 "use strict";
 const dns=require("dns").promises,net=require("net");
-const {infer}=require("./client-type-inference");
+const {inferWebsiteActivity}=require("./client-type-inference");
 const profiles=new Map(),visited=new Set(),queue=[],sourcePriority=new Map();
 let pagesScanned=0,checkedSites=0,lastProgressLogged=0;
 let active=0,lastAt=0;
@@ -50,7 +50,7 @@ function extract(html){
 }
 function discoverLinks(html,base){
  const seen=new Set(),suggestions=[];
- const general=/(?:о[-_ ]?(?:компании|нас)|about|company|proizvod|production|продукц|products|catalog|katalog|services|услуг|uslugi|деятельност|deyatelnost|направлен|napravlen|solutions|решения|kontakty|contacts|контакт)/i;
+ const general=/(?:о[-_ ]?(?:компании|нас)|about|company|proizvod|production|продукц|products|catalog|katalog|services|услуг|uslugi|деятельност|deyatelnost|направлен|napravlen|solutions|решения|kontakty|contacts|контакт|реквизит|rekvizit|requisites|legal[-_ ]?details|информац.{0,15}юрлиц)/i;
  for(const m of String(html||"").matchAll(/<a\b[^>]*href\s*=\s*["']([^"']{1,230})["'][^>]*>([\s\S]{0,950}?)<\/a>/gi)){
   const label=strip(m[2]),raw=m[1].replace(/&amp;/gi,"&");
   if(!general.test(label+" "+raw))continue;
@@ -63,12 +63,13 @@ function discoverLinks(html,base){
    if(u===base.origin+"/"||seen.has(u))continue;
    seen.add(u);
    const isAbout=/(?:о[-_ ]?(?:компании|нас)|about|company|o-kompanii|onas)/i.test(label+" "+raw);
+   const identityPage=/(?:реквизит|rekvizit|requisites|legal[-_ ]?details|контакт|kontakty|contacts|contact[-_ ]?us|legal[-_ ]?information)/i.test(label+" "+raw);
    const isProducts=/(?:продукц|products|catalog|katalog|services|услуг|uslugi|деятельност|deyatelnost|направлен|napravlen|production|proizvod|solutions|решен)/i.test(label+" "+raw);
-   suggestions.push({url:u,score:isAbout?3:isProducts?2:1});
+   suggestions.push({url:u,score:identityPage?5:isAbout?4:isProducts?3:1});
    if(suggestions.length>=18)break;
   }catch{}
  }
- return suggestions.sort((a,b)=>b.score-a.score).slice(0,3).map(x=>x.url);
+ return suggestions.sort((a,b)=>b.score-a.score).slice(0,5).map(x=>x.url);
 }
 async function fetchPage(raw){
  let current=raw;
@@ -99,7 +100,7 @@ async function one(c){
   // The homepage often contains marketing but not the company's actual activity.
   // Look at up to three same-host About / Services / Products pages.
   const pages=[result],seenPages=new Set([result.pageUrl]);
-  for(const u of result.links.slice(0,3)){
+  for(const u of result.links.slice(0,5)){
    if(seenPages.has(u))continue;
    try{
     const part=await fetchPage(u);
@@ -108,27 +109,13 @@ async function one(c){
     pages.push(part);seenPages.add(part.pageUrl);
    }catch{}
   }
-  const signals=new Map();
-  for(const p of pages){
-   const parts=[
-    [p.meta.title,p.meta.description,...p.meta.headings].join(". "),
-    p.meta.body.slice(0,5800)
-   ];
-   for(let index=0;index<parts.length;index++){
-    const match=infer(parts[index]);
-    if(!match)continue;
-    const weight=index===0?2:1;
-    signals.set(match.type,(signals.get(match.type)||0)+weight);
-   }
-  }
-  const ranking=[...signals].sort((a,b)=>b[1]-a[1]);
-  const found=ranking.length&&(ranking.length===1||ranking[0][1]>ranking[1][1])?
-   {type:ranking[0][0]}:null;
-  const ambiguous=ranking.length>1&&(!found||ranking[0][1]-ranking[1][1]<2);
-  const text=pages.map(p=>[p.meta.title,p.meta.description,...p.meta.headings,p.meta.body.slice(0,1200)].join(". ")).join(". ");
-
+  // Site owner activity must be distinguished from sectors buying its equipment.
+  // Read About/Products for activity, Contacts/Requisites for legal identity.
+  const activity=inferWebsiteActivity(pages,c.name);
+  const found=activity?.type?{type:activity.type}:null;
+  const ambiguous=Boolean(activity&&!activity.type);
   const tokens=String(c.name||"").toLowerCase().replace(/(?:ооо|ао|оао|пао|зао|пкф|нпп|тд|филиал)/g," ").split(/[^а-яёa-z0-9]+/i).filter(t=>t.length>=5);
-  const target=pages.map(p=>[p.meta.title,p.meta.description,...p.meta.headings].join(" ")).join(" ").toLowerCase();
+  const target=pages.map(p=>[p.meta.title,p.meta.description,...p.meta.headings,p.meta.body.slice(0,2000)].join(" ")).join(" ").toLowerCase();
   const checkedName=tokens.some(t=>target.includes(t));
   const orphanSource=c.siteSource==="Непривязанные CRM-контакты: совпали название и корпоративный домен";
   const fullCompanyName=String(c.name||"").toLowerCase().replace(/ё/g,"е")
@@ -139,7 +126,7 @@ async function one(c){
   const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
-  profiles.set(c.id,{status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()});
+  profiles.set(c.id,{status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()});
  }catch(error){if(evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"))<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
 function pump(){
