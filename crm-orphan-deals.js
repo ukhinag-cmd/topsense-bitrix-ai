@@ -196,10 +196,20 @@ async function verifyRelevantDealEmails(deals,reconciliation,stageMap,history,ca
   const chunk=requested.slice(i,i+3);
   const outputs=await Promise.all(chunk.map(async id=>{
    try{
-    const resp=await call("crm.activity.list",{order:{ID:"DESC"},
-     filter:{OWNER_TYPE_ID:2,OWNER_ID:Number(id)},
-     select:["ID","TYPE_ID","PROVIDER_ID","COMMUNICATIONS"],start:0});
-    return {id,items:Array.isArray(resp.result)?resp.result:[]};
+    const filters=[{OWNER_TYPE_ID:2,OWNER_ID:Number(id)},
+     {BINDINGS:[{OWNER_TYPE_ID:2,OWNER_ID:Number(id)}]}];
+    const parts=await Promise.allSettled(filters.map(filter=>
+     call("crm.activity.list",{order:{ID:"DESC"},filter,
+      select:["ID","OWNER_ID","OWNER_TYPE_ID","TYPE_ID","PROVIDER_ID","COMMUNICATIONS","BINDINGS"],start:0})));
+    const valid=parts.filter(p=>p.status==="fulfilled"&&Array.isArray(p.value.result));
+    if(!valid.length)throw Error("CRM activity sources unavailable");
+    const items=new Map();
+    for(const p of valid)for(const a of p.value.result){
+     const bound=String(a.OWNER_TYPE_ID||"")==="2"&&String(a.OWNER_ID||"")===id||
+      (a.BINDINGS||[]).some(b=>String(b.OWNER_TYPE_ID)==="2"&&String(b.OWNER_ID)===id);
+     if(bound)items.set(String(a.ID),a);
+    }
+    return {id,items:[...items.values()]};
    }catch{return{id,items:null}}
   }));
   for(const o of outputs){
