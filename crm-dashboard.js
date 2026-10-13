@@ -119,14 +119,14 @@ const REVIEWED_PUBLIC_SITES=new Map([
  ["2334",{url:"https://gazoanalit.ru/",name:"НПП ГАЗОАНАЛИТ",primaryType:"Производитель газоаналитических приборов",source:"Публичный сайт gazoanalit.ru: ООО НПП ГазоАналит, собственное производство и газоаналитические системы, совпадает телефон и корпоративная почта"}],
  ["1134",{url:"https://gazoanalit.ru/",name:"НПП ГАЗОАНАЛИТ",primaryType:"Производитель газоаналитических приборов",source:"Публичный сайт gazoanalit.ru: ООО НПП ГазоАналит, производство систем газового анализа; в CRM указано то же полное юридическое наименование"}]
 ]);
-function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB),siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":(website(x.WEB)?"Сайт из CRM":""),verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
+function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB),siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":(website(x.WEB)?"Сайт из CRM":""),verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),finance2025:require("./financial-2025").fromCompany(x),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
  const endpoint=new URL("crm.company.list.json",base.endsWith("/")?base:base+"/");
  for(let attempt=0;attempt<2;attempt++){
   try{
-   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","PHONE","ADDRESS_CITY","ADDRESS_REGION","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
+   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","PHONE","ADDRESS_CITY","ADDRESS_REGION","UF_CRM_AI_REVENUE","UF_CRM_AI_REVENUE_YEAR","UF_CRM_AI_INN","UF_CRM_AI_FIN_SOURCE","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
    const j=await r.json();
    if(!r.ok||j.error||!Array.isArray(j.result))throw Error(j.error_description||j.error||"Bad CRM response "+r.status);
    return j;
@@ -156,6 +156,8 @@ async function refresh(){
   state.companies=registry.valid.sort((a,b)=>Number(a.id)-Number(b.id));
   state.excludedCompanies=registry.excluded;
   console.log(JSON.stringify({component:"registry-quality",event:"client-names-screened",valid:registry.valid.length,excluded:registry.excluded.length}));
+  const finStatus={};for(const c of state.companies){const key=c.finance2025?.status||"no_data";finStatus[key]=(finStatus[key]||0)+1}
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"financial-2025-coverage",...finStatus}));
   const dupStats=require("./crm-duplicates").consolidate(state.companies).stats;
   console.log(JSON.stringify({component:"crm-duplicates",event:"reporting-group-snapshot",...dupStats}));
   // CRM #2 = ООО «ПКФ ТОП-СЕНС» (our own entity), do not include it in client analytics.
@@ -377,6 +379,7 @@ function data(known){
   excludedCompanies:state.excludedCompanies.map(c=>({...c,name:format(c.name).name})),
   sourceCrmCount:state.rawCrmTotal,
   virtualCustomerTotal:virtual.stats.customerCardCount,
+  financial2025Coverage:virtual.companies.reduce((a,c)=>{const k=c.finance2025?.status||"no_data";a[k]=(a[k]||0)+1;return a},{}),
   confirmed:virtual.companies.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,
   relatedGroups:virtual.stats.groupedCount,
   duplicateStats:virtual.stats,
