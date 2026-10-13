@@ -450,6 +450,13 @@ function coverageLog(){
    const source=String(c.segmentSource||"Other").slice(0,90);
    sourceCounts[source]=(sourceCounts[source]||0)+1;
   }
+  const sampleCases=[[276,1342],[974,2024],[1784,2110]];
+  const sampleMatches=sampleCases.map((pair,index)=>({
+   check:index+1,
+   grouped:companyList.some(c=>pair.every(id=>(c.crmIdList||[c.id]).map(Number).includes(id))),
+   review:(snap.duplicateReview||[]).some(g=>pair.every(id=>g.members.some(m=>Number(m.id)===id)))
+  }));
+  console.log(JSON.stringify({component:"crm-duplicates",event:"regression-integrity",checks:sampleMatches,stats:snap.duplicateStats}));
   console.log(JSON.stringify({component:"topsense-dashboard",event:"classification-coverage",
    customers:companyList.length,crmCards:state.companies.length,
    typed:typed.length,untyped:companyList.length-typed.length,coveredTypes:distinctTypes.size,
