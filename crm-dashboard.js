@@ -158,7 +158,17 @@ async function refresh(){
   console.log(JSON.stringify({component:"registry-quality",event:"client-names-screened",valid:registry.valid.length,excluded:registry.excluded.length}));
   const finStatus={};for(const c of state.companies){const key=c.finance2025?.status||"no_data";finStatus[key]=(finStatus[key]||0)+1}
   console.log(JSON.stringify({component:"topsense-dashboard",event:"financial-2025-coverage",...finStatus}));
-  const dupStats=require("./crm-duplicates").consolidate(state.companies).stats;
+  const duplicateReport=require("./crm-duplicates").consolidate(state.companies);
+  const dupStats=duplicateReport.stats;
+  const crmPairChecks=[["276","1342"],["974","2024"],["1784","2110"]];
+  const pairCoverage=crmPairChecks.map(pair=>{
+   const exists=pair.every(id=>state.companies.some(c=>String(c.id)===id));
+   const group=duplicateReport.duplicates.find(g=>pair.every(id=>g.members.some(m=>String(m.id)===id)));
+   return {idPair:pair.join("/"),inCrm:exists,grouped:!!group};
+  });
+  console.log(JSON.stringify({component:"crm-duplicates",event:"specific-pair-validation",pairs:pairCoverage}));
+  if(pairCoverage.some(p=>p.inCrm&&!p.grouped))
+   console.warn(JSON.stringify({component:"crm-duplicates",event:"duplicate-invariant-failed",failedPairs:pairCoverage.filter(p=>p.inCrm&&!p.grouped).map(p=>p.idPair)}));
   console.log(JSON.stringify({component:"crm-duplicates",event:"reporting-group-snapshot",...dupStats}));
   // CRM #2 = ООО «ПКФ ТОП-СЕНС» (our own entity), do not include it in client analytics.
   if(require("./crm-sales-audit").stats().status==="not_started")require("./crm-sales-audit").run(state.companies).catch(()=>{});
