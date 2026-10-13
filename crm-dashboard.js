@@ -169,6 +169,7 @@ async function refresh(){
   if(state.contactsAt)enqueueMissingSiteNameSearch();
   state.status="ready";state.updatedAt=new Date().toISOString();state.error=null;
   console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:state.companies.length,excludedOwnCompanies:1,excludedInvalidTitles:state.excludedCompanies.length}));
+  setTimeout(coverageLog,2500);
  }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
  finally{state.refreshing=false}
 }
