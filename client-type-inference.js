@@ -106,7 +106,11 @@ function inferWebsiteActivity(pages,companyName){
  }
  const ownName=/(?:шахта|рудник|горно.?обогатительн|нефте(?:перерабат|добывающ)|газо(?:перерабат|добывающ)|металлургическ|тэц|грэс|водоканал|газпром добыча)/i.test(name);
  const ownClaim=/(?:наша компания|наше предприятие|компания|предприятие|общество|мы)\s.{0,90}(?:ведет добыч|осуществляет добыч|добывает|эксплуатирует (?:шахт|месторожд|нефтепереработ)|занимается (?:добыч|переработк)|осуществляет переработк)/i.test(core);
- let result=infer(chosen.map(p=>p.header).join(". "));
+ if(!ownName&&!ownClaim){
+  const role=require("./corporate-role-evidence").classify(pages);
+  if(role&&valid.has(role.type))return role;
+ }
+  let result=infer(chosen.map(p=>p.header).join(". "));
  if(!result)result=infer(core.slice(0,3500));
  if(result&&operatingTypes.has(result.type)&&!ownName&&!ownClaim){
   return {type:"",reason:"Отрасли потребителей упомянуты на сайте, но не являются деятельностью компании"};
