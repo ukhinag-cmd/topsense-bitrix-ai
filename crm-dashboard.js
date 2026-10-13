@@ -430,6 +430,30 @@ function route(req,res,pathname,known){
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,initialHtml(data(known)),"text/html; charset=utf-8");return true}
  write(res,404,{error:"Not found"});return true;
 }
+// Log only aggregate classification coverage; never log customer names, URLs or email.
+// A crawler queue being empty does not mean all 45 client types were assigned.
+function coverageLog(){
+ if(!state.companies.length)return;
+ try{
+  const snap=data(()=>[]);
+  const companyList=snap.companies||[];
+  const typed=companyList.filter(x=>ORG_TYPES.some(t=>t.name===x.organizationType));
+  const distinctTypes=new Set(typed.map(x=>x.organizationType));
+  const sourceCounts={};
+  for(const c of typed){
+   const source=String(c.segmentSource||"Other").slice(0,90);
+   sourceCounts[source]=(sourceCounts[source]||0)+1;
+  }
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"classification-coverage",
+   customers:companyList.length,crmCards:state.companies.length,
+   typed:typed.length,untyped:companyList.length-typed.length,coveredTypes:distinctTypes.size,
+   siteCrawl:require("./website-profiler").stats(),
+   nameSearch:require("./name-site-search").stats(),
+   classificationSources:sourceCounts}));
+ }catch(e){console.warn(JSON.stringify({component:"topsense-dashboard",event:"coverage-unavailable",reason:String(e.message||e).slice(0,100)}))}
+}
+setTimeout(coverageLog,76000);
+setInterval(coverageLog,240000);
 // Preload the read-only snapshot when the dashboard module is first requested.
 setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
