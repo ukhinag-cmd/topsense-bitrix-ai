@@ -38,6 +38,11 @@ function identifiers(c){
  const v=[domain(c.siteCandidate),domain(c.siteVerified),domain(c.siteProfileUrl),blank(c.corporateDomain).toLowerCase(),...emailDomains(c)];
  return distinct(v.filter(x=>x.includes(".")));
 }
+function phones(c){
+ return distinct([...(c.crmPhones||[]),...(c.contactPhones||[])]
+  .map(v=>String(v||"").replace(/\D/g,""))
+  .filter(v=>v.length>=10).map(v=>v.slice(-10)));
+}
 function links(c){
  return {id:c.id,name:display(c.name).name,crmUrl:c.crmUrl,
   hasEmail:distinct([...(c.crmEmails||[]),...(c.contactEmails||[])]).length>0,
@@ -178,18 +183,22 @@ function consolidate(companies){
   const remaining=set.filter(c=>!claimed.has(String(c.id)));
   if(remaining.length<2)continue;
   const ident=identity(remaining[0]);
-  if(ident.base.length<9)continue;
+  const phonesets=remaining.map(phones).filter(a=>a.length);
+  const overlap=distinct(phonesets.flat()).some(p=>phonesets.length>=2&&phonesets.every(a=>a.includes(p)));
+  if(ident.base.length<9&&!overlap)continue;
   const forms=distinct(remaining.map(c=>identity(c).opf).filter(Boolean));
   if(forms.length>1)continue;
   const inns=distinct(remaining.map(c=>String(c.finance2025?.inn||c.crmInn||"").replace(/\D/g,"")).filter(v=>v.length===10||v.length===12));
   if(inns.length>1)continue;
   const sites=distinct(remaining.flatMap(c=>identityDomain(c)));
+  if(ident.base.length<9&&sites.length===0&&!overlap)continue;
   if(sites.length>1)continue; // Different corporate identities.
   // If there are multiple cards and no independent evidence, grouping remains
   // expressly preliminary, never proof that the legal entities are identical.
-  const merged=merge(remaining,sites.length?"exact_name_domain":"exact_distinctive_name_provisional");
+  const merged=merge(remaining,sites.length?"exact_name_domain":overlap?"exact_name_matching_phone":"exact_distinctive_name_provisional");
   merged.duplicateStatus=sites.length
-   ?"Совпадают отличительное полное наименование и домен; объединено в аналитике"
+   ?"Совпадают полное наименование и домен; объединено в аналитике"
+   :overlap?"Совпадают название и контактный телефон; аналитическое объединение, юридическая сверка необходима"
    :"Совпадает полное отличительное название; ОПФ отсутствует в части карточек или домен не указан. Юридическую идентичность проверить при слиянии в CRM";
   merged.segmentConfidence=sites.length?merged.segmentConfidence:"Предварительная виртуальная группа";
   accepted.push(merged);
