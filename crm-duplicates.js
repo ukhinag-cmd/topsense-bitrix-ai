@@ -242,6 +242,17 @@ function consolidate(companies){
    reason:"Один корпоративный домен у компаний с разными названиями. Это могут быть отдельные юрлица или карточки с ошибочным названием; контакты и сделки не объединены",
    members:unreviewed.map(links),count:unreviewed.length,sharedDomain:d});
  }
+ // A pair can initially enter manual review and later be consolidated using
+ // better evidence (shared domain, phone, full name). Never show it twice.
+ const finalReview=review.map(group=>{
+  const members=group.members.filter(c=>!claimed.has(String(c.id)));
+  return {...group,members,count:members.length};
+ }).filter(group=>group.members.length>=2);
+ // If any CRM record is still duplicated between analytical rows, report it.
+ const sourceIds=[...rows.filter(c=>!claimed.has(String(c.id))).map(c=>String(c.id)),
+  ...accepted.flatMap(g=>g.crmIdList||[])];
+ const integrityOK=sourceIds.length===rows.length&&new Set(sourceIds).size===rows.length;
+ if(!integrityOK)console.warn(JSON.stringify({component:"crm-duplicates",event:"group-integrity-check-failed",raw:rows.length,seen:sourceIds.length,unique:new Set(sourceIds).size}));
  const all=[...rows.filter(c=>!claimed.has(String(c.id))),...accepted]
   .sort((a,b)=>{
     const an=display(a.name).name,bn=display(b.name).name;
@@ -252,10 +263,11 @@ function consolidate(companies){
   saleInfo:x.saleInfo,crmEmails:x.crmEmails,contactNames:x.contactNames,
   crmUrl:x.crmUrl,virtualCardId:x.id,website:x.siteProfileUrl||"",
   clientType:x.organizationType||""})).sort((a,b)=>a.name.localeCompare(b.name,"ru"));
- return {companies:all,duplicates:groups,review,stats:{
+ return {companies:all,duplicates:groups,review:finalReview,stats:{
   rawCompanyCount:rows.length,customerCardCount:all.length,
   groupedCount:groups.length,groupedCrmCardCount:claimed.size,
-  reviewGroupCount:review.length,
-  reviewCrmCardCount:distinct(review.flatMap(g=>g.members.map(m=>m.id))).length}};
+  reviewGroupCount:finalReview.length,
+  reviewCrmCardCount:distinct(finalReview.flatMap(g=>g.members.map(m=>m.id))).length,
+  duplicateCoverageValidated:integrityOK}};
 }
 module.exports={consolidate,identity,combineSale};
