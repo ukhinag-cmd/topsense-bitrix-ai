@@ -118,6 +118,26 @@ function reconcile(deals,companies,contacts){
  return {byDeal,candidates,idx,stats:{...stats}};
 }
 
+
+// Resolve CONTACT_ID on orphan deals without scanning all ~20k CRM contacts again.
+async function fetchContactIndex(deals,call){
+ const ids=[...new Set([...deals.values()]
+  .filter(d=>String(d.COMPANY_ID||"")==="0"||String(d.COMPANY_ID||"")==="")
+  .map(d=>String(d.CONTACT_ID||""))
+  .filter(s=>/^\d+$/.test(s)&&s!=="0"))];
+ const maxIds=4500,map=new Map(),errors=[];
+ for(let i=0;i<Math.min(ids.length,maxIds);i+=40){
+  try{
+   const p=await call("crm.contact.list",{
+    order:{ID:"ASC"},filter:{"@ID":ids.slice(i,i+40)},
+    select:["ID","COMPANY_ID","EMAIL"],start:0});
+   for(const row of Array.isArray(p.result)?p.result:[])if(row.ID)map.set(String(row.ID),row);
+  }catch{errors.push(i)}
+  if(i%240===0)await new Promise(resolve=>setTimeout(resolve,120));
+ }
+ return {contacts:map,stats:{contactIdsFound:ids.length,contactsRead:map.size,failedBatches:errors.length,
+  status:errors.length?"partial_errors":ids.length>maxIds?"partial_limit":"complete"}};
+}
 // Read inbound/outbound CRM email activities attached to deals. This recovers
 // deals with generic titles that still contain a unique customer email domain.
 // Completeness is surfaced; partial scans must never imply no deal exists.
@@ -192,4 +212,4 @@ async function scanEmailActivities(deals,reconciliation,call){
  return out;
 }
 
-module.exports={scanEmailActivities,reconcile,indexCompanies,indexContacts,resolveDeal,lookupDealEmailEvidence,stats,norm,stripped,emailCandidates,titleCandidates};
+module.exports={fetchContactIndex,scanEmailActivities,reconcile,indexCompanies,indexContacts,resolveDeal,lookupDealEmailEvidence,stats,norm,stripped,emailCandidates,titleCandidates};
