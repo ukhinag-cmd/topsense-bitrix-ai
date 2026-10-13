@@ -167,8 +167,10 @@ async function run(companies){
   const linker=require("./crm-orphan-deals");
   const contactIndex=await linker.fetchContactIndex(deals,call);
   const orphan=linker.reconcile(deals,companies,contactIndex.contacts);
+  const viaHistory=await stageHistory(stageMap,deals);
+  const focusedEmailAudit=await linker.verifyRelevantDealEmails(deals,orphan,stageMap,viaHistory,call);
   const mailScan=await linker.scanEmailActivities(deals,orphan,call);
-  orphanMatchSummary={...orphan.stats,contactAudit:contactIndex.stats,activityScan:mailScan,
+  orphanMatchSummary={...orphan.stats,contactAudit:contactIndex.stats,activityScan:mailScan,qualifyingDealEmailAudit:focusedEmailAudit,
     verifiedDomainLinks:orphan.candidates.filter(c=>c.linkVerified&&c.linkSource!=="crm_contact_id").length,
     totalRecoveredLinks:orphan.candidates.filter(c=>c.linkVerified&&/domain/.test(String(c.linkSource||""))).length,
     rejectedUnconfirmed:orphan.candidates.filter(c=>!c.linkVerified||!/domain/.test(String(c.linkSource||""))).length};
@@ -179,7 +181,6 @@ async function run(companies){
    if(orphanDealIndex.get(item.companyId).length<120)orphanDealIndex.get(item.companyId).push(item);
   }
   console.log(JSON.stringify({component:"sales-audit",event:"unlinked-deal-reconciliation",...orphanMatchSummary}));
-  const viaHistory=await stageHistory(stageMap,deals);
   const eligible=[];
   const accum=new Map();
   for(const d of deals.values()){
