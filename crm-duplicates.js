@@ -68,7 +68,7 @@ function combineSale(members){
 function merge(members,certainty){
  const sorted=[...members].sort((a,b)=>Number(a.id)-Number(b.id));
  const lead=[...sorted].sort((a,b)=>{
-  const score=x=>10*Number(Boolean(x.verifiedOrgType))+4*Number(Boolean(x.siteProfileUrl||x.siteCandidate))
+  const score=x=>10*Number(Boolean(x.verifiedOrgType))+4*Number(Boolean(x.siteProfileUrl||x.siteCandidate))+3*Number(Boolean(identity(x).opf))
    +2*Number(Boolean(x.organizationType||x.type))+Number((x.crmEmails||[]).length>0);
   return score(b)-score(a)||Number(a.id)-Number(b.id);
  })[0];
@@ -135,7 +135,7 @@ function consolidate(companies){
  // corporate domain also matches, use one reversible analytical card.
  // Never merge different known legal forms or distinct legal INNs.
  function identityDomain(c){
-  const corporate=distinct([blank(c.corporateDomain).toLowerCase(),...(c.crmEmails||[]).map(e=>{
+  const corporate=distinct([blank(c.corporateDomain).toLowerCase(),...[...(c.crmEmails||[]),...(c.contactEmails||[])].map(e=>{
    const m=String(e||"").toLowerCase().match(/@([a-z0-9.-]+\.[a-z]{2,})/);
    return m?m[1]:"";
   }),domain(c.siteCandidate||"")]).filter(d=>d&&d.includes("."));
@@ -146,7 +146,7 @@ function consolidate(companies){
  for(const c of rows){
   if(claimed.has(String(c.id)))continue;
   const ident=identity(c);
-  if(ident.base.length<5||/^(?:безназвания|неизвестно|нетназвания)$/.test(ident.base))continue;
+  if(ident.base.length<3||/^(?:безназвания|неизвестно|нетназвания|тест)$/.test(ident.base))continue;
   for(const d of identityDomain(c)){
    const key=aliasBase(ident.base)+"|"+d;
    if(!domainSameBase.has(key))domainSameBase.set(key,[]);
@@ -157,7 +157,7 @@ function consolidate(companies){
  for(const [key,set] of domainClusters){
   const rest=set.filter(c=>!claimed.has(String(c.id)));
   if(rest.length<2)continue;
-  const forms=distinct(rest.map(c=>identity(c).opf));
+  const forms=distinct(rest.map(c=>identity(c).opf).filter(Boolean));
   const inns=distinct(rest.map(c=>String(c.finance2025?.inn||c.crmInn||"").replace(/\D/g,"")).filter(x=>x.length===10||x.length===12));
   if(forms.length>1||inns.length>1){
    review.push({id:"R-domain-"+rest.map(x=>x.id).join("-"),name:display(rest[0].name).name,
@@ -169,6 +169,31 @@ function consolidate(companies){
   group.duplicateStatus="Совпадают корпоративный домен и нормализованное название (включая ИТЦ/инженерно-технический центр); юридическая сверка перед объединением в Bitrix24";
   accepted.push(group);
   for(const c of rest)claimed.add(String(c.id));
+ }
+
+ // Fall back to a distinctive exact company name when neither record has a
+ // usable corporate domain. One card may omit its legal form. Virtual only.
+ // Require long names and no conflicting known INNs, domains or OPFs.
+ for(const set of byBase.values()){
+  const remaining=set.filter(c=>!claimed.has(String(c.id)));
+  if(remaining.length<2)continue;
+  const ident=identity(remaining[0]);
+  if(ident.base.length<9)continue;
+  const forms=distinct(remaining.map(c=>identity(c).opf).filter(Boolean));
+  if(forms.length>1)continue;
+  const inns=distinct(remaining.map(c=>String(c.finance2025?.inn||c.crmInn||"").replace(/\D/g,"")).filter(v=>v.length===10||v.length===12));
+  if(inns.length>1)continue;
+  const sites=distinct(remaining.flatMap(c=>identityDomain(c)));
+  if(sites.length>1)continue; // Different corporate identities.
+  // If there are multiple cards and no independent evidence, grouping remains
+  // expressly preliminary, never proof that the legal entities are identical.
+  const merged=merge(remaining,sites.length?"exact_name_domain":"exact_distinctive_name_provisional");
+  merged.duplicateStatus=sites.length
+   ?"Совпадают отличительное полное наименование и домен; объединено в аналитике"
+   :"Совпадает полное отличительное название; ОПФ отсутствует в части карточек или домен не указан. Юридическую идентичность проверить при слиянии в CRM";
+  merged.segmentConfidence=sites.length?merged.segmentConfidence:"Предварительная виртуальная группа";
+  accepted.push(merged);
+  remaining.forEach(c=>claimed.add(String(c.id)));
  }
  // Same organization label with different legal forms or a missing legal form:
  // put on the review list, DO NOT merge contacts or deals.
