@@ -81,6 +81,7 @@ function inferWebsiteActivity(pages,companyName){
  const selected=data.filter(p=>/(?:\/about|\/o-kompanii|\/onas|о компании|о нас|предприятие)/i.test(p.path+" "+p.header));
  const chosen=selected.length?selected:data;
  const core=chosen.map(p=>p.header+" "+p.body.slice(0,3500)).join(" ");
+ const combinedPages=data.map(p=>p.header+" "+p.body.slice(0,3800)).join(" ");
  const name=String(companyName||"").toLowerCase().replace(/ё/g,"е");
  const gas=/газоаналитическ|газоанализатор|газоанализ\w*|газосигнализ|течеискател/i.test(core);
  if(gas){
@@ -92,8 +93,8 @@ function inferWebsiteActivity(pages,companyName){
 
  // Catalogue vendors are not technical-inspection contractors merely because
  // product pages mention defectoscopes or non-destructive testing.
- const diagnosticEquipment=/дефектоскоп|толщиномер|вихретоков|ультразвуков.*датчик|оборудован.*(?:неразрушающ|дефектоскоп|диагностик)|прибор.*(?:диагностик|контроля)|измерительн.*оборудован/i.test(core);
- const tradeRole=/(?:дилер|дистрибьют|поставщик|поставка|оптов\w*\s+продаж|прода[её]м|продажа|купить|интернет-магазин|торговый дом|торговая компания|каталог\s+оборудован|реализуем\s+(?:оборудован|прибор|техник))/i.test(core);
+ const diagnosticEquipment=/дефектоскоп|толщиномер|вихретоков|ультразвуков.*датчик|оборудован.*(?:неразрушающ|дефектоскоп|диагностик)|прибор.*(?:диагностик|контроля)|измерительн.*оборудован/i.test(combinedPages);
+ const tradeRole=/(?:дилер|дистрибьют|поставщик|поставка|оптов\w*\s+продаж|прода[её]м|продажа|купить|интернет-магазин|торговый дом|торговая компания|каталог\s+оборудован|реализуем\s+(?:оборудован|прибор|техник))/i.test(combinedPages);
  const actualTesting=/(?:оказыва(?:ем|ет)\s+услуг[иу]\s+(?:по\s+)?(?:неразрушающ|диагностик|испытан)|проводим\s+(?:контроль|диагностик|испытани|дефектоскоп)|выполняем\s+(?:диагностик|неразрушающ|обследован)|(?:осуществляем|проводим)\s+техническ\w*\s+диагностик|наша\s+лаборатори[яи])/i.test(core);
  if(diagnosticEquipment&&tradeRole&&!actualTesting){
   const authorized=/(?:официальн[а-яё]*\s+дилер[а-яё]*|дилер[а-яё]*\s+производител|авторизованн[а-яё]*\s+дилер[а-яё]*)/i.test(core);
