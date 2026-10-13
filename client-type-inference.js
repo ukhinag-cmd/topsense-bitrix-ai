@@ -89,6 +89,20 @@ function inferWebsiteActivity(pages,companyName){
   if(dealer&&!manufacturer)return {type:"Дилер промышленного оборудования",reason:"Официальное дилерство газоаналитического оборудования"};
   if(manufacturer)return {type:"Производитель газоаналитических приборов",reason:"Собственное изготовление газоаналитического оборудования"};
  }
+
+ // Catalogue vendors are not technical-inspection contractors merely because
+ // product pages mention defectoscopes or non-destructive testing.
+ const diagnosticEquipment=/дефектоскоп|толщиномер|вихретоков|ультразвуков.*датчик|оборудован.*(?:неразрушающ|дефектоскоп|диагностик)|прибор.*(?:диагностик|контроля)|измерительн.*оборудован/i.test(core);
+ const tradeRole=/(?:дилер|дистрибьют|поставщик|поставка|оптов\w*\s+продаж|прода[её]м|продажа|купить|интернет-магазин|торговый дом|торговая компания|каталог\s+оборудован|реализуем\s+(?:оборудован|прибор|техник))/i.test(core);
+ const actualTesting=/(?:оказыва(?:ем|ет)\s+услуг[иу]\s+(?:по\s+)?(?:неразрушающ|диагностик|испытан)|проводим\s+(?:контроль|диагностик|испытани|дефектоскоп)|выполняем\s+(?:диагностик|неразрушающ|обследован)|(?:осуществляем|проводим)\s+техническ\w*\s+диагностик|наша\s+лаборатори[яи])/i.test(core);
+ if(diagnosticEquipment&&tradeRole&&!actualTesting){
+  const authorized=/(?:официальн\w*\s+дилер|дилер\w*\s+производител|авторизованн\w*\s+дилер)/i.test(core);
+  return {type:authorized?"Дилер промышленного оборудования":"Дистрибьютор / оптовый поставщик",
+   reason:"Продажа и поставка диагностических приборов, а не выполнение диагностических работ"};
+ }
+ if(actualTesting&&/(?:диагностик|неразрушающ|дефектоскоп)/i.test(core)){
+  return {type:"Диагностика трубопроводов и оборудования",reason:"Подтверждены собственные услуги технической диагностики и неразрушающего контроля"};
+ }
  const ownName=/(?:шахта|рудник|горно.?обогатительн|нефте(?:перерабат|добывающ)|газо(?:перерабат|добывающ)|металлургическ|тэц|грэс|водоканал|газпром добыча)/i.test(name);
  const ownClaim=/(?:наша компания|наше предприятие|компания|предприятие|общество|мы)\s.{0,90}(?:ведет добыч|осуществляет добыч|добывает|эксплуатирует (?:шахт|месторожд|нефтепереработ)|занимается (?:добыч|переработк)|осуществляет переработк)/i.test(core);
  let result=infer(chosen.map(p=>p.header).join(". "));
@@ -114,6 +128,12 @@ function apply(records){
    siteProfileDescription:siteBelongs?(site?.siteDescription||""):""
   };
   if(officiallyVerifiedType)return {...c,...websiteEvidence,siteStatus:"official_site_verified",siteProfileUrl:c.siteCandidate||websiteEvidence.siteProfileUrl,organizationType:officiallyVerifiedType,segmentConfidence:"Высокая — официальный сайт",segmentSource:c.verifiedOrgEvidence||"Юридическое наименование и описание деятельности на официальном сайте"};
+  if(previous==="Диагностика трубопроводов и оборудования"&&bySite&&
+   ["Дилер промышленного оборудования","Дистрибьютор / оптовый поставщик"].includes(bySite.type)){
+   return {...c,...websiteEvidence,organizationType:bySite.type,proposedType:bySite.type,
+    segmentConfidence:"Предварительная — исправлена роль поставщика",segmentSource:"Проверка сайта: продаёт приборы диагностики, не проводит диагностику",
+    verification:"Предварительная классификация"};
+  }
   if(previous)return {...c,...websiteEvidence,organizationType:previous,segmentConfidence:c.verification||"Ранее назначен",segmentSource:"Ранее сохранённая аналитика / классификация"};
   let selected=null,confidence="",basis="";
   if(bySite&&byName&&bySite.type===byName.type){
