@@ -181,6 +181,7 @@ async function scanEmailActivities(deals,reconciliation,call){
    }));
    for(const p of parts)if(!p||!Array.isArray(p.result))out.failedPages++;
    else p.result.forEach(handle);
+   if(i%42===0)console.log(JSON.stringify({component:"crm-orphan-deals",event:"correspondence-progress",scanned:out.scannedActivities,total:out.totalActivities,errors:out.failedPages}));
    if(i%48===0)await new Promise(resolve=>setTimeout(resolve,180));
   }
  }
