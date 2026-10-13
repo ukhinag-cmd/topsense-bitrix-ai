@@ -253,6 +253,23 @@ function consolidate(companies){
   ...accepted.flatMap(g=>g.crmIdList||[])];
  const integrityOK=sourceIds.length===rows.length&&new Set(sourceIds).size===rows.length;
  if(!integrityOK)console.warn(JSON.stringify({component:"crm-duplicates",event:"group-integrity-check-failed",raw:rows.length,seen:sourceIds.length,unique:new Set(sourceIds).size}));
+ const leftover=rows.filter(c=>!claimed.has(String(c.id)));
+ const possible=new Map();
+ for(const c of leftover){
+  const ident=identity(c);
+  if(ident.base.length<7)continue;
+  const key=aliasBase(ident.base);
+  if(!possible.has(key))possible.set(key,[]);
+  possible.get(key).push(c);
+ }
+ let unresolvedExactNameGroups=0,unresolvedDomainNameGroups=0;
+ for(const cluster of possible.values()){
+  if(cluster.length<2)continue;
+  unresolvedExactNameGroups++;
+  const domains=cluster.map(c=>new Set(identityDomain(c)));
+  if(domains.some((set,i)=>domains.some((other,j)=>i<j&&[...set].some(d=>other.has(d)))))
+   unresolvedDomainNameGroups++;
+ }
  const all=[...rows.filter(c=>!claimed.has(String(c.id))),...accepted]
   .sort((a,b)=>{
     const an=display(a.name).name,bn=display(b.name).name;
@@ -268,6 +285,7 @@ function consolidate(companies){
   groupedCount:groups.length,groupedCrmCardCount:claimed.size,
   reviewGroupCount:finalReview.length,
   reviewCrmCardCount:distinct(finalReview.flatMap(g=>g.members.map(m=>m.id))).length,
+  unresolvedExactNameGroups,unresolvedDomainNameGroups,
   duplicateCoverageValidated:integrityOK}};
 }
 module.exports={consolidate,identity,combineSale};
