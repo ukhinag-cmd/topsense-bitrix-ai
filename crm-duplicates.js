@@ -105,10 +105,10 @@ function consolidate(companies){
  const byExact=new Map(),byBase=new Map();
  for(const c of rows){
   const id=identity(c);
-  if(id.base.length<7||/^(?:безназвания|неизвестно|нетназвания|неназвано|безимени|неопределено|тест|названиенетуказано)$/i.test(id.base))continue;
+  if(id.base.length<3||/^(?:безназвания|неизвестно|нетназвания|неназвано|безимени|неопределено|тест|названиенетуказано)$/i.test(id.base))continue;
   if(!byBase.has(id.base))byBase.set(id.base,[]);
   byBase.get(id.base).push(c);
-  if(!id.opf)continue;
+  if(!id.opf||id.base.length<7)continue;
   const k=id.base+"|"+id.opf;
   if(!byExact.has(k))byExact.set(k,[]);
   byExact.get(k).push(c);
