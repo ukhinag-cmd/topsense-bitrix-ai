@@ -182,7 +182,7 @@ async function run(companies){
    if(!accum.has(companyId))accum.set(companyId,{shipped:false,paid:false,qualified:false,
     purchaseItems:[],purchaseAmount:null,purchaseCurrency:"",purchaseDealCount:0,
     purchaseBasis:"Одна из пяти согласованных стадий Bitrix24; сумма только из документов",
-    documentCount:0,documentAmountsKnown:0,documentTotal:0,documentSources:[],stageEvidence:[],productEvidence:"pending"});
+    documentCount:0,documentAmountsKnown:0,documentTotal:0,documentSources:[],stageEvidence:[],purchaseDeals:[],productEvidence:"pending"});
    const rec=accum.get(companyId);
    rec.shipped||=shipped;rec.paid||=paid;rec.qualified||=qualified;rec.purchaseDealCount++;
    for(const src of hist?.sources||[]){
@@ -191,6 +191,12 @@ async function run(companies){
    }
    if(current&&rec.stageEvidence.length<8&&!rec.stageEvidence.some(x=>x.code===current.code))
     rec.stageEvidence.push({code:current.code,name:current.stageName,kind:current.kind,at:"Текущая стадия"});
+   if(rec.purchaseDeals.length<40){
+     const fromHistory=(hist?.sources||[]).map(x=>({name:x.name,at:x.at||"",source:"history"}));
+     const atCurrent=current?[{name:current.stageName,at:"",source:"current"}]:[];
+     const stages=[...fromHistory,...atCurrent].filter((x,i,a)=>a.findIndex(y=>y.name===x.name)===i).slice(0,6);
+     rec.purchaseDeals.push({id:dealId,crmCompanyId:companyId,stages,productsStatus:"not_checked",documentStatus:"not_checked"});
+   }
    eligible.push({id:dealId,companyId});
   }
   for(const [companyId,rec] of accum){
@@ -204,6 +210,8 @@ async function run(companies){
   for(const deal of eligible){
    const rows=await productRows(deal.id),rec=summary.get(deal.companyId);
    const doc=await docAudit.forDeal(deal.id);
+   const purchaseDeal=(rec.purchaseDeals||[]).find(x=>x.id===deal.id);
+   if(purchaseDeal){purchaseDeal.documentStatus=doc.status;purchaseDeal.documentSource=doc.source||"";purchaseDeal.productsStatus=rows===null?"unavailable":rows.length?"available":"empty";}
    rec.documentCount+=(doc.documentCount||0);
    if(doc.amount!==null){rec.documentAmountsKnown++;rec.documentTotal+=doc.amount;
     if(rec.documentSources.length<12)rec.documentSources.push({dealId:deal.id,source:doc.source});}
