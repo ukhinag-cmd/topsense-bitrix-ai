@@ -118,6 +118,46 @@ function consolidate(companies){
   accepted.push(combined);
   for(const c of set)claimed.add(String(c.id));
  }
+
+ // The same legal name is often recorded with and without ООО/АО. If their
+ // corporate domain also matches, use one reversible analytical card.
+ // Never merge different known legal forms or distinct legal INNs.
+ function identityDomain(c){
+  const corporate=distinct([blank(c.corporateDomain).toLowerCase(),...(c.crmEmails||[]).map(e=>{
+   const m=String(e||"").toLowerCase().match(/@([a-z0-9.-]+\.[a-z]{2,})/);
+   return m?m[1]:"";
+  }),domain(c.siteCandidate||"")]).filter(d=>d&&d.includes("."));
+  const publicMail=/^(?:gmail\.com|mail\.ru|bk\.ru|inbox\.ru|yandex\.ru|ya\.ru|rambler\.ru|outlook\.com|yahoo\.com|hotmail\.com|icloud\.com|topsense\.su|detector-gaza\.ru)$/;
+  return corporate.filter(d=>!publicMail.test(d));
+ }
+ const domainSameBase=new Map();
+ for(const c of rows){
+  if(claimed.has(String(c.id)))continue;
+  const ident=identity(c);
+  if(ident.base.length<5||/^(?:безназвания|неизвестно|нетназвания)$/.test(ident.base))continue;
+  for(const d of identityDomain(c)){
+   const key=ident.base+"|"+d;
+   if(!domainSameBase.has(key))domainSameBase.set(key,[]);
+   domainSameBase.get(key).push(c);
+  }
+ }
+ const domainClusters=[...domainSameBase].filter(([key,x])=>x.length>1).sort((a,b)=>b[1].length-a[1].length);
+ for(const [key,set] of domainClusters){
+  const rest=set.filter(c=>!claimed.has(String(c.id)));
+  if(rest.length<2)continue;
+  const forms=distinct(rest.map(c=>identity(c).opf));
+  const inns=distinct(rest.map(c=>String(c.finance2025?.inn||c.crmInn||"").replace(/\D/g,"")).filter(x=>x.length===10||x.length===12));
+  if(forms.length>1||inns.length>1){
+   review.push({id:"R-domain-"+rest.map(x=>x.id).join("-"),name:display(rest[0].name).name,
+    reason:"Совпадает наименование и домен, но конфликтуют ОПФ или ИНН — не объединено",
+    members:rest.map(links),count:rest.length});
+   continue;
+  }
+  const group=merge(rest,"matching_corporate_domain_and_name");
+  group.duplicateStatus="Совпадают нормализованное название и корпоративный домен; юридическая сверка перед объединением в Bitrix24";
+  accepted.push(group);
+  for(const c of rest)claimed.add(String(c.id));
+ }
  // Same organization label with different legal forms or a missing legal form:
  // put on the review list, DO NOT merge contacts or deals.
  for(const set of byBase.values()){
