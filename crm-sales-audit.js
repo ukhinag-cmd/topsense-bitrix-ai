@@ -170,9 +170,11 @@ async function run(companies){
   const mailScan=await linker.scanEmailActivities(deals,orphan,call);
   orphanMatchSummary={...orphan.stats,contactAudit:contactIndex.stats,activityScan:mailScan,
     verifiedDomainLinks:orphan.candidates.filter(c=>c.linkVerified&&c.linkSource!=="crm_contact_id").length,
-    totalRecoveredLinks:orphan.candidates.length};
+    totalRecoveredLinks:orphan.candidates.filter(c=>c.linkVerified&&/domain/.test(String(c.linkSource||""))).length,
+    rejectedUnconfirmed:orphan.candidates.filter(c=>!c.linkVerified||!/domain/.test(String(c.linkSource||""))).length};
   orphanDealIndex=new Map();
   for(const item of orphan.candidates){
+   if(!item.linkVerified||!/domain/.test(String(item.linkSource||"")))continue;
    if(!orphanDealIndex.has(item.companyId))orphanDealIndex.set(item.companyId,[]);
    if(orphanDealIndex.get(item.companyId).length<120)orphanDealIndex.get(item.companyId).push(item);
   }
@@ -184,7 +186,7 @@ async function run(companies){
    const dealId=String(d.ID);
    const originalId=String(d.COMPANY_ID||"");
    const match=orphan.byDeal.get(dealId);
-   const companyId=originalId&&originalId!=="0"?originalId:(match?.companyId||"");
+   const companyId=originalId&&originalId!=="0"?originalId:(match?.linkVerified&&/domain/.test(String(match.linkSource||""))?match.companyId:"");
    if(!allowed.has(companyId))continue;
    if(won(d))state.wonDeals++;
    const hist=viaHistory.get(dealId),current=stageMap.get(String(d.STAGE_ID||""));
