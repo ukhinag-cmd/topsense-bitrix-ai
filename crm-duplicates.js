@@ -10,6 +10,18 @@ function identity(c){
  const base=opf?d.name.slice(0,-(opf.length+2)):d.name;
  return {display:d.name,base:normalize(base),opf};
 }
+// Expand common industry acronyms ONLY when checking a shared corporate domain.
+// Never merge dissimilar entities by domain alone.
+function aliasBase(base){
+ const b=String(base||"");
+ return b
+  .replace(/^инженернотехническ(?:ий|ого|ая)центр/,"итц")
+  .replace(/^научнотехническ(?:ий|ого|ая)центр/,"нтц")
+  .replace(/^научнопроизводственн(?:ое|ого|ая)предприятие/,"нпп")
+  .replace(/^научнопроизводственн(?:ый|ого|ая)центр/,"нпц")
+  .replace(/^производственнокоммерческ(?:ая|ой)фирма/,"пкф")
+  .replace(/^торговыйдом/,"тд");
+}
 function domain(value){
  const raw=String(value||"").toLowerCase();
  try{return new URL(raw.includes("://")?raw:"https://"+raw).hostname.replace(/^www\./,"")}catch{return""}
@@ -136,7 +148,7 @@ function consolidate(companies){
   const ident=identity(c);
   if(ident.base.length<5||/^(?:безназвания|неизвестно|нетназвания)$/.test(ident.base))continue;
   for(const d of identityDomain(c)){
-   const key=ident.base+"|"+d;
+   const key=aliasBase(ident.base)+"|"+d;
    if(!domainSameBase.has(key))domainSameBase.set(key,[]);
    domainSameBase.get(key).push(c);
   }
@@ -154,7 +166,7 @@ function consolidate(companies){
    continue;
   }
   const group=merge(rest,"matching_corporate_domain_and_name");
-  group.duplicateStatus="Совпадают нормализованное название и корпоративный домен; юридическая сверка перед объединением в Bitrix24";
+  group.duplicateStatus="Совпадают корпоративный домен и нормализованное название (включая ИТЦ/инженерно-технический центр); юридическая сверка перед объединением в Bitrix24";
   accepted.push(group);
   for(const c of rest)claimed.add(String(c.id));
  }
@@ -183,7 +195,7 @@ function consolidate(companies){
  }
  for(const [d,items] of sharedDomain){
   if(items.length<2)continue;
-  const cores=new Set(items.map(c=>identity(c).base));
+  const cores=new Set(items.map(c=>aliasBase(identity(c).base)));
   if(cores.size<2)continue; // Same normalized company: handled above.
   const unreviewed=items.filter(c=>!review.some(g=>g.members.some(m=>String(m.id)===String(c.id))));
   if(unreviewed.length<2)continue;
