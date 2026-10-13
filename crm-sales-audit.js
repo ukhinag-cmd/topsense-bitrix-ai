@@ -165,9 +165,10 @@ async function run(companies){
   if(!stageMap.size)throw Error("Отгрузка и оплата не найдены среди названий стадий доступных воронок CRM");
   const deals=await allDeals();
   const linker=require("./crm-orphan-deals");
-  const orphan=linker.reconcile(deals,companies);
+  const contactIndex=await linker.fetchContactIndex(deals,call);
+  const orphan=linker.reconcile(deals,companies,contactIndex.contacts);
   const mailScan=await linker.scanEmailActivities(deals,orphan,call);
-  orphanMatchSummary={...orphan.stats,activityScan:mailScan,
+  orphanMatchSummary={...orphan.stats,contactAudit:contactIndex.stats,activityScan:mailScan,
     verifiedDomainLinks:orphan.candidates.filter(c=>c.linkVerified&&c.linkSource!=="crm_contact_id").length,
     totalRecoveredLinks:orphan.candidates.length};
   orphanDealIndex=new Map();
