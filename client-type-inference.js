@@ -142,9 +142,9 @@ function apply(records){
   if(previous)return {...c,...websiteEvidence,organizationType:previous,segmentConfidence:c.verification||"Ранее назначен",segmentSource:"Ранее сохранённая аналитика / классификация"};
   let selected=null,confidence="",basis="";
   if(bySite&&byName&&bySite.type===byName.type){
-   selected=bySite.type;confidence="Выше средней";basis="Содержимое сайта и название компании";
+   selected=bySite.type;confidence="Выше средней";basis=(site.siteActivityReason||"Основная деятельность на сайте")+"; совпадает с названием организации";
   }else if(bySite){
-   selected=bySite.type;confidence="Предварительная";basis="Профиль доступного сайта, принадлежность требует проверки";
+   selected=bySite.type;confidence="Предварительная";basis=(site.siteActivityReason||"Публичные сведения о собственной деятельности компании")+" · "+(site.source||"проверенный сайт CRM");
   }else if(byName){
    selected=byName.type;confidence=byName.confidence;basis="Название CRM, без подтверждения сайтом";
   }
