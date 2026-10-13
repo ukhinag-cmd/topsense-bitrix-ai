@@ -41,12 +41,47 @@ function titleCandidates(title,idx){
  if(unique.length!==1)return found.map(x=>x.id);
  return [...new Set(found.map(x=>x.id))];
 }
+function normalizedLegal(v){
+ const x=stripped(v).replace(/^(?:нпп|пкф|тд|ооо|оао|пао|ао|зао|ип)\s+/,"");
+ return x.replace(/(?:\s+(?:ооо|оао|пао|ао|зао|ип))$/,"").replace(/\s+/g,"").trim();
+}
+function legalForm(v){
+ const m=norm(v).match(/^(?:ооо|оао|пао|ао|зао|ип)\b|\b(?:ооо|оао|пао|ао|зао|ип)$/i);
+ return m?m[0]:"";
+}
+function canonicalDomain(idset,idx){
+ const ids=[...(idset||[])].filter(id=>idx.companyById.has(id));
+ if(ids.length===1)return ids[0];
+ if(ids.length<2)return"";
+ const companies=ids.map(id=>idx.companyById.get(id));
+ const keys=[...new Set(companies.map(c=>normalizedLegal(c.name)))];
+ const forms=[...new Set(companies.map(c=>legalForm(c.name)).filter(Boolean))];
+ if(keys.length!==1||keys[0].length<5||forms.length>1)return"";
+ return ids.sort((a,b)=>Number(a)-Number(b))[0];
+}
+function domainsInTitle(title,idx){
+ const out=[];
+ const raw=String(title||"").toLowerCase();
+ for(const [d,ids] of idx.byDomain){
+  if(d.length<7||generalDomains.has(d))continue;
+  let at=raw.indexOf(d);
+  while(at>=0){
+   const left=at===0?"":raw[at-1],right=at+d.length>=raw.length?"":raw[at+d.length];
+   if(!/[a-z0-9.-]/.test(left)&&!/[a-z0-9.-]/.test(right)){
+    const owner=canonicalDomain(ids,idx);if(owner)out.push(owner);
+    break;
+   }
+   at=raw.indexOf(d,at+1);
+  }
+ }
+ return [...new Set(out)];
+}
 function emailCandidates(addresses,idx){
  const out=new Set();
  for(const e of addresses||[]){
   const d=domain(e);if(!d||generalDomains.has(d))continue;
   const ids=idx.byDomain.get(d);
-  if(ids&&ids.size===1)for(const id of ids)out.add(id);
+  if(ids){const owner=canonicalDomain(ids,idx);if(owner)out.add(owner)}
  }
  return [...out];
 }
@@ -55,6 +90,10 @@ function resolveDeal(d,idx,contacts){
  if(old!=="0"&&old&&idx.companyById.has(old))return {companyId:old,source:"direct_company",verified:true};
  if(old!=="0"&&old)return null; // Never override a nonempty CRM company ID.
  const matches=titleCandidates(d.TITLE,idx);
+ const titleDomains=domainsInTitle(d.TITLE,idx);
+ if(titleDomains.length===1&&(!matches.length||matches.includes(titleDomains[0])))
+  return {companyId:titleDomains[0],source:"deal_title_corporate_domain",verified:true};
+ if(titleDomains.length>1)return {companyId:"",source:"ambiguous_domains_in_title",verified:false};
  const contactId=String(d.CONTACT_ID||"");
  let contactMatch="";
  if(contacts?.has(contactId)){
