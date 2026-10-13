@@ -117,4 +117,79 @@ function reconcile(deals,companies,contacts){
  stats.status="title_and_contact_matched";
  return {byDeal,candidates,idx,stats:{...stats}};
 }
-module.exports={reconcile,indexCompanies,indexContacts,resolveDeal,lookupDealEmailEvidence,stats,norm,stripped,emailCandidates,titleCandidates};
+
+// Read inbound/outbound CRM email activities attached to deals. This recovers
+// deals with generic titles that still contain a unique customer email domain.
+// Completeness is surfaced; partial scans must never imply no deal exists.
+async function scanEmailActivities(deals,reconciliation,call){
+ const maxActivities=15000;
+ const filter={TYPE_ID:4,BINDINGS:[{OWNER_TYPE_ID:2}]};
+ const baseParams={order:{ID:"DESC"},filter,
+  select:["ID","OWNER_ID","OWNER_TYPE_ID","TYPE_ID","PROVIDER_ID","DIRECTION","COMMUNICATIONS","BINDINGS"]};
+ const out={status:"not_started",scannedActivities:0,totalActivities:0,domainLinkedDeals:0,verifiedTitleDeals:0,conflictingEvidence:0,failedPages:0};
+ let first;
+ try{first=await call("crm.activity.list",{...baseParams,start:0})}
+ catch(err){out.status="activity_filter_unavailable";return out}
+ const rows=Array.isArray(first.result)?first.result:[];
+ const total=Number(first.total||rows.length);
+ out.totalActivities=total;
+ const bucket=new Map();
+ function handle(a){
+  out.scannedActivities++;
+  if(String(a.TYPE_ID||"")!=="4"&&String(a.PROVIDER_ID||"").toUpperCase()!=="CRM_EMAIL")return;
+  const bindingIds=[];
+  if(Number(a.OWNER_TYPE_ID)===2)bindingIds.push(String(a.OWNER_ID||""));
+  for(const b of Array.isArray(a.BINDINGS)?a.BINDINGS:[])
+   if(Number(b.OWNER_TYPE_ID)===2)bindingIds.push(String(b.OWNER_ID||""));
+  if(!bindingIds.length)return;
+  const communications=Array.isArray(a.COMMUNICATIONS)?a.COMMUNICATIONS:[];
+  const ids=emailCandidates(communications.map(c=>c.VALUE||""),reconciliation.idx);
+  if(ids.length!==1)return;
+  for(const id of new Set(bindingIds)){
+   const d=deals.get(id);if(!d||String(d.COMPANY_ID||"")!=="0"&&String(d.COMPANY_ID||"")!=="")continue;
+   if(!bucket.has(id))bucket.set(id,new Set());
+   bucket.get(id).add(ids[0]);
+  }
+ }
+ rows.forEach(handle);
+ if(total>rows.length){
+  const size=Math.max(1,rows.length||50),last=Math.min(total,maxActivities),starts=[];
+  for(let i=size;i<last;i+=size)starts.push(i);
+  for(let i=0;i<starts.length;i+=3){
+   const parts=await Promise.all(starts.slice(i,i+3).map(async start=>{
+    try{return await call("crm.activity.list",{...baseParams,start})}catch{return null}
+   }));
+   for(const p of parts)if(!p||!Array.isArray(p.result))out.failedPages++;
+   else p.result.forEach(handle);
+   if(i%48===0)await new Promise(resolve=>setTimeout(resolve,180));
+  }
+ }
+ for(const [dealId,companySet] of bucket){
+  if(companySet.size!==1){out.conflictingEvidence++;continue}
+  const companyId=[...companySet][0],old=reconciliation.byDeal.get(dealId);
+  if(old){
+   if(old.companyId!==companyId){
+    reconciliation.byDeal.delete(dealId);
+    out.conflictingEvidence++;
+   }else{
+    old.linkVerified=true;old.linkSource="deal_email_corporate_domain_plus_title";
+    out.verifiedTitleDeals++;
+   }
+  }else{
+   const deal=deals.get(dealId);
+   reconciliation.byDeal.set(dealId,{
+    dealId,companyId,linkSource:"deal_email_corporate_domain",linkVerified:true,
+    originalCompanyId:"",title:String(deal?.TITLE||"").slice(0,180)
+   });
+   out.domainLinkedDeals++;
+  }
+ }
+ reconciliation.candidates=[...reconciliation.byDeal.values()];
+ out.status=out.failedPages?"partial_errors":out.scannedActivities>=total?"complete":"partial_limit";
+ stats.matchedByDomain=out.domainLinkedDeals;
+ stats.emailOwnerMatches=out.verifiedTitleDeals;
+ stats.emailsInspected=out.scannedActivities;
+ return out;
+}
+
+module.exports={scanEmailActivities,reconcile,indexCompanies,indexContacts,resolveDeal,lookupDealEmailEvidence,stats,norm,stripped,emailCandidates,titleCandidates};
