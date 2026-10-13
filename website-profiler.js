@@ -46,7 +46,9 @@ function extract(html){
  const headings=[...html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi)].slice(0,14).map(m=>strip(m[1]));
  const focus=(html.match(/<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)>/i)||[])[1]||html;
  const body=strip(focus).slice(0,7500);
- return {title:strip(title).slice(0,200),description:strip(description).slice(0,600),headings,body};
+ const whole=strip(html);
+ const identityText=(whole.slice(0,1900)+" "+whole.slice(-5000)).slice(0,6900);
+ return {title:strip(title).slice(0,200),description:strip(description).slice(0,600),headings,body,identityText};
 }
 function discoverLinks(html,base){
  const seen=new Set(),suggestions=[];
@@ -65,11 +67,16 @@ function discoverLinks(html,base){
    const isAbout=/(?:о[-_ ]?(?:компании|нас)|about|company|o-kompanii|onas)/i.test(label+" "+raw);
    const identityPage=/(?:реквизит|rekvizit|requisites|legal[-_ ]?details|контакт|kontakty|contacts|contact[-_ ]?us|legal[-_ ]?information)/i.test(label+" "+raw);
    const isProducts=/(?:продукц|products|catalog|katalog|services|услуг|uslugi|деятельност|deyatelnost|направлен|napravlen|production|proizvod|solutions|решен)/i.test(label+" "+raw);
-   suggestions.push({url:u,score:identityPage?5:isAbout?4:isProducts?3:1});
+   const category=/(?:реквизит|rekvizit|requisites|legal[-_ ]?details)/i.test(label+" "+raw)?"requisites":/(?:контакт|kontakty|contacts|contact[-_ ]?us)/i.test(label+" "+raw)?"contacts":isAbout?"about":isProducts?"activity":"other";
+   suggestions.push({url:u,score:identityPage?5:isAbout?4:isProducts?3:1,category});
    if(suggestions.length>=18)break;
   }catch{}
  }
- return suggestions.sort((a,b)=>b.score-a.score).slice(0,5).map(x=>x.url);
+ const list=suggestions.sort((a,b)=>b.score-a.score);
+ const picked=[],kinds=new Set(),urls=new Set();
+ for(const candidate of list){if(kinds.has(candidate.category))continue; kinds.add(candidate.category);picked.push(candidate);urls.add(candidate.url);}
+ for(const candidate of list){if(picked.length>=5)break;if(urls.has(candidate.url))continue;picked.push(candidate);urls.add(candidate.url)}
+ return picked.slice(0,5).map(x=>x.url);
 }
 async function fetchPage(raw){
  let current=raw;
@@ -115,7 +122,7 @@ async function one(c){
   const found=activity?.type?{type:activity.type}:null;
   const ambiguous=Boolean(activity&&!activity.type);
   const tokens=String(c.name||"").toLowerCase().replace(/(?:ооо|ао|оао|пао|зао|пкф|нпп|тд|филиал)/g," ").split(/[^а-яёa-z0-9]+/i).filter(t=>t.length>=5);
-  const target=pages.map(p=>[p.meta.title,p.meta.description,...p.meta.headings,p.meta.body.slice(0,2000)].join(" ")).join(" ").toLowerCase();
+  const target=pages.map(p=>[p.meta.title,p.meta.description,...p.meta.headings,p.meta.body.slice(0,2000),p.meta.identityText].join(" ")).join(" ").toLowerCase();
   const checkedName=tokens.some(t=>target.includes(t));
   const orphanSource=c.siteSource==="Непривязанные CRM-контакты: совпали название и корпоративный домен";
   const fullCompanyName=String(c.name||"").toLowerCase().replace(/ё/g,"е")
