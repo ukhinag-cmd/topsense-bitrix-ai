@@ -59,6 +59,45 @@ function infer(name){
  }
  return {type:distinct[0],confidence:"Предварительная",reason:"Признаки деятельности в названии CRM"};
 }
+
+// Website content can mention mines and other customer sectors without operating them.
+// Prefer the company's own manufacturer/dealer statements over use-case keywords.
+const operatingTypes=new Set([
+ "Горно-обогатительное / горнодобывающее предприятие",
+ "Нефтедобывающее / газодобывающее предприятие",
+ "Нефтеперерабатывающий завод",
+ "Газоперерабатывающее предприятие",
+ "Металлургическое предприятие",
+ "Нефтехимическое / химическое предприятие",
+ "Энергогенерирующая / теплоснабжающая компания",
+ "Водоканал / канализационные сооружения"
+]);
+function inferWebsiteActivity(pages,companyName){
+ const data=(pages||[]).map(p=>({
+  header:[p.meta?.title,p.meta?.description,...(p.meta?.headings||[])].join(" ").toLowerCase().replace(/ё/g,"е"),
+  body:String(p.meta?.body||"").toLowerCase().replace(/ё/g,"е"),
+  path:String(p.pageUrl||"").toLowerCase()
+ }));
+ const selected=data.filter(p=>/(?:\/about|\/o-kompanii|\/onas|о компании|о нас|предприятие)/i.test(p.path+" "+p.header));
+ const chosen=selected.length?selected:data;
+ const core=chosen.map(p=>p.header+" "+p.body.slice(0,3500)).join(" ");
+ const name=String(companyName||"").toLowerCase().replace(/ё/g,"е");
+ const gas=/газоаналитическ|газоанализатор|газоанализ\w*|газосигнализ|течеискател/i.test(core);
+ if(gas){
+  const dealer=/(?:явля[а-я]{0,12}\s+(?:официальн[а-я]{0,10}\s+)?дилер[а-я]*|официальн[а-я]*\s+дилер[а-я]*|дилер[а-я]*\s+(?:всех|прибор|производител|оборудован))/i.test(core);
+  const manufacturer=/(?:собственн[а-я]*\s+(?:производств[а-я]*|сборк[а-я]*)|разрабатываем\s+и\s+производим|производител[а-я]*\s+газоаналитическ|производств[а-я]*\s+(?:газоанализатор|газоаналитическ)|(?:нпп|научно.производственн).*газоаналит)/i.test(core+" "+name);
+  if(dealer&&!manufacturer)return {type:"Дилер промышленного оборудования",reason:"Официальное дилерство газоаналитического оборудования"};
+  if(manufacturer)return {type:"Производитель газоаналитических приборов",reason:"Собственное изготовление газоаналитического оборудования"};
+ }
+ const ownName=/(?:шахта|рудник|горно.?обогатительн|нефте(?:перерабат|добывающ)|газо(?:перерабат|добывающ)|металлургическ|тэц|грэс|водоканал|газпром добыча)/i.test(name);
+ const ownClaim=/(?:наша компания|наше предприятие|компания|предприятие|общество|мы)\s.{0,90}(?:ведет добыч|осуществляет добыч|добывает|эксплуатирует (?:шахт|месторожд|нефтепереработ)|занимается (?:добыч|переработк)|осуществляет переработк)/i.test(core);
+ let result=infer(chosen.map(p=>p.header).join(". "));
+ if(!result)result=infer(core.slice(0,3500));
+ if(result&&operatingTypes.has(result.type)&&!ownName&&!ownClaim){
+  return {type:"",reason:"Отрасли потребителей упомянуты на сайте, но не являются деятельностью компании"};
+ }
+ return result?{type:result.type,reason:"Деятельность в профильных разделах сайта"}:null;
+}
 function apply(records){
  const sites=require("./website-profiler");
  return records.map(c=>{
@@ -88,4 +127,4 @@ function apply(records){
   return {...c,...websiteEvidence,organizationType:selected,proposedType:selected,segmentConfidence:confidence,segmentSource:basis,verification:"Предварительная классификация"};
  });
 }
-module.exports={infer,apply};
+module.exports={infer,apply,inferWebsiteActivity};
