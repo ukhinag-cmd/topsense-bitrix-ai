@@ -164,8 +164,12 @@ async function run(companies){
   const stageMap=await stages();
   if(!stageMap.size)throw Error("Отгрузка и оплата не найдены среди названий стадий доступных воронок CRM");
   const deals=await allDeals();
-  const orphan=require("./crm-orphan-deals").reconcile(deals,companies);
-  orphanMatchSummary=orphan.stats;
+  const linker=require("./crm-orphan-deals");
+  const orphan=linker.reconcile(deals,companies);
+  const mailScan=await linker.scanEmailActivities(deals,orphan,call);
+  orphanMatchSummary={...orphan.stats,activityScan:mailScan,
+    verifiedDomainLinks:orphan.candidates.filter(c=>c.linkVerified&&c.linkSource!=="crm_contact_id").length,
+    totalRecoveredLinks:orphan.candidates.length};
   orphanDealIndex=new Map();
   for(const item of orphan.candidates){
    if(!orphanDealIndex.has(item.companyId))orphanDealIndex.set(item.companyId,[]);
@@ -251,7 +255,7 @@ async function run(companies){
   state.status=state.stageHistoryStatus==="complete"?"complete":"partial";
   state.finishedAt=new Date().toISOString();
   console.log(JSON.stringify({component:"sales-audit",event:"fulfilment-audit-complete",
-   status:state.status,scannedDeals:state.scannedDeals,shippedDeals:state.shippedDeals,
+   status:state.status,scannedDeals:state.scannedDeals,orphanRecovered:orphanMatchSummary.totalRecoveredLinks||0,shippedDeals:state.shippedDeals,
    paidDeals:state.paidDeals,companiesWithEvidence:state.companiesWithPurchaseEvidence,
    stageHistoryStatus:state.stageHistoryStatus,productRowsChecked:state.productRowsChecked,documentAudit:state.documentAudit}));
  }catch(e){
