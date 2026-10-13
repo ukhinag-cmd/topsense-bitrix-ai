@@ -2,6 +2,7 @@
 const dns=require("dns").promises,net=require("net");
 const {infer}=require("./client-type-inference");
 const profiles=new Map(),visited=new Set(),queue=[],sourcePriority=new Map();
+let pagesScanned=0,checkedSites=0,lastProgressLogged=0;
 let active=0,lastAt=0;
 function publicIPv4(ip){
  const x=ip.split(".").map(Number);
@@ -34,6 +35,7 @@ function strip(s){
  return String(s||"").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ")
  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi," ")
  .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi," ")
+ .replace(/<(?:nav|footer|aside)\b[^>]*>[\s\S]*?<\/(?:nav|footer|aside)>/gi," ")
  .replace(/<[^>]*>/g," ").replace(/&(?:nbsp|amp|quot|lt|gt);/gi," ")
  .replace(/\s+/g," ").trim();
 }
@@ -41,8 +43,9 @@ function extract(html){
  const title=(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||"";
  const description=(html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)/i)||[])[1]||
  (html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i)||[])[1]||"";
- const headings=[...html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi)].slice(0,8).map(m=>strip(m[1]));
- const body=strip(html).slice(0,3500);
+ const headings=[...html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/gi)].slice(0,14).map(m=>strip(m[1]));
+ const focus=(html.match(/<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)>/i)||[])[1]||html;
+ const body=strip(focus).slice(0,7500);
  return {title:strip(title).slice(0,200),description:strip(description).slice(0,600),headings,body};
 }
 function discoverLinks(html,base){
@@ -135,14 +138,23 @@ async function one(c){
   const redirectedToOtherDomain=new URL(candidates[0].url).hostname.replace(/^www\./i,"")!==new URL(result.url).hostname.replace(/^www\./i,"");
   const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
+  pagesScanned+=pages.length;checkedSites++;
   profiles.set(c.id,{status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()});
- }catch(error){if(evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"))<(sourcePriority.get(String(c.id))||0))return;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
+ }catch(error){if(evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"))<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
 function pump(){
  while(active<2&&queue.length){
   const now=Date.now();if(now-lastAt<1200){setTimeout(pump,1250);return}
   const c=queue.shift();active++;lastAt=Date.now();
-  one(c).finally(()=>{active--;setTimeout(pump,1300)});
+  one(c).finally(()=>{
+   active--;
+   if(checkedSites-lastProgressLogged>=35||(!queue.length&&active===0)){
+    lastProgressLogged=checkedSites;
+    const counts={};for(const profile of profiles.values())counts[profile.status]=(counts[profile.status]||0)+1;
+    console.log(JSON.stringify({component:"site-profiler",event:"progress",checkedSites,pagesScanned,remaining:queue.length,active,byStatus:counts}));
+   }
+   setTimeout(pump,1300);
+  });
  }
 }
 function evidenceRank(source){
@@ -175,5 +187,5 @@ function enqueue(companies){
  if(companies.length>25)console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",queued:queue.length,known:profiles.size}));
 }
 function get(id){return profiles.get(String(id))||{status:"site_pending"}}
-function stats(){const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;return {queued:queue.length,active,processed:profiles.size,byStatus:by}}
+function stats(){const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;return {queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,byStatus:by}}
 module.exports={enqueue,get,stats,fetchPage};
