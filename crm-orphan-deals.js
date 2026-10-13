@@ -177,6 +177,58 @@ async function fetchContactIndex(deals,call){
  return {contacts:map,stats:{contactIdsFound:ids.length,contactsRead:map.size,failedBatches:errors.length,
   status:errors.length?"partial_errors":ids.length>maxIds?"partial_limit":"complete"}};
 }
+// Check the ENTIRE lifetime of every orphan deal reaching a qualifying stage.
+// Avoid relying on a recent slice of global correspondence.
+async function verifyRelevantDealEmails(deals,reconciliation,stageMap,history,call){
+ const requested=[];
+ for(const d of deals.values()){
+  const id=String(d.ID||"");
+  if(!id||(String(d.COMPANY_ID||"")!=="0"&&String(d.COMPANY_ID||"")!==""))continue;
+  const h=history.get(id);
+  if(!h?.paid&&!h?.shipped&&!h?.qualified&&!stageMap.has(String(d.STAGE_ID||"")))continue;
+  const current=reconciliation.byDeal.get(id);
+  if(current?.linkVerified&&/domain/.test(current.linkSource))continue;
+  requested.push(id);
+ }
+ const result={status:"not_started",qualifyingUnlinkedDeals:requested.length,checked:0,domainConfirmed:0,conflicts:0,failed:0};
+ const limit=1200;
+ for(let i=0;i<Math.min(requested.length,limit);i+=3){
+  const chunk=requested.slice(i,i+3);
+  const outputs=await Promise.all(chunk.map(async id=>{
+   try{
+    const resp=await call("crm.activity.list",{order:{ID:"DESC"},
+     filter:{OWNER_TYPE_ID:2,OWNER_ID:Number(id)},
+     select:["ID","TYPE_ID","PROVIDER_ID","COMMUNICATIONS"],start:0});
+    return {id,items:Array.isArray(resp.result)?resp.result:[]};
+   }catch{return{id,items:null}}
+  }));
+  for(const o of outputs){
+   result.checked++;
+   if(o.items===null){result.failed++;continue}
+   const domains=new Set();
+   for(const a of o.items){
+    if(String(a.TYPE_ID||"")!=="4"&&String(a.PROVIDER_ID||"").toUpperCase()!=="CRM_EMAIL")continue;
+    for(const c of Array.isArray(a.COMMUNICATIONS)?a.COMMUNICATIONS:[])
+     for(const owner of emailCandidates([c.VALUE||""],reconciliation.idx))domains.add(owner);
+   }
+   if(domains.size!==1){if(domains.size>1)result.conflicts++;continue}
+   const owner=[...domains][0];
+   const prior=reconciliation.byDeal.get(o.id),deal=deals.get(o.id);
+   if(prior&&prior.companyId!==owner){
+    reconciliation.byDeal.delete(o.id);result.conflicts++;continue;
+   }
+   reconciliation.byDeal.set(o.id,{dealId:o.id,companyId:owner,
+    linkSource:"deal_email_corporate_domain",linkVerified:true,
+    originalCompanyId:"",title:String(deal?.TITLE||"").slice(0,180)});
+   result.domainConfirmed++;
+  }
+  if(i%75===0)await new Promise(done=>setTimeout(done,250));
+ }
+ reconciliation.candidates=[...reconciliation.byDeal.values()];
+ result.status=result.failed?"partial_errors":requested.length>limit?"partial_limit":"complete";
+ console.log(JSON.stringify({component:"crm-orphan-deals",event:"qualifying-deal-email-audit",...result}));
+ return result;
+}
 // Read inbound/outbound CRM email activities attached to deals. This recovers
 // deals with generic titles that still contain a unique customer email domain.
 // Completeness is surfaced; partial scans must never imply no deal exists.
@@ -252,4 +304,4 @@ async function scanEmailActivities(deals,reconciliation,call){
  return out;
 }
 
-module.exports={fetchContactIndex,scanEmailActivities,reconcile,indexCompanies,indexContacts,resolveDeal,lookupDealEmailEvidence,stats,norm,stripped,emailCandidates,titleCandidates};
+module.exports={verifyRelevantDealEmails,fetchContactIndex,scanEmailActivities,reconcile,indexCompanies,indexContacts,resolveDeal,lookupDealEmailEvidence,stats,norm,stripped,emailCandidates,titleCandidates};
