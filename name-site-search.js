@@ -21,7 +21,8 @@ function eligible(c){
  });
 }
 function legalOrPhoneMatch(c,site){
- const content=String([site.meta.title,site.meta.description,...(site.meta.headings||[]),site.meta.body||""].join(" ")).toLowerCase().replace(/ё/g,"е");
+ const all=Array.isArray(site)?site:[site];
+ const content=String(all.flatMap(p=>[p.meta.title,p.meta.description,...(p.meta.headings||[]),p.meta.body||"",p.meta.identityText||""]).join(" ")).toLowerCase().replace(/ё/g,"е");
  const digits=s=>String(s||"").replace(/\D/g,"");
  const originalPhones=(c.crmPhones||[]).map(digits).filter(x=>x.length>=10).map(x=>x.slice(-10));
  const shownPhones=[...content.matchAll(/(?:\+7|7|8)[\s().-]*\d{3}[\s().-]*\d{3}[\s().-]*\d{2}[\s().-]*\d{2}/g)].map(x=>digits(x[0]).slice(-10));
@@ -61,13 +62,19 @@ async function search(name){
  return items;
 }
 async function inspect(c,hit){
- const site=await require("./website-profiler").fetchPage(hit.url);
+ const fetchSite=require("./website-profiler").fetchPage;
+ const site=await fetchSite(hit.url);
+ const pages=[site];
+ const relevant=(site.links||[]).filter(u=>["contact","kontakty","реквизит","rekvizit","requisit","about","o-kompanii","контакт"].some(k=>u.toLowerCase().includes(k))).slice(0,3);
+ for(const url of relevant){
+  try{const p=await fetchSite(url);if(p.url===site.url)pages.push(p)}catch{}
+ }
  const name=normalized(cleanName(c.name));
- const siteText=[site.meta.title,site.meta.description,...(site.meta.headings||[]),site.meta.body||""].join(" ");
+ const siteText=pages.flatMap(p=>[p.meta.title,p.meta.description,...(p.meta.headings||[]),p.meta.body||"",p.meta.identityText||""]).join(" ");
  const siteNormalized=normalized(siteText);
  const nameMatch=name.length>=9&&siteNormalized.includes(name);
  if(!nameMatch)return {url:site.url,title:hit.title,status:"other_company",note:"Название организации на сайте не совпало"};
- const proof=legalOrPhoneMatch(c,site);
+ const proof=legalOrPhoneMatch(c,pages);
  return {url:site.url,title:hit.title,status:proof.matched?"confirmed":"needs_review",
   note:proof.matched?proof.proof:"Совпадает название, но не телефон или ИНН — принадлежность сайта не подтверждена"};
 }
