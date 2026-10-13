@@ -210,6 +210,9 @@ function consolidate(companies){
   if(set.length<2)continue;
   const residual=set.filter(c=>!claimed.has(String(c.id)));
   if(residual.length<2)continue;
+  // Very short matching labels without shared corporate evidence are not enough
+  // to call separate CRM cards duplicates or burden the manual review queue.
+  if(identity(residual[0]).base.length<7)continue;
   if(review.some(g=>g.members.some(c=>residual.some(x=>String(x.id)===String(c.id)))))continue;
   review.push({id:"R-"+residual.map(c=>c.id).join("-"),
    name:display(residual[0].name).name,
