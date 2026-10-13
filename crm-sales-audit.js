@@ -6,7 +6,7 @@ const state={status:"not_started",totalDeals:0,scannedDeals:0,wonDeals:0,product
  shipmentStages:[],paymentStages:[],commercialStages:[],stageHistoryRecords:0,stageHistoryStatus:"not_started",
  shippedDeals:0,paidDeals:0,qualifiedDeals:0,companiesWithPurchaseEvidence:0,
  error:null,startedAt:null,finishedAt:null,refreshAfter:null};
-let summary=new Map(),busy=false;
+let summary=new Map(),busy=false,orphanDealIndex=new Map(),orphanMatchSummary={status:"not_started"};
 async function call(method,params){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix webhook not configured");
@@ -65,7 +65,7 @@ async function stages(){
 }
 async function dealPage(start){
  return call("crm.deal.list",{order:{ID:"ASC"},filter:{},
- select:["ID","COMPANY_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID","CURRENCY_ID"],start});
+ select:["ID","TITLE","CONTACT_ID","COMPANY_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID","CURRENCY_ID"],start});
 }
 async function allDeals(){
  const first=await dealPage(0);
@@ -164,11 +164,22 @@ async function run(companies){
   const stageMap=await stages();
   if(!stageMap.size)throw Error("Отгрузка и оплата не найдены среди названий стадий доступных воронок CRM");
   const deals=await allDeals();
+  const orphan=require("./crm-orphan-deals").reconcile(deals,companies);
+  orphanMatchSummary=orphan.stats;
+  orphanDealIndex=new Map();
+  for(const item of orphan.candidates){
+   if(!orphanDealIndex.has(item.companyId))orphanDealIndex.set(item.companyId,[]);
+   if(orphanDealIndex.get(item.companyId).length<120)orphanDealIndex.get(item.companyId).push(item);
+  }
+  console.log(JSON.stringify({component:"sales-audit",event:"unlinked-deal-reconciliation",...orphanMatchSummary}));
   const viaHistory=await stageHistory(stageMap,deals);
   const eligible=[];
   const accum=new Map();
   for(const d of deals.values()){
-   const companyId=String(d.COMPANY_ID||""),dealId=String(d.ID);
+   const dealId=String(d.ID);
+   const originalId=String(d.COMPANY_ID||"");
+   const match=orphan.byDeal.get(dealId);
+   const companyId=originalId&&originalId!=="0"?originalId:(match?.companyId||"");
    if(!allowed.has(companyId))continue;
    if(won(d))state.wonDeals++;
    const hist=viaHistory.get(dealId),current=stageMap.get(String(d.STAGE_ID||""));
@@ -195,7 +206,7 @@ async function run(companies){
      const fromHistory=(hist?.sources||[]).map(x=>({name:x.name,at:x.at||"",source:"history"}));
      const atCurrent=current?[{name:current.stageName,at:"",source:"current"}]:[];
      const stages=[...fromHistory,...atCurrent].filter((x,i,a)=>a.findIndex(y=>y.name===x.name)===i).slice(0,6);
-     rec.purchaseDeals.push({id:dealId,crmCompanyId:companyId,stages,productsStatus:"not_checked",documentStatus:"not_checked"});
+     rec.purchaseDeals.push({id:dealId,crmCompanyId:companyId,stages,linkSource:match?.linkSource||"direct_company",linkVerified:match?.linkVerified??true,productsStatus:"not_checked",documentStatus:"not_checked"});
    }
    eligible.push({id:dealId,companyId});
   }
@@ -250,13 +261,14 @@ async function run(companies){
  }finally{busy=false}
 }
 function get(id){
+ const linked=(orphanDealIndex.get(String(id))||[]).map(d=>({id:d.dealId,crmCompanyId:d.companyId,title:d.title,linkSource:d.linkSource,linkVerified:d.linkVerified,url:"https://topsense.bitrix24.ru/crm/deal/details/"+encodeURIComponent(d.dealId)+"/"}));
  const record=summary.get(String(id));
  if(record){
-  if(state.status==="complete")return record;
-  if(record.shipped||record.paid||record.qualified)return record;
-  return {...record,purchaseStatus:"НЕ ПОДТВЕРЖДЕНО — только успешная сделка (аудит продолжается)"};
+  if(state.status==="complete")return {...record,linkedDeals:linked};
+  if(record.shipped||record.paid||record.qualified)return {...record,linkedDeals:linked};
+  return {...record,linkedDeals:linked,purchaseStatus:"ПРОВЕРЯЕТСЯ — аудит сделки продолжается"};
  }
- return fallback(id);
+ return {...fallback(id),linkedDeals:linked};
 }
-function stats(){return {...state,companiesWithSuccessfulDeal:state.wonDeals};}
+function stats(){return {...state,orphanDeals:orphanMatchSummary,companiesWithSuccessfulDeal:state.wonDeals};}
 module.exports={run,get,stats};
