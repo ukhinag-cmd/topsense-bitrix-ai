@@ -206,7 +206,7 @@ async function verifyRelevantDealEmails(deals,reconciliation,stageMap,history,ca
     const items=new Map();
     for(const p of valid)for(const a of p.value.result){
      const bound=String(a.OWNER_TYPE_ID||"")==="2"&&String(a.OWNER_ID||"")===id||
-      (a.BINDINGS||[]).some(b=>String(b.OWNER_TYPE_ID)==="2"&&String(b.OWNER_ID)===id);
+      (Array.isArray(a.BINDINGS)?a.BINDINGS:[]).some(b=>String(b.OWNER_TYPE_ID)==="2"&&String(b.OWNER_ID)===id);
      if(bound)items.set(String(a.ID),a);
     }
     return {id,items:[...items.values()]};
