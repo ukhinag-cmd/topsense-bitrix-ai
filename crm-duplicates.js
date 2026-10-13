@@ -170,6 +170,27 @@ function consolidate(companies){
    reason:"Совпало название; ОПФ отличается или не указана — необходима ручная проверка",
    members:residual.map(links),count:residual.length});
  }
+
+ // One corporate domain can serve many legal entities (e.g. group companies).
+ // Surface such cases for the user's manual review, NEVER merge different names.
+ const sharedDomain=new Map();
+ for(const c of rows){
+  if(claimed.has(String(c.id)))continue;
+  for(const d of identityDomain(c)){
+   if(!sharedDomain.has(d))sharedDomain.set(d,[]);
+   sharedDomain.get(d).push(c);
+  }
+ }
+ for(const [d,items] of sharedDomain){
+  if(items.length<2)continue;
+  const cores=new Set(items.map(c=>identity(c).base));
+  if(cores.size<2)continue; // Same normalized company: handled above.
+  const unreviewed=items.filter(c=>!review.some(g=>g.members.some(m=>String(m.id)===String(c.id))));
+  if(unreviewed.length<2)continue;
+  review.push({id:"R-shared-domain-"+d,name:"Общий домен: "+d,
+   reason:"Один корпоративный домен у компаний с разными названиями. Это могут быть отдельные юрлица или карточки с ошибочным названием; контакты и сделки не объединены",
+   members:unreviewed.map(links),count:unreviewed.length,sharedDomain:d});
+ }
  const all=[...rows.filter(c=>!claimed.has(String(c.id))),...accepted]
   .sort((a,b)=>{
     const an=display(a.name).name,bn=display(b.name).name;
