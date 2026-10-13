@@ -35,11 +35,11 @@ function titleCandidates(title,idx){
   // A complete distinctive company name must form a phrase with word boundaries.
   if(full.includes(" "+n.key+" "))found.push(n);
  }
- // Generic substrings are never sufficient: require a unique most-specific name.
+ // Several distinct company names in one deal title = unsafe to assign to one.
  if(!found.length)return [];
- found.sort((a,b)=>b.key.length-a.key.length);
- const best=found[0].key.length;
- return [...new Set(found.filter(x=>x.key.length===best).map(x=>x.id))];
+ const unique=[...new Set(found.map(x=>x.key))];
+ if(unique.length!==1)return found.map(x=>x.id);
+ return [...new Set(found.map(x=>x.id))];
 }
 function emailCandidates(addresses,idx){
  const out=new Set();
