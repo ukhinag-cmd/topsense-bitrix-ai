@@ -41,12 +41,13 @@ function combineSale(members){
  const status=yes.length?"БЫЛА":negative?"НЕ БЫЛО":"ПРОВЕРЯЕТСЯ";
  const productNames=distinct(sales.flatMap(s=>s.purchaseItems||[]).map(blank));
  const purchaseDeals=members.flatMap(c=>(c.saleInfo?.purchaseDeals||[]).map(d=>({...d,crmCompanyId:String(c.id)}))).slice(0,55);
+ const linkedDeals=members.flatMap(c=>(c.saleInfo?.linkedDeals||[]).map(d=>({...d,sourceCrmCompanyId:String(c.id)}))).slice(0,140);
  const involved=yes;
  const usable=involved.length>0&&involved.every(s=>Number.isFinite(s.purchaseAmount)&&s.purchaseCurrency);
  const currencies=distinct(involved.map(s=>s.purchaseCurrency));
  const amount=usable&&currencies.length===1?involved.reduce((a,s)=>a+Number(s.purchaseAmount),0):null;
  return {purchaseStatus:status,shipped:sales.some(s=>Boolean(s.shipped)),paid:sales.some(s=>Boolean(s.paid)),
-  purchaseItems:productNames,purchaseDeals,purchaseAmount:amount,purchaseCurrency:amount===null?"":currencies[0],
+  purchaseItems:productNames,purchaseDeals,linkedDeals,purchaseAmount:amount,purchaseCurrency:amount===null?"":currencies[0],
   purchaseDealCount:sales.reduce((a,s)=>a+Number(s.purchaseDealCount||0),0),
   purchaseBasis:"Виртуально сведены отдельные CRM-карточки. Документальные суммы суммируются только если подтверждены для всех карточек с покупкой.",
   mergedCrmIds:members.map(x=>String(x.id)),
