@@ -124,10 +124,12 @@ function consolidate(companies){
   const siteConflict=verified.size>1;
   const emailOnlyConflict=explicitDomains.length>1&&set.every(c=>identifiers(c).length>0)
     &&!set.some(c=>c.verifiedOrgType);
-  const conf=siteConflict||emailOnlyConflict?"review":"exact_name_opf";
+  const legalInn=distinct(set.map(c=>String(c.finance2025?.inn||c.crmInn||"").replace(/\D/g,"")).filter(v=>v.length===10||v.length===12));
+  const legalConflict=legalInn.length>1;
+  const conf=siteConflict||emailOnlyConflict||legalConflict?"review":"exact_name_opf";
   if(conf==="review"){
    review.push({id:"R-"+set.map(c=>c.id).join("-"),
-    name:display(set[0].name).name,reason:"Название и ОПФ совпадают, но сайты или домены расходятся",
+    name:display(set[0].name).name,reason:legalConflict?"Название и ОПФ совпадают, но ИНН разные — юридические лица не объединены":"Название и ОПФ совпадают, но сайты или домены расходятся",
     members:set.map(links),count:set.length});
    continue;
   }
