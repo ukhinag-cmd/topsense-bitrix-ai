@@ -8,7 +8,7 @@ function parseAmount(input){
  if(typeof input==="number")return Number.isFinite(input)&&input>=0&&input<1e15?input:null;
  const raw=String(input??"").replace(/\u00a0|\u202f/g," ").trim();
  if(!raw||/не\s*извест|нет\s*данных/i.test(raw))return null;
- const clean=raw.replace(/[\s₽р]/g,"").replace(/руб(?:лей|ля|ль)?\.?/gi,"").replace(/,/g,".");
+ const clean=raw.replace(/руб(?:лей|ля|ль)?\.?/gi,"").replace(/[\s₽]/g,"").replace(/,/g,".");
  if(!/^\d{1,15}(?:\.\d{1,2})?$/.test(clean))return null;
  const n=Number(clean);return Number.isFinite(n)&&n>=0&&n<1e15?n:null;
 }
