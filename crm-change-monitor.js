@@ -74,7 +74,7 @@ async function refresh(){
    const rows=await bitrixList(method,{">=DATE_CREATE":BASELINE},fields);
    return rows.map(transform).filter(x=>ms(x.createdAt)>=ms(BASELINE));
   }));
-  const since=state.updatedAt?new Date(Math.max(ms(BASELINE),ms(state.startedAt)-20*60*1000)).toISOString():BASELINE;
+  const since=state.updatedAt?new Date(Math.max(ms(BASELINE),ms(state.updatedAt)-20*60*1000)).toISOString():BASELINE;
   // Modifications of pre-existing companies and contacts are also tracked.
   // On first startup, scan modifications only from the baseline. Future
   // passes use a bounded overlap; the old analytics record is not re-searched.
