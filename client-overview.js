@@ -119,7 +119,7 @@ function render(payload,requested,requestedType="",requestedPage=1){
   '<div class="panel"><div class="panelheading"><h2>Коммерческие направления</h2><span>6 дашбордов</span></div>'+
   '<div class="segments">'+b.groups.map((g,i)=>'<a class="segment" href="/contractors?section='+encodeURIComponent(g.name)+'"><span class="dot" style="background:'+colors[(i+1)%colors.length]+'"></span><span class="segment-main"><b>'+esc(g.name)+'</b><small>Назначен тип: '+nr(g.typed)+' / '+nr(g.value)+'</small></span><strong>'+nr(g.value)+'</strong><span class="arrow">↗</span></a>').join("")+'</div>'+
   '<p class="minor">Остальные / неразнесённые: '+nr(b.others)+'. Направления предварительные, если тип не подтверждён независимым источником.</p></div>'
- :'<div class="panel"><div class="panelheading"><h2>Виды организаций внутри направления</h2><span>45 согласованных типов</span></div>'+
+ :'<div class="panel"><div class="panelheading"><h2>Виды организаций внутри направления</h2><span>Расширяемый справочник типов</span></div>'+
   bars(b.typeRows,b.total,barColor,16,false,true)+'</div>';
  const typeBlock=section==="Обзор"?'<div class="panel"><div class="panelheading"><h2>Самые распространённые типы</h2><span>из расширяемого справочника</span></div>'+bars(b.typeRows,b.total,"#3186B6",13,false,true)+'</div>':
   '<div class="panel"><div class="panelheading"><h2>Происхождение данных</h2><span>Степень достоверности</span></div>'+bars(b.sources,b.total,barColor,8,true)+'</div>';
