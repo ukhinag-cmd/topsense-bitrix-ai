@@ -1,6 +1,6 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
-const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,paidControl:{}};
+const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,contactCache:null,contactSyncStartedAt:null,contactsFullAt:null,contactsIncrementalSupported:true,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,paidControl:{}};
 function analyticSeeds(){
  try{
    const arr=JSON.parse(String(process.env.TOPSENSE_ANALYTIC_SEED_JSON||"[]"));
@@ -221,22 +221,66 @@ function enqueuePreviousPilotSites(){
 // Fetch linked CRM contacts read-only. No contacts are sent to public source control.
 async function loadLinkedContacts(){
  if(state.contactsLoading||!process.env.BITRIX_WEBHOOK_BASE)return;
+ const startedAt=new Date().toISOString();
+ const fullDue=!state.contactCache||
+  !state.contactsFullAt||Date.now()-Date.parse(state.contactsFullAt)>24*60*60*1000||
+  !state.contactsIncrementalSupported;
+ // If modified-since filtering is unsupported, fall back to an hourly
+ // complete scan instead of hammering the 20k contact list.
+ if(fullDue&&!state.contactsIncrementalSupported&&state.contactsFullAt&&
+  Date.now()-Date.parse(state.contactsFullAt)<60*60*1000)return;
  state.contactsLoading=true;
+ let incremental=!fullDue;
  try{
-  const endpoint=new URL("crm.contact.list.json",String(process.env.BITRIX_WEBHOOK_BASE).replace(/\/?$/,"/"));
+  const base=String(process.env.BITRIX_WEBHOOK_BASE);
+  const endpoint=new URL("crm.contact.list.json",base.endsWith("/")?base:base+"/");
+  // The overlap is based on the PREVIOUS scan start, not finish:
+  // new contacts edited during a long scan will be captured again.
+  const since=incremental&&state.contactSyncStartedAt
+   ?new Date(Date.parse(state.contactSyncStartedAt)-5*60*1000).toISOString():"";
+  if(incremental&&!since)incremental=false;
   async function chunk(start){
-   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","NAME","LAST_NAME","COMPANY_ID","EMAIL"],start}),signal:AbortSignal.timeout(18000)});
-   const p=await r.json();if(!r.ok||p.error||!Array.isArray(p.result))throw Error(p.error||"CRM contacts read error");return p;
+   for(let retry=0;retry<2;retry++){
+    try{
+     const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({order:{ID:"ASC"},filter:since&&incremental?{">DATE_MODIFY":since}:{},
+       select:["ID","NAME","LAST_NAME","COMPANY_ID","EMAIL","DATE_MODIFY"],start}),
+      signal:AbortSignal.timeout(20000)});
+     const p=await r.json();
+     if(!r.ok||p.error||!Array.isArray(p.result)){
+      const problem=new Error("CRM contacts read error");
+      problem.isProviderQueryError=Boolean(p.error);throw problem;
+     }
+     return p;
+    }catch(e){
+     if(e.isProviderQueryError){
+      if(incremental)state.contactsIncrementalSupported=false;
+      throw e;
+     }
+     if(retry)throw e;
+     await new Promise(resolve=>setTimeout(resolve,800));
+    }
+   }
   }
-  const first=await chunk(0),all=[...first.result],total=Number(first.total||0),size=Math.max(1,first.result.length);
+  const first=await chunk(0),changed=[...first.result],total=Number(first.total||first.result.length),size=Math.max(1,first.result.length);
   if(total>80000)throw Error("Contacts safety limit");
   if(total>size){
    const starts=[];for(let i=size;i<total;i+=size)starts.push(i);
-   for(let j=0;j<starts.length;j+=5){
-    const group=await Promise.all(starts.slice(j,j+5).map(chunk));
-    group.forEach(g=>all.push(...g.result));
+   for(let j=0;j<starts.length;j+=4){
+    const group=await Promise.all(starts.slice(j,j+4).map(chunk));
+    group.forEach(g=>changed.push(...g.result));
    }
+  }else if(first.next!=null){
+   let next=first.next,n=0;
+   while(next!=null&&n++<1600){
+    const page=await chunk(next);changed.push(...page.result);next=page.next;
+   }
+   if(next!=null)throw Error("Contact pagination incomplete");
   }
+  const cache=incremental?new Map(state.contactCache):new Map();
+  for(const c of changed)if(c&&c.ID)cache.set(String(c.ID),c);
+  if(!incremental&&cache.size<total)throw Error("Incomplete contact snapshot "+cache.size+"/"+total);
+  const all=[...cache.values()];
   const by=new Map();
   for(const c of all){
    const id=String(c.COMPANY_ID||"");if(!id||id==="0")continue;
@@ -281,7 +325,13 @@ async function loadLinkedContacts(){
   if(websiteCandidates.length)require("./website-profiler").enqueue(websiteCandidates);
   console.log(JSON.stringify({component:"client-segments",event:"unlinked-contact-domain-candidates",
    unlinkedContacts:orphanContacts.length,siteCandidates:websiteCandidates.length}));
-  state.linkedContacts=by;state.contactsAt=new Date().toISOString();
+  state.linkedContacts=by;
+  state.contactCache=cache;
+  state.contactSyncStartedAt=startedAt;
+  if(!incremental)state.contactsFullAt=new Date().toISOString();
+  state.contactsAt=new Date().toISOString();
+  console.log(JSON.stringify({component:"client-segments",event:"contact-sync",
+   mode:incremental?"delta":"full",changed:changed.length,total:all.length,linkedCompanies:by.size}));
   enqueueMissingSiteNameSearch();
   enqueueLinkedContactSites();
   console.log(JSON.stringify({component:"client-segments",event:"linked-contacts-loaded",contacts:all.length,companies:by.size}));
@@ -460,12 +510,14 @@ function route(req,res,pathname,known){
    write(res,401,{error:"Авторизация необходима"});return true;
  }
  if(req.method!=="GET"){write(res,405,{error:"Read-only"});return true}
- if(!state.refreshing&&(!state.updatedAt||Date.now()-Date.parse(state.updatedAt)>30*60*1000))refresh().catch(()=>{});
+ if(!state.refreshing&&(!state.updatedAt||Date.now()-Date.parse(state.updatedAt)>10*60*1000))refresh().catch(()=>{});
  if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
- if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
+ if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>15*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
  if(pathname==="/contractors/leads"){write(res,200,require("./client-leads").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/changes"){write(res,200,require("./crm-change-monitor").html(),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/changes/api"){write(res,200,require("./crm-change-monitor").snapshot());return true}
  if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/duplicates.csv"){write(res,200,require("./client-duplicates").csv(data(known)),"text/csv; charset=utf-8",{"content-disposition":"attachment; filename=TOPSENSE_CRM_duplicates.csv"});return true}
  if(pathname==="/contractors/duplicates"){write(res,200,require("./client-duplicates").html(data(known)),"text/html; charset=utf-8");return true}
@@ -513,4 +565,13 @@ setTimeout(() => loadPilot().catch(() => {}), 1500);
 setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
 setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 12000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
+// Incremental CRM monitor: no internet research when contact/deal changes.
+setTimeout(()=>require("./crm-change-monitor").refresh().catch(()=>{}),15000);
+setInterval(()=>require("./crm-change-monitor").refresh().catch(()=>{}),10*60*1000);
+setInterval(()=>{
+ if(!state.refreshing&&(!state.updatedAt||Date.now()-Date.parse(state.updatedAt)>=10*60*1000))refresh().catch(()=>{});
+},10*60*1000);
+setInterval(()=>{
+ if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>=15*60*1000))loadLinkedContacts().catch(()=>{});
+},15*60*1000);
 module.exports={route,refresh,data};
