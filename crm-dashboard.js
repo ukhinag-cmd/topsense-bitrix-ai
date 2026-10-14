@@ -310,6 +310,11 @@ async function loadPilot(){
     if(item.companyId&&item.recordType==="topsense-pilot-result")x.set(String(item.companyId),item);
   }
   const v4=entries.filter(e=>/^pilot:v4:result:/.test(String(e.key||""))).map(e=>e.payload||{});
+  const taxonomy=require("./client-taxonomy");
+  let addedTypes=0;
+  for(const row of v4)if(taxonomy.registerFromPilot(row))addedTypes++;
+  if(addedTypes)console.log(JSON.stringify({component:"client-taxonomy",
+   event:"new-subtypes-restored",count:addedTypes,total:taxonomy.stats().total}));
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
   state.paidControl={
@@ -334,7 +339,7 @@ function commercialFromOrgType(t){
  if(x.family==="Подрядчики")return "Подрядчики";
  if(x.family==="Торговля")return "Партнёрские продажи";
  if(x.family==="Сервис")return "Сервис и метрология";
- if(x.family==="Эксплуатация")return "Конечные потребители";
+ if(x.family==="Эксплуатация"||x.family==="Отраслевые производства")return "Конечные потребители";
  if(x.family==="Смежные")return "Смежные организации";
  if(x.family==="Производители")return t.includes("газоаналитических")?"Конкуренты":"Проектные продажи";
  return "";
@@ -370,7 +375,7 @@ function data(known){
   if(!r){
     if(!ai)return c;
     const orgType=String(ai.primaryType||"");
-    const validType=ORG_TYPES.some(x=>x.name===orgType)&&ai.status==="classified";
+    const validType=require("./client-taxonomy").known(orgType)&&ai.status==="classified";
     return {...c,
       category:validType?commercialFromOrgType(orgType)||c.category:c.category,
       type:validType?orgType:"",
@@ -425,7 +430,7 @@ function data(known){
   aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,
   aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,
   aiLastChecked:state.pilotUpdatedAt,paidClassification:state.paidControl,contactsAt:state.contactsAt,counts,organizationTypes:ORG_TYPES,
-  organizationTypeCount:ORG_TYPES.length,
+  organizationTypeCount:ORG_TYPES.length,taxonomy:require("./client-taxonomy").stats(),
   siteCrawl:require("./website-profiler").stats(),
   researchCompletion:finalization.stats(),
   incomingLeads:require("./crm-lead-inbox").view(virtual.companies),
@@ -487,7 +492,7 @@ function coverageLog(){
  try{
   const snap=data(()=>[]);
   const companyList=snap.companies||[];
-  const typed=companyList.filter(x=>ORG_TYPES.some(t=>t.name===x.organizationType));
+  const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   const distinctTypes=new Set(typed.map(x=>x.organizationType));
   const sourceCounts={};
   for(const c of typed){
