@@ -67,7 +67,7 @@ function initialHtml(payload){
      items.map(t=>'<div style="font-size:11px;color:#a9c5d1;padding:7px 10px 8px 17px;line-height:1.35" title="'+escapeHtml(t.description)+'">'+escapeHtml(t.name)+'</div>').join("")+'</details>';
  }).join("");
  text=text.replace('<nav id="nav"></nav>',
-   '<nav id="nav"></nav><div class="subbrand" style="margin-top:24px">45 типов организаций · полный справочник</div><div style="padding-bottom:20px">'+groupHtml+'</div>');
+   '<nav id="nav"></nav><div class="subbrand" style="margin-top:24px">Расширяемый справочник типов организаций</div><div style="padding-bottom:20px">'+groupHtml+'</div>');
  text=text.replace('const categories=["Обзор","Подрядчики","Предприятия","Интеграторы и проекты","Дистрибьюторы","Сервис и метрология","Конкуренты","Не определены"];',
    'const categories=["Обзор","Подрядчики","Конечные потребители","Проектные продажи","Партнёрские продажи","Сервис и метрология","Конкуренты","Смежные организации","Не определены"];');
  text=text.replace('Отдельная аналитическая база уже содержит 49 подтверждённых карточек, но пока ещё не синхронизирована с этим веб-реестром. Здесь — прямое чтение Битрикс24 и подтверждения действующего реестра подрядчиков.',
@@ -486,7 +486,7 @@ function route(req,res,pathname,known){
  write(res,404,{error:"Not found"});return true;
 }
 // Log only aggregate classification coverage; never log customer names, URLs or email.
-// A crawler queue being empty does not mean all 45 client types were assigned.
+// An empty crawl queue does not prove every company has a subtype.
 function coverageLog(){
  if(!state.companies.length)return;
  try{
