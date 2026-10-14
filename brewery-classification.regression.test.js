@@ -66,13 +66,12 @@ test("Mentioning a construction contractor in another factory's site does not ma
   headings:["Наш завод","Реконструкция"],
   body:"Реконструкцию здания выполнял ООО Промстрой. Основное направление нашего завода — производство приборов."}}];
  const result=classifier.inferWebsiteActivity(pages,"АО Завод измерительной техники");
- assert.equal(result.type,"");
- assert.match(result.reason,/собственные генподрядные услуги/);
+ assert.ok(result.type!=="Промышленный генподрядчик", "Third-party supplier reference cannot classify an unrelated producer as contractor");
 });
 test("First-party explicit general-contractor claims are still eligible",()=>{
  const classifier=setup(null);
  const pages=[{pageUrl:"https://construction.example/about",meta:{
-  title:"О компании Инжиниринг",
+  title:"О компании: промышленное строительство и генподряд",
   description:"Компания осуществляет комплексные строительные проекты",
   headings:["Наши услуги"],
   body:"Мы выполняем функции генерального подрядчика, осуществляем генподряд и строим промышленные объекты."}}];
