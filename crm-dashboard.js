@@ -302,7 +302,7 @@ async function loadPilot(){
   const d=await r.json();
   if(!r.ok||d.ok===false)throw Error("private AI store read error");
   const entries=Array.isArray(d.rows)?d.rows:[];
-  require("./client-finalization").ingest(entries);
+  // Restore confirmed types before replaying completion locks for those types.
   const x=new Map();
   for(const e of entries){
     if(!/^pilot:v[1234]:result:/.test(String(e.key||"")))continue;
@@ -315,6 +315,7 @@ async function loadPilot(){
   for(const row of v4)if(taxonomy.registerFromPilot(row))addedTypes++;
   if(addedTypes)console.log(JSON.stringify({component:"client-taxonomy",
    event:"new-subtypes-restored",count:addedTypes,total:taxonomy.stats().total}));
+  require("./client-finalization").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
   state.paidControl={
