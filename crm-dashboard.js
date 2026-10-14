@@ -302,6 +302,7 @@ async function loadPilot(){
   const d=await r.json();
   if(!r.ok||d.ok===false)throw Error("private AI store read error");
   const entries=Array.isArray(d.rows)?d.rows:[];
+  require("./client-finalization").ingest(entries);
   const x=new Map();
   for(const e of entries){
     if(!/^pilot:v[1234]:result:/.test(String(e.key||"")))continue;
@@ -389,8 +390,17 @@ function data(known){
   else if(/завод|комбинат|потребител|эксплуатир|теплоснабж/i.test(type))group="Конечные потребители";
   return {...c,category:group,type,organizationType:type,verificationStatus:r.verificationStatus,siteVerified:String(r.website||""),strategy:String(r.strategicReason||"").slice(0,260),verification:"Проверено по реестру подрядчиков"};
  });
- const typedRecords=require("./client-type-inference").apply(records);
+ const finalization=require("./client-finalization");
+ const typedRecords=require("./client-type-inference").apply(records).map(c=>finalization.apply(c));
  const virtual=require("./crm-duplicates").consolidate(typedRecords);
+ // A virtual duplicate is never treated as independently proven identity.
+ const duplicateIds=new Set([...virtual.duplicates,...virtual.review]
+  .flatMap(group=>(group.members||group.mergedCrmCards||[]).map(m=>String(m.id))));
+ const salesStatus=require("./crm-sales-audit").stats().status;
+ for(const c of typedRecords){
+  if(finalization.isComplete(c.id))continue;
+  finalization.queue(c,{contactsAt:state.contactsAt,salesStatus,duplicateIds});
+ }
 
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  virtual.companies.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
@@ -414,6 +424,7 @@ function data(known){
   aiLastChecked:state.pilotUpdatedAt,paidClassification:state.paidControl,contactsAt:state.contactsAt,counts,organizationTypes:ORG_TYPES,
   organizationTypeCount:ORG_TYPES.length,
   siteCrawl:require("./website-profiler").stats(),
+  researchCompletion:finalization.stats(),
   mailAudit:require("./crm-mail-evidence").stats(),
   salesAudit:require("./crm-sales-audit").stats(),
   nameSiteSearch:require("./name-site-search").stats(),
