@@ -391,7 +391,9 @@ function data(known){
   return {...c,category:group,type,organizationType:type,verificationStatus:r.verificationStatus,siteVerified:String(r.website||""),strategy:String(r.strategicReason||"").slice(0,260),verification:"Проверено по реестру подрядчиков"};
  });
  const finalization=require("./client-finalization");
- const typedRecords=require("./client-type-inference").apply(records).map(c=>finalization.apply(c));
+ const requisites=require("./company-requisites"),finances=require("./financial-2025");
+ const typedRecords=require("./client-type-inference").apply(records)
+  .map(c=>finalization.apply({...c,finance2025:finances.withRequisite(c.finance2025,requisites.get(c.id))}));
  const virtual=require("./crm-duplicates").consolidate(typedRecords);
  // A virtual duplicate is never treated as independently proven identity.
  const duplicateIds=new Set([...virtual.duplicates,...virtual.review]
@@ -413,6 +415,7 @@ function data(known){
   sourceCrmCount:state.rawCrmTotal,
   virtualCustomerTotal:virtual.stats.customerCardCount,
   financial2025Coverage:virtual.companies.reduce((a,c)=>{const k=c.finance2025?.status||"no_data";a[k]=(a[k]||0)+1;return a},{}),
+  requisites:requisites.stats(),
   confirmed:virtual.companies.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,
   relatedGroups:virtual.stats.groupedCount,
   duplicateStats:virtual.stats,
@@ -513,5 +516,7 @@ setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
 setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
 setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 12000);
+setTimeout(() => require("./company-requisites").refresh().catch(()=>{}), 28000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
+setInterval(() => require("./company-requisites").refresh().catch(()=>{}), 24*60*60*1000);
 module.exports={route,refresh,data};
