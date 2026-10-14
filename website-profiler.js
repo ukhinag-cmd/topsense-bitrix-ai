@@ -222,7 +222,9 @@ function enqueue(companies){
 function get(id){return profiles.get(String(id))||{status:"site_pending"}}
 function stats(){
  const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;
- return {queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
+ return {restorationComplete:restored,restorationInProgress:restoring,
+  classificationSnapshotProvisional:!restored||queue.length>0||active>0,
+  queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
   restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
 }
 module.exports={enqueue,get,stats,fetchPage};
