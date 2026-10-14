@@ -22,7 +22,9 @@ function companyWebsiteDetails(c){
  const strong=new Set(["site_profiled","site_read_no_clear_type","official_site_verified","research_completed"]);
  const profiled=reviewedWebsiteUrl(c?.siteProfileUrl);
  const declared=reviewedWebsiteUrl(c?.siteVerified);
- const candidate=reviewedWebsiteUrl(c?.siteCandidate)||reviewedWebsiteUrl(c?.corporateDomain);
+ // Email domain can belong to an entire holding: never offer the shared root
+ // as this distinct legal entity's website without independent proof.
+ const candidate=reviewedWebsiteUrl(c?.siteCandidate);
  const verified=(strong.has(String(c?.siteStatus||""))&&Boolean(profiled||declared))||
   (c?.verificationStatus==="confirmed"&&Boolean(declared));
  const url=verified?(profiled||declared):(profiled||declared||candidate);
@@ -95,6 +97,7 @@ function render(payload,requested,requestedType="",requestedPage=1){
   return '<article class="companyCard"><div class="companyTitle">'+
    (site?'<a class="companyWebsite" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer" title="'+(website.verified?"Перейти на изученный сайт":"Сайт-кандидат: принадлежность компании не подтверждена")+'">'+companyTitle+' ↗</a>':companyTitle)+'</div>'+
    '<div class="companyMeta">CRM '+esc(ids.join(", "))+' · '+esc(c.organizationType||c.industryDescription||"Тип требует проверки")+'</div>'+
+   (c.corporateGroup?'<div class="companyMeta">Группа: '+esc(c.corporateGroup)+' · отдельное юридическое лицо</div>':"")+
    '<div class="companyMeta">'+(bought?"Подтверждена покупка по стадиям":"Покупка: не подтверждена / идёт проверка")+
    ' · '+(website.verified?"Сайт изучен":website.candidate?"Сайт-кандидат · требует подтверждения":"Сайт не найден")+'</div>'+   (site?'<div class="companyMeta websiteLine">Сайт: <a class="websiteAddress" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer">'+esc(website.domain)+' ↗</a></div>':"")+
    '<a href="'+esc(c.crmUrl||"")+'" target="_blank" rel="noopener noreferrer">Открыть в Bitrix24 ↗</a></article>';
