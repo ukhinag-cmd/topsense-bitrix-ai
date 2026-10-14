@@ -327,11 +327,15 @@ async function loadPilot(){
   if(!r.ok||d.ok===false)throw Error("private AI store read error");
   const entries=Array.isArray(d.rows)?d.rows:[];
   // Restore confirmed types before replaying completion locks for those types.
-  const x=new Map();
+  const x=new Map(),versions=new Map();
   for(const e of entries){
-    if(!/^pilot:v[1234]:result:/.test(String(e.key||"")))continue;
-    const item=e.payload||{};
-    if(item.companyId&&item.recordType==="topsense-pilot-result")x.set(String(item.companyId),item);
+    const match=String(e.key||"").match(/^pilot:v([1234]):result:([0-9]+)$/);
+    if(!match)continue;
+    const item=e.payload||{},id=String(item.companyId||"");
+    if(id!==match[2]||item.recordType!=="topsense-pilot-result")continue;
+    const version=Number(match[1]);
+    if((versions.get(id)||0)>version)continue;
+    versions.set(id,version);x.set(id,item);
   }
   const v4=entries.filter(e=>/^pilot:v4:result:/.test(String(e.key||""))).map(e=>e.payload||{});
   const taxonomy=require("./client-taxonomy");
