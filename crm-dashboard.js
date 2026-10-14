@@ -503,6 +503,8 @@ function route(req,res,pathname,known){
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>15*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
  if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/changes"){write(res,200,require("./crm-change-monitor").html(),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/changes/api"){write(res,200,require("./crm-change-monitor").snapshot());return true}
  if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/duplicates.csv"){write(res,200,require("./client-duplicates").csv(data(known)),"text/csv; charset=utf-8",{"content-disposition":"attachment; filename=TOPSENSE_CRM_duplicates.csv"});return true}
  if(pathname==="/contractors/duplicates"){write(res,200,require("./client-duplicates").html(data(known)),"text/html; charset=utf-8");return true}
@@ -558,4 +560,8 @@ setInterval(()=>{
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>=15*60*1000))
   loadLinkedContacts().catch(()=>{});
 },15*60*1000);
+// Monitor genuinely new and modified CRM entities independently of web/AI enrichment.
+// Company research is never re-triggered merely because a contact changes.
+setTimeout(()=>require("./crm-change-monitor").refresh().catch(()=>{}),15000);
+setInterval(()=>require("./crm-change-monitor").refresh().catch(()=>{}),10*60*1000);
 module.exports={route,refresh,data};
