@@ -63,8 +63,12 @@ function criteria(c,context={}){
  if(!(Array.isArray(c?.contactEmails)&&c.contactEmails.length>0) &&
     !(Array.isArray(c?.contactNames)&&c.contactNames.length>0))missing.push("linked_contacts_missing");
  // "No purchase" is a verified outcome ONLY after full stage/history audit.
- if(context.salesStatus!=="complete")missing.push("sales_audit_incomplete");
- if(!/^(?:БЫЛА|НЕ БЫЛО)/.test(string(c?.saleInfo?.purchaseStatus)))missing.push("purchase_status_unverified");
+ const purchase=string(c?.saleInfo?.purchaseStatus);
+ // Positive stage/document evidence can be confirmed individually even when
+ // global orphan-deal audit is still partial. A negative requires full audit.
+ const hasPositive=/^БЫЛА/.test(purchase);
+ const hasNegative=/^НЕ БЫЛО/.test(purchase)&&context.salesStatus==="complete";
+ if(!hasPositive&&!hasNegative)missing.push("purchase_status_unverified");
  if(context.duplicateIds?.has(string(c?.id)))missing.push("duplicate_identity_pending");
  // An AI-only verdict is preliminary even if an AI declared site ownership.
  if(/^AI\s*[—-]/.test(string(c?.verification))||c?.verification==="Предварительная классификация")
