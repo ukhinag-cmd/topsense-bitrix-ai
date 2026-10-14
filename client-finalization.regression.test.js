@@ -22,6 +22,7 @@ test("Cannot finalize based on name-only, missing site, missing contact, unknown
  assert.equal(criteria({...c,siteStatus:"site_pending"},context()).complete,false);
  assert.equal(criteria({...c,contactEmails:[],contactNames:[]},context()).complete,false);
  assert.equal(criteria(c,{...context(),salesStatus:"partial"}).complete,false);
+ assert.equal(criteria({...c,saleInfo:{purchaseStatus:"БЫЛА",paid:true}},{...context(),salesStatus:"partial"}).complete,true);
  assert.equal(criteria({...c,saleInfo:{purchaseStatus:"ПРОВЕРЯЕТСЯ"}},context()).complete,false);
  assert.equal(criteria(c,{...context(),duplicateIds:new Set(["501"])}).complete,false);
  assert.equal(criteria({...c,verification:"AI — требует проверки"},context()).complete,false);
