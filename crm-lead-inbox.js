@@ -94,9 +94,21 @@ async function refresh(){
   state.error=[leads,deals].filter(x=>x.status==="rejected")
    .map(x=>"CRM read unavailable: "+str(x.reason.message||x.reason).slice(0,80)).join("; ")||contactLinkError||null;
   state.updatedAt=new Date().toISOString();
-  console.log(JSON.stringify({component:"lead-inbox",event:"read-only-refreshed",inbound:state.total,
-   crmLeads:leads.status==="fulfilled"?leads.value.length:0,
-   incomingDeals:deals.status==="fulfilled"?deals.value.length:0,status:state.status}));
+  // Observability only: distinguish actual CRM leads from deals in category 0,
+  // count other pipelines separately, and never imply that an unlinked record
+  // is a genuine customer request merely because it exists in Bitrix.
+  const possibleServiceMail=state.items.filter(l=>
+   /undeliverable|delivery status notification|mail delivery failed|ошибка доставки|сбой доставки|рассылка|спам|security alert|password reset/i.test(l.title)).length;
+  console.log(JSON.stringify({component:"lead-inbox",event:"read-only-refreshed",
+   since:state.history.since,inbound:state.total,
+   crmLeads:state.history.leads,
+   incomingDeals:state.history.incomingDeals,
+   otherPipelineDeals:state.history.otherPipelineDeals,
+   withoutCompanyDirect:state.history.withoutCompanyDirect,
+   contactLinksChecked:state.history.contactLinksChecked,
+   contactLinkError:state.history.contactLinkError,
+   possibleServiceMail,leadStatus:state.leadStatus,dealStatus:state.dealStatus,
+   crmError:state.error||"",status:state.status}));
  }catch(e){
   state.status=state.updatedAt?"stale":"unavailable";state.error=str(e.message||e).slice(0,150);
   console.warn(JSON.stringify({component:"lead-inbox",event:"read-only-unavailable",reason:state.error}));
