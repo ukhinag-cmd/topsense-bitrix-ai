@@ -1,0 +1,24 @@
+name: TOP-SENSE analytics keepalive
+on:
+  schedule:
+    - cron: '7,17,27,37,47,57 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: topsense-keepalive
+  cancel-in-progress: true
+jobs:
+  wake-dashboard:
+    runs-on: ubuntu-slim
+    timeout-minutes: 2
+    steps:
+      - name: Keep protected Render analytics available without CRM writes
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            --max-time 75 \
+            --retry 2 \
+            --retry-delay 5 \
+            --output /dev/null \
+            'https://topsense-bitrix-ai.onrender.com/health'
