@@ -97,9 +97,9 @@ function ownIndustrialContractingEvidence(site){
  if(!site||site.status!=="site_profiled")return false;
  const headings=(site.siteHeadings||[]).map(x=>String(x||"").toLowerCase().replace(/ё/g,"е"));
  const words=headings.join(" ");
- const construction=/капитальн\w*\s+строительств|строительств\w*\s+объектов/i.test(words);
- const installation=/монтажн\w*\s+работ|строительно.?монтажн\w*\s+работ/i.test(words);
- const sector=/теплоизоляционн\w*\s+работ|антикоррозионн\w*\s+(?:обработк|работ)|нефтехим|нефтепереработ|опо/i.test(words);
+ const construction=/капитальн[а-яё]*\s+строительств|строительств[а-яё]*\s+объектов/i.test(words);
+ const installation=/монтажн[а-яё]*\s+работ|строительно.?монтажн[а-яё]*\s+работ/i.test(words);
+ const sector=/теплоизоляционн[а-яё]*\s+работ|антикоррозионн[а-яё]*\s+(?:обработк|работ)|нефтехим|нефтепереработ|опо/i.test(words);
  return construction&&installation&&sector;
 }
 function firstPartyGeneralContractorClaim(core,name){
