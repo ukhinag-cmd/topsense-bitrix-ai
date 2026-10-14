@@ -178,7 +178,7 @@ async function loop(){
 }
 function enqueue(items){
  for(const c of items){
-  const id=String(c.id||"");if(!id||results.has(id)||pending.has(id)||companies.size>=MAX_COMPANIES)continue;
+  const id=String(c.id||"");if(!id||require("./client-finalization").isComplete(id)||results.has(id)||pending.has(id)||companies.size>=MAX_COMPANIES)continue;
   companies.set(id,c);pending.add(id);queue.push(c);
  }
  setTimeout(()=>loop().catch(()=>{running=false}),50);
