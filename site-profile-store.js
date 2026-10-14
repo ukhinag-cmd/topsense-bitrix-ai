@@ -12,9 +12,17 @@ function configured(){
  return Boolean(String(process.env.GOOGLE_SHEET_STORE_URL||"").trim()&&String(process.env.GOOGLE_SHEET_STORE_SECRET||"").trim());
 }
 function inputUrl(c){
- if(c&&c.siteCandidate)return c.siteCandidate;
- if(c&&/^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$/i.test(c.corporateDomain||""))return "https://"+c.corporateDomain;
- return "";
+ if(!c)return "";
+ const individuallyIdentified=Boolean(c.verifiedOrgType)||
+  ["Официальный сайт, проверенный по юридическим данным",
+   "Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены",
+   "Поиск по названию — подтверждено независимыми реквизитами",
+   "Сайт из подписи входящего письма",
+   "Сайт из карточки компании, присланной письмом"].includes(c.siteSource);
+ if(individuallyIdentified&&c.siteCandidate)return c.siteCandidate;
+ // A company's own corporate mail domain outranks an unverified CRM URL.
+ if(/^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$/i.test(c.corporateDomain||""))return "https://"+c.corporateDomain;
+ return c.siteCandidate||"";
 }
 function fingerprint(c){
  let host="";
