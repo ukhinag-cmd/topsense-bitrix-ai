@@ -1,5 +1,5 @@
 "use strict";
-const valid=new Set(require("./company-types").types.map(x=>x.name));
+const valid={has:require("./client-taxonomy").known};
 const rules=[
 ["Нефтеперерабатывающий завод",/(?:нпз|нефтепереработ|нефтеперерабатывающ|новойл|нефтехимпереработ)/i],
 ["Газоперерабатывающее предприятие",/(?:гпз|газоперерабатывающ|газопереработк|гелиевый завод)/i],
@@ -108,8 +108,22 @@ function inferWebsiteActivity(pages,companyName){
   siteTitle:data.map(x=>x.header).join(" "),
   siteDescription:chosen.map(x=>x.body.slice(0,400)).join(" "),
   siteHeadings:data.map(x=>x.header)
- }))return {type:"",reason:"Собственное производство напитков/солода; в утверждённых 45 типах отдельного пищевого подтипа нет"};
- const gas=/газоаналитическ|газоанализатор|газоанализ\w*|газосигнализ|течеискател/i.test(core);
+ }))return {type:"Производство напитков",reason:"Собственное производство напитков и солода подтверждено профильными разделами сайта"};
+ // Product specialization is applied only when the company's own
+ // manufacturing is described, not when a dealer sells third-party goods.
+ const manufacturing=/собственн\w*\s+производств|мы\s+производим|мы\s+выпускаем|наш[ао]\s+производств|предприяти[ея]\s+производит|завод\s+производит|производител|производств[оае]\s+(?:удобрен|бытов|сигарет|табачн)/i.test(core);
+ const shopOnly=/интернет-магазин|розничн\w*\s+магазин|магазин\s+товаров/i.test(core)&&
+   !/собственн\w*\s+производств|завод\s+производит|мы\s+выпускаем/i.test(core);
+ if(manufacturing&&!shopOnly){
+  const sectors=[
+   ["Производство бытовой химии",/бытов\w*\s+хим|моющ\w*\s+средств|чистящ\w*\s+средств|стиральн\w*\s+порошк/i],
+   ["Производство табачных изделий",/табачн\w*\s+(?:издел|продукц|фабрик)|сигарет|производств\w*\s+табака/i],
+   ["Производство удобрений",/производств\w*\s+(?:минеральн\w*\s+|органическ\w*\s+)?удобрен|минеральн\w*\s+удобрен|карбамид|аммиачн\w*\s+селитр/i]
+  ].filter(x=>x[1].test(core));
+  if(sectors.length===1)return {type:sectors[0][0],
+   reason:"Собственное отраслевое производство подтверждено материалами сайта"};
+ }
+  const gas=/газоаналитическ|газоанализатор|газоанализ\w*|газосигнализ|течеискател/i.test(core);
  if(gas){
   const dealer=/(?:явля[а-я]{0,12}\s+(?:официальн[а-я]{0,10}\s+)?дилер[а-я]*|официальн[а-я]*\s+дилер[а-я]*|дилер[а-я]*\s+(?:всех|прибор|производител|оборудован))/i.test(core);
   const manufacturer=/(?:собственн[а-я]*\s+(?:производств[а-я]*|сборк[а-я]*)|разрабатываем\s+и\s+производим|производител[а-я]*\s+газоаналитическ|производств[а-я]*\s+(?:газоанализатор|газоаналитическ)|(?:нпп|научно.производственн).*газоаналит)/i.test(core+" "+name);
@@ -167,10 +181,10 @@ function apply(records){
    const correctedSite=site&&["site_profiled","site_read_no_clear_type"].includes(site.status)?site.url:"";
    return {...c,siteStatus:correctedSite?"site_profiled":c.siteStatus||"site_pending",
     siteProfileUrl:correctedSite||c.siteVerified||"",siteVerified:correctedSite||c.siteVerified||"",
-    organizationType:"",type:"",proposedType:"",
+    organizationType:"Производство напитков",type:"Производство напитков",proposedType:"",
     category:"Конечные потребители",
     industryDescription:"Производство пива, напитков и солода",
-    segmentConfidence:"Производственная деятельность подтверждена; узкий тип отсутствует в справочнике",
+    segmentConfidence:"Производственная деятельность подтверждена; тип включён в расширяемый справочник",
     segmentSource:"Официальный сайт предприятия и ранее сохранённый AI-профиль",
     verification:"Исправлена ошибочная классификация подрядчика — не является генподрядчиком по найденным сведениям"};
   }
