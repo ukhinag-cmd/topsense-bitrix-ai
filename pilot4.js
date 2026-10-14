@@ -336,6 +336,31 @@ async function runPilot(){
      let answer;
      try{
       answer=await classify(company,evidence,searchMode);
+     }catch(e){
+      // The provider can return incomplete JSON after billing. Do NOT
+      // repeat the charged API request. Mark this CRM ID and continue.
+      errors++;
+      const detail=String(e.message||e).slice(0,170);
+      const fatal=/OpenAI (?:400|401|403|404|429)\b|insufficient.quota|billing|invalid.api.key|rate.limit|API key missing/i.test(detail);
+      try{
+       await upsert(key,{recordType:"topsense-pilot-result",companyId:Number(id),
+        status:"api_or_storage_error",error:detail,possibleChargeUsd:reserveUsd,
+        evidenceLevel:"unverified_due_to_api_error",verifiedAt:iso()});
+      }catch(saveError){
+       stop=true;resultStatus="checkpoint_error";
+       log("checkpoint-error",{id,stage:"failed-model-outcome",error:String(saveError.message||saveError).slice(0,110)});
+       break;
+      }
+      processed++;
+      log("classification-error-recorded",{id,error:detail,fatal});
+      if(fatal||errors>=8){
+       stop=true;resultStatus=fatal?"provider_error":"too_many_model_errors";
+       break;
+      }
+      await pause(150);
+      continue;
+     }
+     try{
       const approved=APPROVED_TYPES.includes(answer.parsed.primaryType);
       const classified=approved&&answer.parsed.siteOwnership==="confirmed";
       const status=classified?"classified":"review";
@@ -352,10 +377,10 @@ async function runPilot(){
       processed++;
       if(processed%10===0)log("progress",{processed,aiCalls,classified:counts.classified,review:counts.review,remaining:Math.max(0,batch.length-processed),estimatedModelUsd:modelSpend,committedUsd:committed});
      }catch(e){
-      errors++;stop=true;resultStatus="api_or_store_error";
-      try{await upsert(key,{recordType:"topsense-pilot-result",companyId:Number(id),
-       status:"api_or_storage_error",error:String(e.message||e).slice(0,170),possibleChargeUsd:reserveUsd,verifiedAt:iso()});}catch{}
-      log("classification-error",{id,error:String(e.message||e).slice(0,150)});
+      // A durable result-write failure must stop the run. The reservation
+      // already exists, preventing duplicate calls on the next cycle.
+      errors++;stop=true;resultStatus="checkpoint_error";
+      log("checkpoint-error",{id,stage:"model-result",error:String(e.message||e).slice(0,110)});
       break;
      }
     }catch(e){
