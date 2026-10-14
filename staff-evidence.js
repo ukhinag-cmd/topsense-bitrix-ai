@@ -42,7 +42,7 @@ function fromPages(pages){
 }
 function resolve(company,site){
  // CRM staff with explicit year is stronger if independently sourced.
- const crm=fromCompany(company);
+ const crm=company?.staffEvidence?.count>0?company.staffEvidence:fromCompany(company);
  if(crm.count!==null&&crm.year===2025)return crm;
  const web=site?.staffEvidence||empty();
  if(web.count!==null&&safeUrl(web.sourceUrl))return {...web,sourceUrl:safeUrl(web.sourceUrl)};
