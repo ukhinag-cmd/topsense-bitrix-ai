@@ -3,6 +3,7 @@
 // A search result is NOT identity proof. Only name + independent phone/city
 // corroboration is allowed to promote a URL to an official website.
 const queue=[],pending=new Set(),profiles=new Map();
+const completion=require("./client-finalization");
 let busy=false,attempted=0,confirmed=0,review=0,unavailable=0;
 const skipDomains=new Set(["bing.com","google.com","yandex.ru","2gis.ru","rusprofile.ru","checko.ru","sbis.ru","saby.ru","companies.rbc.ru","list-org.com","orgpage.ru","avito.ru","hh.ru","vk.com","youtube.com","facebook.com","instagram.com","spravker.ru","spark-interfax.ru"]);
 const sleep=n=>new Promise(r=>setTimeout(r,n));
@@ -101,7 +102,7 @@ async function scan(c){
 async function pump(){
  if(busy)return;busy=true;
  while(queue.length){
-  const c=queue.shift(),id=String(c.id);pending.delete(id);if(profiles.has(id))continue;
+  const c=queue.shift(),id=String(c.id);pending.delete(id);if(profiles.has(id)||completion.isComplete(id))continue;
   attempted++;
   try{profiles.set(id,await scan(c))}
   catch{unavailable++;profiles.set(id,{status:"error",candidates:[]})}
@@ -113,7 +114,7 @@ async function pump(){
 function enqueue(companies){
  let added=0;
  for(const c of companies||[]){
-  const id=String(c.id||"");if(!id||profiles.has(id)||pending.has(id)||!eligible(c))continue;
+  const id=String(c.id||"");if(!id||completion.isComplete(id)||profiles.has(id)||pending.has(id)||!eligible(c))continue;
   pending.add(id);queue.push(c);added++;
  }
  if(added)console.log(JSON.stringify({component:"name-site-search",event:"queued",count:added,remaining:queue.length}));
