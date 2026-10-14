@@ -64,6 +64,9 @@ function html(payload){
   ["Подтверждённый тип заменён",ai.finalTypeOverridden||0],
   ["Результатов на проверке",ai.review||0],
   ["На проверке с предложенным типом",ai.reviewWithProposedType||0],
+  ["На проверке: корпоративный домен контакта",ai.reviewWithContactDomain||0],
+  ["На проверке: корпоративный домен компании",ai.reviewWithCompanyDomain||0],
+  ["На проверке: есть сайт-кандидат",ai.reviewWithWebsiteCandidate||0],
   ["AI-результат без CRM-карточки",ai.notInCurrentCrm||0]
  ];
  const aiTiles=aiMetrics.map(([label,value])=>'<section class="tile"><strong>'+num(value)+'</strong><span>'+esc(label)+'</span></section>').join("");
