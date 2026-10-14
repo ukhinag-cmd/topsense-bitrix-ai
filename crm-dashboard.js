@@ -446,7 +446,8 @@ function data(known){
  const aiReconciliation={saved:state.pilot.size,notInCurrentCrm:0,classified:0,review:0,
   otherStatus:0,classifiedWithKnownType:0,classifiedMissingValidType:0,
   classifiedTypedInFinal:0,classifiedMissingInFinal:0,reviewWithProposedType:0,
-  reviewWithoutProposedType:0,finalTypeOverridden:0};
+  reviewWithoutProposedType:0,reviewWithContactDomain:0,reviewWithCompanyDomain:0,
+  reviewWithWebsiteCandidate:0,finalTypeOverridden:0};
  for(const [id,ai] of state.pilot){
   const c=byCrmId.get(String(id));
   if(!c){aiReconciliation.notInCurrentCrm++;continue}
@@ -461,6 +462,10 @@ function data(known){
     aiReconciliation.finalTypeOverridden++;
   }else if(ai.status==="review"){
    aiReconciliation.review++;
+   const linked=state.linkedContacts.get(String(id));
+   if(linked&&[...linked.emails].some(email=>Boolean(domain(email))))aiReconciliation.reviewWithContactDomain++;
+   if(c.corporateDomain)aiReconciliation.reviewWithCompanyDomain++;
+   if(c.siteCandidate||c.siteVerified||c.siteProfileUrl)aiReconciliation.reviewWithWebsiteCandidate++;
    if(ai.primaryType&&ai.primaryType!=="Не определён")aiReconciliation.reviewWithProposedType++;
    else aiReconciliation.reviewWithoutProposedType++;
   }else aiReconciliation.otherStatus++;
