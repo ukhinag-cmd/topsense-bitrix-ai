@@ -7,7 +7,7 @@ let map=new Map(),loading=false;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function validInn(v){
  const s=innNumber(v);if(!s)return "";
- const sum=(a,k)=>a.reduce((v,w,i)=>v+Number(s[i])*w,0)%11%10;
+ const sum=(a,k)=>k.reduce((v,w,i)=>v+Number(a[i])*w,0)%11%10;
  if(s.length===10)return sum(s.slice(0,9),[2,4,10,3,5,9,4,6,8])===Number(s[9])?s:"";
  const tenth=sum(s.slice(0,10),[7,2,4,10,3,5,9,4,6,8]);
  const eleventh=sum(s.slice(0,11),[3,7,2,4,10,3,5,9,4,6,8]);
