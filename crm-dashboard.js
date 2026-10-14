@@ -1,6 +1,6 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
-const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false};
+const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,paidControl:{}};
 function analyticSeeds(){
  try{
    const arr=JSON.parse(String(process.env.TOPSENSE_ANALYTIC_SEED_JSON||"[]"));
@@ -304,10 +304,22 @@ async function loadPilot(){
   const entries=Array.isArray(d.rows)?d.rows:[];
   const x=new Map();
   for(const e of entries){
-    if(!/^pilot:v[123]:result:/.test(String(e.key||"")))continue;
+    if(!/^pilot:v[1234]:result:/.test(String(e.key||"")))continue;
     const item=e.payload||{};
     if(item.companyId&&item.recordType==="topsense-pilot-result")x.set(String(item.companyId),item);
   }
+  const v4=entries.filter(e=>/^pilot:v4:result:/.test(String(e.key||""))).map(e=>e.payload||{});
+  const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
+  const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
+  state.paidControl={
+   newResults:v4.filter(p=>p.status==="classified"||p.status==="review").length,
+   calls:v4.filter(p=>p.tokenUsage).length,
+   estimatedUsd:v4.reduce((a,p)=>a+(Number(p.estimatedCostUsd)||0),0),
+   limitUsd: Number(summary.approvedLimitUsd)||Number(process.env.TOPSENSE_PAID_CLASSIFICATION_BUDGET_USD)||0,
+   previousProcessed:oldResults.size,
+   lastRun:summary.updatedAt||null,
+   status:summary.status||"not_started"
+  };
   state.pilot=x;state.pilotUpdatedAt=new Date().toISOString();
   enqueuePreviousPilotSites();
   console.log(JSON.stringify({component:"topsense-dashboard",event:"ai-results-loaded",count:x.size}));
@@ -399,7 +411,7 @@ function data(known){
   analyticTyped:seeds.size,analyticConfirmed:[...seeds.values()].filter(x=>x.status==="confirmed").length,
   aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,
   aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,
-  aiLastChecked:state.pilotUpdatedAt,counts,organizationTypes:ORG_TYPES,
+  aiLastChecked:state.pilotUpdatedAt,paidClassification:state.paidControl,contactsAt:state.contactsAt,counts,organizationTypes:ORG_TYPES,
   organizationTypeCount:ORG_TYPES.length,
   siteCrawl:require("./website-profiler").stats(),
   mailAudit:require("./crm-mail-evidence").stats(),
@@ -440,11 +452,15 @@ function route(req,res,pathname,known){
  if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
+ if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/duplicates.csv"){write(res,200,require("./client-duplicates").csv(data(known)),"text/csv; charset=utf-8",{"content-disposition":"attachment; filename=TOPSENSE_CRM_duplicates.csv"});return true}
  if(pathname==="/contractors/duplicates"){write(res,200,require("./client-duplicates").html(data(known)),"text/html; charset=utf-8");return true}
- if(pathname==="/contractors"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
- if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){write(res,200,initialHtml(data(known)),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/list"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
+ if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){
+  const section=new URL(req.url,"http://localhost").searchParams.get("section")||"Обзор";
+  write(res,200,require("./client-overview").render(data(known),section),"text/html; charset=utf-8");return true;
+ }
  write(res,404,{error:"Not found"});return true;
 }
 // Log only aggregate classification coverage; never log customer names, URLs or email.

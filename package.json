@@ -7,7 +7,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test *.regression.test.js"
   },
   "dependencies": {
     "pdf-parse": "1.1.1"
