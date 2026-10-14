@@ -37,8 +37,8 @@ async function list(method,params){
  if(uniq.size<total)throw Error("Incomplete CRM intake scan");
  return [...uniq.values()];
 }
-async function contactIndex(items){
- const ids=[...new Set(items.filter(x=>!x.COMPANY_ID||String(x.COMPANY_ID)==="0").map(x=>String(x.CONTACT_ID||"")).filter(x=>/^[1-9]\d*$/.test(x)))];
+async function contactIndex(items,known){
+ const ids=[...new Set(items.filter(x=>!known.has(String(x.COMPANY_ID||""))).map(x=>String(x.CONTACT_ID||"")).filter(x=>/^[1-9]\d*$/.test(x)))];
  const found=new Map();
  for(let i=0;i<ids.length;i+=40){
   const rows=await list("crm.contact.list",{order:{ID:"ASC"},filter:{"@ID":ids.slice(i,i+40)},select:["ID","COMPANY_ID"]});
@@ -88,7 +88,7 @@ async function refresh(companySource){
   if(!leads)errors.push("leads_unavailable");
   if(!deals)errors.push("deals_unavailable");
   let contacts=new Map();
-  try{contacts=await contactIndex([...(leads||[]),...(deals||[])]);state.contactStatus="complete"}
+  try{contacts=await contactIndex([...(leads||[]),...(deals||[])],known);state.contactStatus="complete"}
   catch{errors.push("contact_links_unavailable");state.contactStatus="unavailable"}
   const items=[...(leads||[]).map(x=>record(x,"lead",known,contacts)),...(deals||[]).map(x=>record(x,"deal",known,contacts))]
    .filter(x=>Date.parse(x.created)>=Date.parse(FROM))
