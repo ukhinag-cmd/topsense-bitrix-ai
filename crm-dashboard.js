@@ -437,6 +437,30 @@ function data(known){
   finalization.queue(c,{contactsAt:state.contactsAt,salesStatus,duplicateIds});
  }
 
+ // Read-only reconciliation: explain why a saved AI result did not reach the final card.
+ const byCrmId=new Map(typedRecords.map(c=>[String(c.id),c]));
+ const aiReconciliation={saved:state.pilot.size,notInCurrentCrm:0,classified:0,review:0,
+  otherStatus:0,classifiedWithKnownType:0,classifiedMissingValidType:0,
+  classifiedTypedInFinal:0,classifiedMissingInFinal:0,reviewWithProposedType:0,
+  reviewWithoutProposedType:0,finalTypeOverridden:0};
+ for(const [id,ai] of state.pilot){
+  const c=byCrmId.get(String(id));
+  if(!c){aiReconciliation.notInCurrentCrm++;continue}
+  if(ai.status==="classified"){
+   aiReconciliation.classified++;
+   const validAiType=require("./client-taxonomy").known(String(ai.primaryType||""));
+   if(validAiType)aiReconciliation.classifiedWithKnownType++;
+   else aiReconciliation.classifiedMissingValidType++;
+   if(require("./client-taxonomy").known(String(c.organizationType||"")))aiReconciliation.classifiedTypedInFinal++;
+   else aiReconciliation.classifiedMissingInFinal++;
+   if(validAiType&&require("./client-taxonomy").known(String(c.organizationType||""))&&c.organizationType!==ai.primaryType)
+    aiReconciliation.finalTypeOverridden++;
+  }else if(ai.status==="review"){
+   aiReconciliation.review++;
+   if(ai.primaryType&&ai.primaryType!=="Не определён")aiReconciliation.reviewWithProposedType++;
+   else aiReconciliation.reviewWithoutProposedType++;
+  }else aiReconciliation.otherStatus++;
+ }
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  virtual.companies.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
  const format=require("./company-name-format").display;
