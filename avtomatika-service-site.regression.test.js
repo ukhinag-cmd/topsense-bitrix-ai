@@ -15,7 +15,7 @@ function companyFromSource(){
  };
  vm.runInNewContext(src+"\nmodule.exports.__testCompany=company;",{
   require:requireMock,module,exports:module.exports,process:{env:{}},
-  URL,URLSearchParams,setTimeout:()=>0,setInterval:()=>0,console:{log:()=>{},warn:()=>{}},
+  URL,URLSearchParams,__dirname:"/test",setTimeout:()=>0,setInterval:()=>0,console:{log:()=>{},warn:()=>{}},
   Buffer
  },{filename:"crm-dashboard.js"});
  return module.exports.__testCompany;
