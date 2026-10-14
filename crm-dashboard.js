@@ -9,7 +9,7 @@ function analyticSeeds(){
 }
 const ORG_TYPES=require("./company-types").types;
 const sections=["Подрядчики","Конечные потребители","Сервис и метрология","Партнёрские продажи","Проектные продажи","Конкуренты","Смежные организации","Не определены"];
-const freeDomains=new Set(["mail.ru","bk.ru","list.ru","inbox.ru","gmail.com","yandex.ru","ya.ru","yahoo.com","rambler.ru","outlook.com","hotmail.com","icloud.com","topsense.su","detector-gaza.ru"]);
+const mailDomains=require("./company-email-domains");
 const html=fs.readFileSync(path.join(__dirname,"crm-dashboard.html"),"utf8");
 function write(res,status,body,type="application/json; charset=utf-8",headers={}) {
  const value=typeof body==="string"?body:JSON.stringify(body);
@@ -97,7 +97,7 @@ function initialHtml(payload){
  return text;
 }
 function value(x){if(Array.isArray(x))return x.map(value).filter(Boolean).join("; ");if(x&&typeof x==="object")return String(x.VALUE||x.value||"");return String(x||"")}
-function domain(x){const m=value(x).match(/[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})/i);const d=m?m[1].toLowerCase():"";return d&&!freeDomains.has(d)?d:""}
+function domain(x){return mailDomains.extract(x)[0]||""}
 function website(x){const raw=value(x).split(/[;,\s]+/)[0].trim();if(!raw)return "";try{const u=new URL(/^https?:\/\//i.test(raw)?raw:"https://"+raw);return ["https:","http:"].includes(u.protocol)?u.origin:""}catch{return ""}}
 function category(name){
  const n=String(name||"").toLowerCase();
@@ -206,19 +206,26 @@ async function refresh(){
 
 function enqueueLinkedContactSites(){
  const suggested=[];
+ let multipleDomains=0;
  for(const c of state.companies){
-  // Preserve an independently identified company-specific website.
+  // Keep independently verified company-specific sites unchanged.
   if(c.verifiedOrgType||c.siteSource==="Официальный сайт, проверенный по юридическим данным"||
      c.siteSource==="Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены")continue;
   const linked=state.linkedContacts.get(c.id);
   if(!linked||!linked.emails.size)continue;
-  const domains=[...new Set([...linked.emails].map(domain).filter(Boolean))];
-  if(domains.length!==1||domains[0]===c.corporateDomain)continue;
-  // Investigate the linked contact's corporate domain before weaker CRM site hints.
-  // A domain still requires legal-entity verification before it becomes official.
-  suggested.push({...c,siteCandidate:"",corporateDomain:domains[0],siteSource:"Домен привязанного контакта"});
+  const ranked=mailDomains.ranked(linked.emails);
+  if(!ranked.length)continue;
+  if(ranked.length>1)multipleDomains++;
+  // Corporate email on the company record is the stronger candidate.
+  if(c.corporateDomain)continue;
+  // Multiple contact domains are no longer discarded. The strongest candidate
+  // is inspected, but the profiler must independently confirm company identity.
+  const selected=ranked[0][0];
+  suggested.push({...c,siteCandidate:"",corporateDomain:selected,siteSource:"Домен привязанного контакта"});
  }
  if(suggested.length)require("./website-profiler").enqueue(suggested);
+ console.log(JSON.stringify({component:"topsense-dashboard",event:"linked-corporate-domain-discovery",
+  queuedCandidates:suggested.length,companiesWithMultipleContactDomains:multipleDomains}));
 }
 function enqueueMissingSiteNameSearch(){
  const requisites=require("./company-requisites");
