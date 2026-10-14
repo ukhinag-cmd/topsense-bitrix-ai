@@ -425,6 +425,7 @@ function data(known){
   organizationTypeCount:ORG_TYPES.length,
   siteCrawl:require("./website-profiler").stats(),
   researchCompletion:finalization.stats(),
+  incomingLeads:require("./crm-lead-inbox").view(virtual.companies),
   mailAudit:require("./crm-mail-evidence").stats(),
   salesAudit:require("./crm-sales-audit").stats(),
   nameSiteSearch:require("./name-site-search").stats(),
@@ -463,6 +464,7 @@ function route(req,res,pathname,known){
  if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
+ if(pathname==="/contractors/leads"){write(res,200,require("./client-leads").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/duplicates.csv"){write(res,200,require("./client-duplicates").csv(data(known)),"text/csv; charset=utf-8",{"content-disposition":"attachment; filename=TOPSENSE_CRM_duplicates.csv"});return true}
@@ -509,4 +511,6 @@ setInterval(coverageLog,240000);
 setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
 setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
+setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 12000);
+setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
 module.exports={route,refresh,data};
