@@ -574,6 +574,21 @@ function coverageLog(){
   const companyList=snap.companies||[];
   const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   const distinctTypes=new Set(typed.map(x=>x.organizationType));
+  // Aggregate diagnostics: a missing type is not the same as a missing site.
+  const untypedCompanies=companyList.filter(x=>!require("./client-taxonomy").known(x.organizationType));
+  const domainCoverage={untyped:untypedCompanies.length,withCompanyMail:0,
+   withContactMail:0,withAnyCorporateMail:0,siteAbsentWithCorporateMail:0,
+   unavailableSiteWithCorporateMail:0};
+  for(const c of untypedCompanies){
+   const companyHas=mailDomains.extract(c.crmEmails||[]).length>0;
+   const contactHas=mailDomains.extract(c.contactEmails||[]).length>0;
+   if(companyHas)domainCoverage.withCompanyMail++;
+   if(contactHas)domainCoverage.withContactMail++;
+   if(!companyHas&&!contactHas)continue;
+   domainCoverage.withAnyCorporateMail++;
+   if(c.siteStatus==="site_absent")domainCoverage.siteAbsentWithCorporateMail++;
+   if(c.siteStatus==="site_unavailable")domainCoverage.unavailableSiteWithCorporateMail++;
+  }
   const sourceCounts={};
   for(const c of typed){
    const source=String(c.segmentSource||"Other").slice(0,90);
@@ -591,7 +606,7 @@ function coverageLog(){
    typed:typed.length,untyped:companyList.length-typed.length,coveredTypes:distinctTypes.size,
    siteCrawl:require("./website-profiler").stats(),
    nameSearch:require("./name-site-search").stats(),
-   classificationSources:sourceCounts}));
+   domainCoverage,classificationSources:sourceCounts}));
  }catch(e){console.warn(JSON.stringify({component:"topsense-dashboard",event:"coverage-unavailable",reason:String(e.message||e).slice(0,100)}))}
 }
 setTimeout(coverageLog,76000);
