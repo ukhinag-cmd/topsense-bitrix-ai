@@ -29,11 +29,21 @@ async function safeUrl(value){
  return u;
 }
 function urls(c){
- const out=[];
- if(c.siteCandidate)out.push({url:c.siteCandidate,origin:c.siteSource||"Сайт из CRM"});
- else if(c.corporateDomain&&/^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$/i.test(c.corporateDomain))
-   out.push({url:"https://"+c.corporateDomain,origin:c.siteSource||"Корпоративный домен e-mail CRM"});
- return out;
+ const selected=evidenceStore.inputUrl(c);
+ if(!selected)return [];
+ const pinned=Boolean(c.verifiedOrgType)||
+  ["Официальный сайт, проверенный по юридическим данным",
+   "Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены",
+   "Поиск по названию — подтверждено независимыми реквизитами",
+   "Сайт из подписи входящего письма",
+   "Сайт из карточки компании, присланной письмом"].includes(c.siteSource);
+ const fromEmail=!pinned&&Boolean(c.corporateDomain)&&selected==="https://"+c.corporateDomain;
+ const origin=fromEmail?(
+   ["Домен привязанного контакта",
+    "Непривязанные CRM-контакты: совпали название и корпоративный домен"].includes(c.siteSource)
+     ?c.siteSource:"Корпоративный домен e-mail CRM"
+   ):(c.siteSource||"Сайт из CRM");
+ return [{url:selected,origin}];
 }
 function strip(s){
  return String(s||"").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ")
@@ -106,7 +116,7 @@ async function one(c){
  const candidates=urls(c);
  if(!candidates.length){profiles.set(c.id,{status:"site_absent",source:"Карточка CRM не содержит сайт или корпоративный домен"});return}
  try{
-  const currentRank=evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"));
+  const currentRank=evidenceRank(candidates[0].origin);
   const result=await fetchPage(candidates[0].url);
   if(currentRank<(sourcePriority.get(String(c.id))||0))return;
   // The homepage often contains marketing but not the company's actual activity.
@@ -135,7 +145,7 @@ async function one(c){
   const pageIdentity=target.replace(/ё/g,"е").replace(/[^а-яa-z0-9]/g,"");
   const orphanNameConfirmed=fullCompanyName.length>=11&&pageIdentity.includes(fullCompanyName);
   const redirectedToOtherDomain=new URL(candidates[0].url).hostname.replace(/^www\./i,"")!==new URL(result.url).hostname.replace(/^www\./i,"");
-  const emailDomainOnly=!c.siteCandidate&&Boolean(c.corporateDomain);
+  const emailDomainOnly=["Корпоративный домен e-mail CRM","Домен привязанного контакта"].includes(candidates[0].origin);
   const identifiedReference=String(c.siteSource||"").startsWith("Сайт организации, установленный по независимым источникам");
   const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
@@ -144,7 +154,7 @@ async function one(c){
    staffEvidence:trusted?require("./staff-evidence").fromPages(pages):null,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()};
   profiles.set(c.id,profile);
   evidenceStore.queue(c,profile);
- }catch(error){if(evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"))<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
+ }catch(error){if(evidenceRank(candidates[0].origin)<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
 function pump(){
  while(active<2&&queue.length){
@@ -193,8 +203,9 @@ function enqueue(companies){
  }
  for(const c of companies||[]){
   const id=String(c?.id||"");if(!id||completion.isComplete(id))continue;
-  const hasSite=urls(c).length>0;
-  const newRank=hasSite?evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM")):0;
+  const candidates=urls(c);
+  const hasSite=candidates.length>0;
+  const newRank=hasSite?evidenceRank(candidates[0].origin):0;
   const signature=hasSite?evidenceStore.fingerprint(c):"";
   if(visited.has(id)){
    const oldRank=sourcePriority.get(id)||0;
