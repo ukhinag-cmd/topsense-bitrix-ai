@@ -207,12 +207,16 @@ async function refresh(){
 function enqueueLinkedContactSites(){
  const suggested=[];
  for(const c of state.companies){
-  if(c.siteCandidate||c.corporateDomain)continue;
+  // Preserve an independently identified company-specific website.
+  if(c.verifiedOrgType||c.siteSource==="Официальный сайт, проверенный по юридическим данным"||
+     c.siteSource==="Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены")continue;
   const linked=state.linkedContacts.get(c.id);
   if(!linked||!linked.emails.size)continue;
   const domains=[...new Set([...linked.emails].map(domain).filter(Boolean))];
-  if(domains.length!==1)continue;
-  suggested.push({...c,corporateDomain:domains[0],siteSource:"Домен привязанного контакта"});
+  if(domains.length!==1||domains[0]===c.corporateDomain)continue;
+  // Investigate the linked contact's corporate domain before weaker CRM site hints.
+  // A domain still requires legal-entity verification before it becomes official.
+  suggested.push({...c,siteCandidate:"",corporateDomain:domains[0],siteSource:"Домен привязанного контакта"});
  }
  if(suggested.length)require("./website-profiler").enqueue(suggested);
 }
