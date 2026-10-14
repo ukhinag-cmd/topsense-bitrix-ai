@@ -17,7 +17,7 @@ const SEARCH_RESERVE_USD = 0.05; // Covers a single paid web search plus model t
 const MAX_QUEUE = 150;
 const PILOT_BUDGET_USD = 75;
 const MAX_INPUT_CHARS = 7600;
-const MAX_OUTPUT_TOKENS = 850;
+const MAX_OUTPUT_TOKENS = 1500;
 const TIMEOUT_MS = 12000;
 const FREE_DOMAINS = new Set([
   "gmail.com", "mail.ru", "bk.ru", "list.ru", "inbox.ru", "yandex.ru",
@@ -333,9 +333,10 @@ async function runPilot(){
      committed+=reserveUsd;
      await upsert(reservation,{recordType:"topsense-pilot-reservation",companyId:Number(id),reservedUsd:reserveUsd,searchMode,at:iso()});
      aiCalls++;
-     let answer;
+     let answer,modelFinished=false;
      try{
       answer=await classify(company,evidence,searchMode);
+      modelFinished=true;
       const approved=APPROVED_TYPES.includes(answer.parsed.primaryType);
       const classified=approved&&answer.parsed.siteOwnership==="confirmed";
       const status=classified?"classified":"review";
@@ -352,10 +353,27 @@ async function runPilot(){
       processed++;
       if(processed%10===0)log("progress",{processed,aiCalls,classified:counts.classified,review:counts.review,remaining:Math.max(0,batch.length-processed),estimatedModelUsd:modelSpend,committedUsd:committed});
      }catch(e){
-      errors++;stop=true;resultStatus="api_or_store_error";
-      try{await upsert(key,{recordType:"topsense-pilot-result",companyId:Number(id),
-       status:"api_or_storage_error",error:String(e.message||e).slice(0,170),possibleChargeUsd:reserveUsd,verifiedAt:iso()});}catch{}
-      log("classification-error",{id,error:String(e.message||e).slice(0,150)});
+      errors++;
+      const errorText=String(e.message||e).slice(0,170);
+      // Occasionally the model/API returns truncated JSON. A paid call was
+      // already reserved, so do not repeat it and do not halt other companies.
+      // Storage errors, credential errors, and rate limits remain fatal.
+      const badJson=!modelFinished&&/Unexpected end of JSON input|Unterminated string in JSON|Expected property name|Unexpected token .*JSON/i.test(errorText);
+      let errorSaved=false;
+      try{
+       await upsert(key,{recordType:"topsense-pilot-result",companyId:Number(id),
+        status:badJson?"review":"api_or_storage_error",
+        reason:badJson?"Структурированный ответ модели неполный; нужна проверка":"Ошибка модели или сохранения",
+        error:errorText,possibleChargeUsd:reserveUsd,verifiedAt:iso()});
+       errorSaved=true;
+      }catch{}
+      if(badJson&&errorSaved){
+       counts.review++;processed++;
+       log("invalid-model-json-recorded",{id,processed,reason:"incomplete_structured_output"});
+       continue;
+      }
+      stop=true;resultStatus="api_or_store_error";
+      log("classification-error",{id,error:errorText});
       break;
      }
     }catch(e){
