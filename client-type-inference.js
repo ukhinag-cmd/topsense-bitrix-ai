@@ -120,6 +120,8 @@ function inferWebsiteActivity(pages,companyName){
 function apply(records){
  const sites=require("./website-profiler");
  return records.map(c=>{
+  const completion=require("./client-finalization");
+  if(completion.isComplete(c.id))return completion.apply(c);
   const site=sites.get(c.id);
   const previous=valid.has(c.organizationType)?c.organizationType:(valid.has(c.type)?c.type:"");
   const byName=infer(c.name);
