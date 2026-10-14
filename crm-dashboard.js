@@ -234,13 +234,18 @@ function enqueuePreviousPilotSites(){
  for(const c of state.companies){
   if(c.siteCandidate||c.corporateDomain)continue;
   const ai=state.pilot.get(c.id);
-  if(!ai||ai.status!=="classified"||!["verified","confirmed","official","owned"].includes(String(ai.siteOwnership||"").toLowerCase()))continue;
+  // A reviewed AI result is a SITE LEAD, not a verified company identity/type.
+  // Revisit its public website for free even when ownership was uncertain.
+  if(!ai||!["classified","review"].includes(ai.status))continue;
   const raw=typeof ai.siteCandidate==="object"?(ai.siteCandidate?.url||""):(ai.siteCandidate||ai.website||"");
   const url=website(raw);
   if(!url)continue;
   suggestions.push({...c,siteCandidate:url,siteSource:"Кандидат из прежнего AI-пилота"});
  }
- if(suggestions.length)require("./website-profiler").enqueue(suggestions);
+ if(suggestions.length){
+  require("./website-profiler").enqueue(suggestions);
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"paid-site-leads-requeued",count:suggestions.length}));
+ }
 }
 // Fetch linked CRM contacts read-only. No contacts are sent to public source control.
 async function loadLinkedContacts(){
@@ -584,6 +589,12 @@ setTimeout(() => loadPilot().catch(() => {}), 1500);
 setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
 setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 12000);
 setTimeout(() => require("./company-requisites").refresh().catch(()=>{}), 28000);
+// Keep the CRM company/contact snapshot fresh without repeating paid AI research.
+// Site profiler fingerprints prevent unchanged completed site evidence being crawled again.
+setInterval(() => {
+ refresh().catch(()=>{});
+ loadLinkedContacts().catch(()=>{});
+}, 2*60*60*1000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
 setInterval(() => require("./company-requisites").refresh().catch(()=>{}), 24*60*60*1000);
 module.exports={route,refresh,data};
