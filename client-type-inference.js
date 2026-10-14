@@ -196,6 +196,15 @@ function apply(records){
    siteProfileTitle:siteBelongs?(site?.siteTitle||""):"",
    siteProfileDescription:siteBelongs?(site?.siteDescription||""):""
   };
+  // An inspected first-party product site is more specific than a broad
+  // legacy chemical/manufacturing label, even if that older label is stored.
+  if(bySite&&["Производство бытовой химии","Производство табачных изделий","Производство удобрений","Производство напитков"].includes(bySite.type)&&
+   (previous!==bySite.type||officiallyVerifiedType!==bySite.type)){
+   return {...c,...websiteEvidence,organizationType:bySite.type,type:bySite.type,
+    category:"Конечные потребители",proposedType:"",
+    segmentConfidence:"Отраслевая специализация подтверждена страницами собственной продукции",
+    segmentSource:"Профильные страницы проверенного сайта компании",verification:"Предварительная классификация"};
+  }
   if(officiallyVerifiedType)return {...c,...websiteEvidence,siteStatus:"official_site_verified",siteProfileUrl:c.siteCandidate||websiteEvidence.siteProfileUrl,organizationType:officiallyVerifiedType,segmentConfidence:"Высокая — официальный сайт",segmentSource:c.verifiedOrgEvidence||"Юридическое наименование и описание деятельности на официальном сайте"};
   if(previous==="Диагностика трубопроводов и оборудования"&&bySite&&
    ["Дилер промышленного оборудования","Дистрибьютор / оптовый поставщик"].includes(bySite.type)){
