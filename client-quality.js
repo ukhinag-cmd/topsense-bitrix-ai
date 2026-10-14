@@ -40,7 +40,7 @@ function summary(payload){
   totalDeals:Number(audit.totalDeals||0),orphanDeals:Number((audit.orphanDeals||{}).orphanDeals||0),
   unlinkedDeals:Number((audit.orphanDeals||{}).unmatched||0),
   recoveryVerified:Number((audit.orphanDeals||{}).totalRecoveredLinks||0),
-  groupStatuses,incomplete
+  aiReconciliation:payload.aiReconciliation||{},groupStatuses,incomplete
  };
 }
 function html(payload){
@@ -55,6 +55,18 @@ function html(payload){
   ["Исследования завершены",Number(q.researchCompletion.completed||0)],
   ["Новые лиды на идентификации",Number(q.incomingLeads.pending||0)]
  ];
+ const ai=q.aiReconciliation;
+ const aiMetrics=[
+  ["AI-результатов в хранилище",ai.saved||0],
+  ["Подтверждённых результатов",ai.classified||0],
+  ["Подтверждённые без типа в итоговой карточке",ai.classifiedMissingInFinal||0],
+  ["Предложенный тип не принят справочником",ai.classifiedMissingValidType||0],
+  ["Подтверждённый тип заменён",ai.finalTypeOverridden||0],
+  ["Результатов на проверке",ai.review||0],
+  ["На проверке с предложенным типом",ai.reviewWithProposedType||0],
+  ["AI-результат без CRM-карточки",ai.notInCurrentCrm||0]
+ ];
+ const aiTiles=aiMetrics.map(([label,value])=>'<section class="tile"><strong>'+num(value)+'</strong><span>'+esc(label)+'</span></section>').join("");
  const lines=Object.entries(q.groupStatuses).sort((a,b)=>b[1]-a[1])
   .map(([key,count])=>"<tr><td>"+esc(key)+"</td><td>"+num(count)+"</td></tr>").join("");
  const typeRows=q.typeCounts.map(x=>"<tr><td>"+esc(x.type)+"</td><td>"+num(x.count)+"</td></tr>").join("");
@@ -65,7 +77,7 @@ function html(payload){
  '<nav><a href="/contractors">База клиентов</a><a href="/contractors/duplicates">Дубли</a><a href="/contractors/excluded">Исключённые карточки</a><a href="/contractors/leads">Новые лиды</a></nav>'+
  '<div class="panel"><b>Статус проверки:</b> <span class="status">'+(q.incomplete?"НЕ ЗАВЕРШЕНА":"Нужна финальная независимая сверка")+'</span> · расчёт на '+esc(q.timestamp)+'. Источник: текущий защищённый снимок CRM/аналитики. Не следует считать процент типизации процентом юридически подтверждённых компаний.</div>'+
  '<div class="panel"><h2>Покрытие классификации</h2><strong style="font-size:34px">'+esc(q.coveragePercent)+'%</strong><div style="height:9px;background:#e3edf0;border-radius:8px;overflow:hidden;margin:11px 0"><div style="background:#13778a;height:100%;width:'+Math.max(0,Math.min(100,q.coveragePercent))+'%"></div></div></div>'+
- '<div class="grid">'+tiles+'</div>'+
+ '<div class="grid">'+tiles+'</div>'+ '<div class="panel"><h2>Сверка сохранённых AI-результатов</h2><p class="note">Подсчёт по исходным CRM ID до виртуального объединения. Статус review не означает подтверждённый тип; никакие AI-запросы здесь не выполняются.</p><div class="grid">'+aiTiles+'</div></div>'+
  '<div class="panel"><h2>Все '+num(q.taxonomyTotal)+' типов</h2><p>Без компаний в текущем срезе: '+num(q.unrepresentedTypes)+' типов. Нулевое значение не означает отсутствие компаний этого типа в CRM, оно означает отсутствие установленного типа.</p><details><summary>Показать разбивку по всем типам</summary><table><thead><tr><th>Тип организации</th><th>Компаний</th></tr></thead><tbody>'+typeRows+'</tbody></table></details></div>'+
  '<div class="panel"><h2>Контроль дубликатов</h2><p>Виртуально сгруппировано '+num(q.duplicateGroups)+' групп; требует ручной сверки '+num(q.duplicateReview)+' групп. Регрессионная целостность источников: '+(q.duplicateIntegrity?"проверена":"не подтверждена")+'. Никакие карточки в CRM не объединялись.</p></div>'+
  '<div class="panel"><h2>Контакты, сделки и источники</h2><p>Аудит сделок: '+esc(q.salesStatus)+'. Прочитано '+num(q.scannedDeals)+' / '+(q.totalDeals?num(q.totalDeals):"не известно")+'. Непривязанных сделок: '+num(q.orphanDeals)+'; из них без найденной связи '+num(q.unlinkedDeals)+'. Подтверждённые восстановленные связи: '+num(q.recoveryVerified)+'. Это не означает завершённый аудит всех сделок.</p>'+
