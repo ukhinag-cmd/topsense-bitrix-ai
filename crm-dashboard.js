@@ -501,8 +501,8 @@ function route(req,res,pathname,known){
  if(pathname==="/contractors/list"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){
   const query=new URL(req.url,"http://localhost").searchParams;
-  const section=query.get("section")||"Обзор",type=query.get("type")||"",page=query.get("page")||"1";
-  write(res,200,require("./client-overview").render(data(known),section,type,page),"text/html; charset=utf-8");return true;
+  const section=query.get("section")||"Обзор",type=query.get("type")||"",page=query.get("page")||"1",purchase=query.get("purchase")||"";
+  write(res,200,require("./client-overview").render(data(known),section,type,page,purchase),"text/html; charset=utf-8");return true;
  }
  write(res,404,{error:"Not found"});return true;
 }
