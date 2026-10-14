@@ -72,6 +72,24 @@ const operatingTypes=new Set([
  "Энергогенерирующая / теплоснабжающая компания",
  "Водоканал / канализационные сооружения"
 ]);
+// Evidence that the enterprise itself makes drinks/malt, NOT that it
+// performs industrial construction for other enterprises.  Such factories
+// can still be END USERS of instrumentation; 45-type taxonomy has no exact
+// "brewery/food-production plant" subtype. Do not guess a contractor type.
+function beverageManufacturerEvidence(company,site){
+ const name=String(company?.name||company||"").toLowerCase().replace(/ё/g,"е");
+ const companyHint=/пив(?:о|овар|завод)|солодов|напитк|квас/i.test(name);
+ if(!companyHint)return false;
+ const meta=[site?.siteTitle,site?.siteDescription,...(site?.siteHeadings||[])].join(" ").toLowerCase().replace(/ё/g,"е");
+ const beverage=/пив(?:о|а|овар|завод)|солод|напитк|квас/.test(meta);
+ const production=/производств|пищев|бренд|солодовенн|о производстве/.test(meta);
+ const firstParty=site&&["site_profiled","site_read_no_clear_type"].includes(site.status)&&beverage&&production;
+ const prior=String(company?.aiExplanation||"").toLowerCase().replace(/ё/g,"е");
+ const priorFirstParty=/производител.*(?:напит|солод|пив)|производство.*(?:напит|солод|пив)/.test(prior)
+  &&/брянскпиво|пив|солод|напитк|квас/i.test(name)
+  &&/^https?:\/\//i.test(String(company?.siteVerified||""));
+ return Boolean(firstParty||priorFirstParty);
+}
 function inferWebsiteActivity(pages,companyName){
  const data=(pages||[]).map(p=>({
   header:[p.meta?.title,p.meta?.description,...(p.meta?.headings||[])].join(" ").toLowerCase().replace(/ё/g,"е"),
@@ -83,6 +101,14 @@ function inferWebsiteActivity(pages,companyName){
  const core=chosen.map(p=>p.header+" "+p.body.slice(0,3500)).join(" ");
  const combinedPages=data.map(p=>p.header+" "+p.body.slice(0,3800)).join(" ");
  const name=String(companyName||"").toLowerCase().replace(/ё/g,"е");
+ // The site may mention construction contractors among its suppliers.
+ // Its own beer / malt production is a stronger first-party activity signal.
+ if(beverageManufacturerEvidence({name:companyName},{
+  status:"site_profiled",
+  siteTitle:data.map(x=>x.header).join(" "),
+  siteDescription:chosen.map(x=>x.body.slice(0,400)).join(" "),
+  siteHeadings:data.map(x=>x.header)
+ }))return {type:"",reason:"Собственное производство напитков/солода; в утверждённых 45 типах отдельного пищевого подтипа нет"};
  const gas=/газоаналитическ|газоанализатор|газоанализ\w*|газосигнализ|течеискател/i.test(core);
  if(gas){
   const dealer=/(?:явля[а-я]{0,12}\s+(?:официальн[а-я]{0,10}\s+)?дилер[а-я]*|официальн[а-я]*\s+дилер[а-я]*|дилер[а-я]*\s+(?:всех|прибор|производител|оборудован))/i.test(core);
@@ -112,6 +138,14 @@ function inferWebsiteActivity(pages,companyName){
  }
   let result=infer(chosen.map(p=>p.header).join(". "));
  if(!result)result=infer(core.slice(0,3500));
+ // A contractor name mentioned as a supplier or renovation partner on
+ // a factory's site is NOT proof that the factory is a general contractor.
+ if(result?.type==="Промышленный генподрядчик"){
+  const ownRoleName=infer(companyName)?.type==="Промышленный генподрядчик";
+  const firstPartyContract=/((?:мы|наша\s+компания|наше\s+предприятие)\s.{0,100}(?:выступа\w*\s+ген(?:еральн\w*)?\s*подрядчик|осуществля\w*\s+генподряд|выполня\w*\s+(?:функции|работы)\s+генподряд))|(?:явля[ею]мся|является)\s+ген(?:еральным\s+)?подрядчик|выполня(?:ем|ет)\s+функции\s+генерального\s+подрядчика/i.test(core);
+  if(!ownRoleName&&!firstPartyContract)
+   return {type:"",reason:"Подрядчик упомянут на сайте, но собственные генподрядные услуги организации не подтверждены"};
+ }
  if(result&&operatingTypes.has(result.type)&&!ownName&&!ownClaim){
   return {type:"",reason:"Отрасли потребителей упомянуты на сайте, но не являются деятельностью компании"};
  }
@@ -126,6 +160,20 @@ function apply(records){
   const previous=valid.has(c.organizationType)?c.organizationType:(valid.has(c.type)?c.type:"");
   const byName=infer(c.name);
   const officiallyVerifiedType=valid.has(c.verifiedOrgType)?c.verifiedOrgType:"";
+  // Reconcile persisted wrong website profiles too: a previous crawler
+  // may have classified a beverage manufacturer as a general contractor
+  // from construction keywords elsewhere on the site. No new paid calls.
+  if(beverageManufacturerEvidence(c,site)){
+   const correctedSite=site&&["site_profiled","site_read_no_clear_type"].includes(site.status)?site.url:"";
+   return {...c,siteStatus:correctedSite?"site_profiled":c.siteStatus||"site_pending",
+    siteProfileUrl:correctedSite||c.siteVerified||"",siteVerified:correctedSite||c.siteVerified||"",
+    organizationType:"",type:"",proposedType:"",
+    category:"Конечные потребители",
+    industryDescription:"Производство пива, напитков и солода",
+    segmentConfidence:"Производственная деятельность подтверждена; узкий тип отсутствует в справочнике",
+    segmentSource:"Официальный сайт предприятия и ранее сохранённый AI-профиль",
+    verification:"Исправлена ошибочная классификация подрядчика — не является генподрядчиком по найденным сведениям"};
+  }
   const bySite=site?.status==="site_profiled"&&valid.has(site.siteType)?{type:site.siteType}:null;
   const siteBelongs=site?.status==="site_profiled"||site?.status==="site_read_no_clear_type";
   const websiteEvidence={
@@ -154,4 +202,4 @@ function apply(records){
   return {...c,...websiteEvidence,organizationType:selected,proposedType:selected,segmentConfidence:confidence,segmentSource:basis,verification:"Предварительная классификация"};
  });
 }
-module.exports={infer,apply,inferWebsiteActivity};
+module.exports={infer,apply,inferWebsiteActivity,beverageManufacturerEvidence};
