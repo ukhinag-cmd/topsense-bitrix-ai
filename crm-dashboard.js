@@ -67,7 +67,7 @@ function initialHtml(payload){
      items.map(t=>'<div style="font-size:11px;color:#a9c5d1;padding:7px 10px 8px 17px;line-height:1.35" title="'+escapeHtml(t.description)+'">'+escapeHtml(t.name)+'</div>').join("")+'</details>';
  }).join("");
  text=text.replace('<nav id="nav"></nav>',
-   '<nav id="nav"></nav><div class="subbrand" style="margin-top:24px">45 типов организаций · полный справочник</div><div style="padding-bottom:20px">'+groupHtml+'</div>');
+   '<nav id="nav"></nav><div class="subbrand" style="margin-top:24px">Расширяемый справочник типов организаций</div><div style="padding-bottom:20px">'+groupHtml+'</div>');
  text=text.replace('const categories=["Обзор","Подрядчики","Предприятия","Интеграторы и проекты","Дистрибьюторы","Сервис и метрология","Конкуренты","Не определены"];',
    'const categories=["Обзор","Подрядчики","Конечные потребители","Проектные продажи","Партнёрские продажи","Сервис и метрология","Конкуренты","Смежные организации","Не определены"];');
  text=text.replace('Отдельная аналитическая база уже содержит 49 подтверждённых карточек, но пока ещё не синхронизирована с этим веб-реестром. Здесь — прямое чтение Битрикс24 и подтверждения действующего реестра подрядчиков.',
@@ -322,7 +322,7 @@ async function loadPilot(){
   const d=await r.json();
   if(!r.ok||d.ok===false)throw Error("private AI store read error");
   const entries=Array.isArray(d.rows)?d.rows:[];
-  require("./client-finalization").ingest(entries);
+  // Restore confirmed types before replaying completion locks for those types.
   const x=new Map();
   for(const e of entries){
     if(!/^pilot:v[1234]:result:/.test(String(e.key||"")))continue;
@@ -330,6 +330,12 @@ async function loadPilot(){
     if(item.companyId&&item.recordType==="topsense-pilot-result")x.set(String(item.companyId),item);
   }
   const v4=entries.filter(e=>/^pilot:v4:result:/.test(String(e.key||""))).map(e=>e.payload||{});
+  const taxonomy=require("./client-taxonomy");
+  let addedTypes=0;
+  for(const row of v4)if(taxonomy.registerFromPilot(row))addedTypes++;
+  if(addedTypes)console.log(JSON.stringify({component:"client-taxonomy",
+   event:"new-subtypes-restored",count:addedTypes,total:taxonomy.stats().total}));
+  require("./client-finalization").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
   state.paidControl={
@@ -354,7 +360,7 @@ function commercialFromOrgType(t){
  if(x.family==="Подрядчики")return "Подрядчики";
  if(x.family==="Торговля")return "Партнёрские продажи";
  if(x.family==="Сервис")return "Сервис и метрология";
- if(x.family==="Эксплуатация")return "Конечные потребители";
+ if(x.family==="Эксплуатация"||x.family==="Отраслевые производства")return "Конечные потребители";
  if(x.family==="Смежные")return "Смежные организации";
  if(x.family==="Производители")return t.includes("газоаналитических")?"Конкуренты":"Проектные продажи";
  return "";
@@ -390,7 +396,7 @@ function data(known){
   if(!r){
     if(!ai)return c;
     const orgType=String(ai.primaryType||"");
-    const validType=ORG_TYPES.some(x=>x.name===orgType)&&ai.status==="classified";
+    const validType=require("./client-taxonomy").known(orgType)&&ai.status==="classified";
     return {...c,
       category:validType?commercialFromOrgType(orgType)||c.category:c.category,
       type:validType?orgType:"",
@@ -445,7 +451,7 @@ function data(known){
   aiResults:state.pilot.size,aiCalls:[...state.pilot.values()].filter(x=>x.tokenUsage).length,
   aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,
   aiLastChecked:state.pilotUpdatedAt,paidClassification:state.paidControl,contactsAt:state.contactsAt,counts,organizationTypes:ORG_TYPES,
-  organizationTypeCount:ORG_TYPES.length,
+  organizationTypeCount:ORG_TYPES.length,taxonomy:require("./client-taxonomy").stats(),
   siteCrawl:require("./website-profiler").stats(),
   researchCompletion:finalization.stats(),
   incomingLeads:require("./crm-lead-inbox").view(virtual.companies),
@@ -501,13 +507,13 @@ function route(req,res,pathname,known){
  write(res,404,{error:"Not found"});return true;
 }
 // Log only aggregate classification coverage; never log customer names, URLs or email.
-// A crawler queue being empty does not mean all 45 client types were assigned.
+// An empty crawl queue does not prove every company has a subtype.
 function coverageLog(){
  if(!state.companies.length)return;
  try{
   const snap=data(()=>[]);
   const companyList=snap.companies||[];
-  const typed=companyList.filter(x=>ORG_TYPES.some(t=>t.name===x.organizationType));
+  const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   const distinctTypes=new Set(typed.map(x=>x.organizationType));
   const sourceCounts={};
   for(const c of typed){

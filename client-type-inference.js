@@ -1,5 +1,5 @@
 "use strict";
-const valid=new Set(require("./company-types").types.map(x=>x.name));
+const valid={has:require("./client-taxonomy").known};
 const rules=[
 ["Нефтеперерабатывающий завод",/(?:нпз|нефтепереработ|нефтеперерабатывающ|новойл|нефтехимпереработ)/i],
 ["Газоперерабатывающее предприятие",/(?:гпз|газоперерабатывающ|газопереработк|гелиевый завод)/i],
@@ -108,8 +108,22 @@ function inferWebsiteActivity(pages,companyName){
   siteTitle:data.map(x=>x.header).join(" "),
   siteDescription:chosen.map(x=>x.body.slice(0,400)).join(" "),
   siteHeadings:data.map(x=>x.header)
- }))return {type:"",reason:"Собственное производство напитков/солода; в утверждённых 45 типах отдельного пищевого подтипа нет"};
- const gas=/газоаналитическ|газоанализатор|газоанализ\w*|газосигнализ|течеискател/i.test(core);
+ }))return {type:"Производство напитков",reason:"Собственное производство напитков и солода подтверждено профильными разделами сайта"};
+ // Product specialization is applied only when the company's own
+ // manufacturing is described, not when a dealer sells third-party goods.
+ const manufacturing=/собственн[а-яё]*\s+производств|мы\s+производим|мы\s+выпускаем|наш[ао]\s+производств|предприяти[ея]\s+производит|завод\s+производит|производител|производств[оае]\s+(?:удобрен|бытов|сигарет|табачн)/i.test(core);
+ const shopOnly=/интернет-магазин|розничн\w*\s+магазин|магазин\s+товаров/i.test(core)&&
+   !/собственн\w*\s+производств|завод\s+производит|мы\s+выпускаем/i.test(core);
+ if(manufacturing&&!shopOnly){
+  const sectors=[
+   ["Производство бытовой химии",/бытов[а-яё]*\s+хим|моющ[а-яё]*\s+средств|чистящ[а-яё]*\s+средств|стиральн[а-яё]*\s+порошк/i],
+   ["Производство табачных изделий",/табачн[а-яё]*\s+(?:издел|продукц|фабрик)|сигарет|производств[а-яё]*\s+табака/i],
+   ["Производство удобрений",/производств[а-яё]*\s+(?:минеральн[а-яё]*\s+|органическ[а-яё]*\s+)?удобрен|минеральн[а-яё]*\s+удобрен|карбамид|аммиачн[а-яё]*\s+селитр/i]
+  ].filter(x=>x[1].test(core));
+  if(sectors.length===1)return {type:sectors[0][0],
+   reason:"Собственное отраслевое производство подтверждено материалами сайта"};
+ }
+  const gas=/газоаналитическ|газоанализатор|газоанализ\w*|газосигнализ|течеискател/i.test(core);
  if(gas){
   const dealer=/(?:явля[а-я]{0,12}\s+(?:официальн[а-я]{0,10}\s+)?дилер[а-я]*|официальн[а-я]*\s+дилер[а-я]*|дилер[а-я]*\s+(?:всех|прибор|производител|оборудован))/i.test(core);
   const manufacturer=/(?:собственн[а-я]*\s+(?:производств[а-я]*|сборк[а-я]*)|разрабатываем\s+и\s+производим|производител[а-я]*\s+газоаналитическ|производств[а-я]*\s+(?:газоанализатор|газоаналитическ)|(?:нпп|научно.производственн).*газоаналит)/i.test(core+" "+name);
@@ -167,10 +181,10 @@ function apply(records){
    const correctedSite=site&&["site_profiled","site_read_no_clear_type"].includes(site.status)?site.url:"";
    return {...c,siteStatus:correctedSite?"site_profiled":c.siteStatus||"site_pending",
     siteProfileUrl:correctedSite||c.siteVerified||"",siteVerified:correctedSite||c.siteVerified||"",
-    organizationType:"",type:"",proposedType:"",
+    organizationType:"Производство напитков",type:"Производство напитков",proposedType:"",
     category:"Конечные потребители",
     industryDescription:"Производство пива, напитков и солода",
-    segmentConfidence:"Производственная деятельность подтверждена; узкий тип отсутствует в справочнике",
+    segmentConfidence:"Производственная деятельность подтверждена; тип включён в расширяемый справочник",
     segmentSource:"Официальный сайт предприятия и ранее сохранённый AI-профиль",
     verification:"Исправлена ошибочная классификация подрядчика — не является генподрядчиком по найденным сведениям"};
   }
@@ -182,6 +196,15 @@ function apply(records){
    siteProfileTitle:siteBelongs?(site?.siteTitle||""):"",
    siteProfileDescription:siteBelongs?(site?.siteDescription||""):""
   };
+  // An inspected first-party product site is more specific than a broad
+  // legacy chemical/manufacturing label, even if that older label is stored.
+  if(bySite&&["Производство бытовой химии","Производство табачных изделий","Производство удобрений","Производство напитков"].includes(bySite.type)&&
+   (previous!==bySite.type||officiallyVerifiedType!==bySite.type)){
+   return {...c,...websiteEvidence,organizationType:bySite.type,type:bySite.type,
+    category:"Конечные потребители",proposedType:"",
+    segmentConfidence:"Отраслевая специализация подтверждена страницами собственной продукции",
+    segmentSource:"Профильные страницы проверенного сайта компании",verification:"Предварительная классификация"};
+  }
   if(officiallyVerifiedType)return {...c,...websiteEvidence,siteStatus:"official_site_verified",siteProfileUrl:c.siteCandidate||websiteEvidence.siteProfileUrl,organizationType:officiallyVerifiedType,segmentConfidence:"Высокая — официальный сайт",segmentSource:c.verifiedOrgEvidence||"Юридическое наименование и описание деятельности на официальном сайте"};
   if(previous==="Диагностика трубопроводов и оборудования"&&bySite&&
    ["Дилер промышленного оборудования","Дистрибьютор / оптовый поставщик"].includes(bySite.type)){
