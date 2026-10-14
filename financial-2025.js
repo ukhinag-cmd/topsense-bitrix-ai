@@ -51,4 +51,11 @@ function forGroup(members){
   status:records.length===1?"source_recorded":"same_value_multiple_cards",
   basis:"Выручка юрлица за 2025 год, не сумма выручек дублирующих CRM-карточек. Сверка финансового источника обязательна"};
 }
-module.exports={fromCompany,forGroup,parseAmount,innNumber,empty};
+function withRequisite(finance,requisite){
+ const f=finance||empty(),inn=String(requisite?.inn||"");
+ if(!inn||requisite?.status!=="inn_recorded")return f;
+ if(f.inn&&f.inn!==inn)return {...empty("identity_conflict"),basis:"ИНН в карточке и реквизитах различаются; финансовые данные не объединены"};
+ if(f.amountRUB!==null&&f.year===YEAR)return {...f,inn};
+ return {...f,inn,status:"inn_only",basis:"ИНН получен из реквизитов CRM. Отчётность за 2025 год ещё не загружена из ФНС"};
+}
+module.exports={fromCompany,forGroup,withRequisite,parseAmount,innNumber,empty};

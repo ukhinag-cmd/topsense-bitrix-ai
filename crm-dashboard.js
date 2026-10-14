@@ -391,7 +391,9 @@ function data(known){
   return {...c,category:group,type,organizationType:type,verificationStatus:r.verificationStatus,siteVerified:String(r.website||""),strategy:String(r.strategicReason||"").slice(0,260),verification:"Проверено по реестру подрядчиков"};
  });
  const finalization=require("./client-finalization");
- const typedRecords=require("./client-type-inference").apply(records).map(c=>finalization.apply(c));
+ const requisites=require("./company-requisites"),finances=require("./financial-2025");
+ const typedRecords=require("./client-type-inference").apply(records)
+  .map(c=>finalization.apply({...c,finance2025:finances.withRequisite(c.finance2025,requisites.get(c.id))}));
  const virtual=require("./crm-duplicates").consolidate(typedRecords);
  // A virtual duplicate is never treated as independently proven identity.
  const duplicateIds=new Set([...virtual.duplicates,...virtual.review]
@@ -413,6 +415,7 @@ function data(known){
   sourceCrmCount:state.rawCrmTotal,
   virtualCustomerTotal:virtual.stats.customerCardCount,
   financial2025Coverage:virtual.companies.reduce((a,c)=>{const k=c.finance2025?.status||"no_data";a[k]=(a[k]||0)+1;return a},{}),
+  requisites:requisites.stats(),
   confirmed:virtual.companies.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,
   relatedGroups:virtual.stats.groupedCount,
   duplicateStats:virtual.stats,
@@ -471,8 +474,9 @@ function route(req,res,pathname,known){
  if(pathname==="/contractors/duplicates"){write(res,200,require("./client-duplicates").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/list"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){
-  const section=new URL(req.url,"http://localhost").searchParams.get("section")||"Обзор";
-  write(res,200,require("./client-overview").render(data(known),section),"text/html; charset=utf-8");return true;
+  const query=new URL(req.url,"http://localhost").searchParams;
+  const section=query.get("section")||"Обзор",type=query.get("type")||"",page=query.get("page")||"1";
+  write(res,200,require("./client-overview").render(data(known),section,type,page),"text/html; charset=utf-8");return true;
  }
  write(res,404,{error:"Not found"});return true;
 }
@@ -512,5 +516,7 @@ setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
 setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
 setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 12000);
+setTimeout(() => require("./company-requisites").refresh().catch(()=>{}), 28000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
+setInterval(() => require("./company-requisites").refresh().catch(()=>{}), 24*60*60*1000);
 module.exports={route,refresh,data};
