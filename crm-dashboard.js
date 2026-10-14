@@ -311,11 +311,15 @@ async function loadPilot(){
   const v4=entries.filter(e=>/^pilot:v4:result:/.test(String(e.key||""))).map(e=>e.payload||{});
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
+  const v4Reservations=entries.filter(e=>/^pilot:v4:reservation:\d+$/.test(String(e.key||"")));
   state.paidControl={
    newResults:v4.filter(p=>p.status==="classified"||p.status==="review").length,
-   calls:v4.filter(p=>p.tokenUsage).length,
+   calls:v4Reservations.length,
+   errors:v4.filter(p=>p.status==="api_or_storage_error").length,
    estimatedUsd:v4.reduce((a,p)=>a+(Number(p.estimatedCostUsd)||0),0),
+   committedUsd:Number(summary.committedUsd)||0,
    limitUsd: Number(summary.approvedLimitUsd)||Number(process.env.TOPSENSE_PAID_CLASSIFICATION_BUDGET_USD)||0,
+   remainingCandidates:Number(summary.remainingCandidates)||0,
    previousProcessed:oldResults.size,
    lastRun:summary.updatedAt||null,
    status:summary.status||"not_started"
