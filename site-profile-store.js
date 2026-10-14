@@ -81,6 +81,13 @@ function serialise(profile){
   siteActivityReason:String(profile.siteActivityReason||"").slice(0,260),
   siteType:profile.siteType||null,
   siteConfidence:String(profile.siteConfidence||"").slice(0,160),
+  staffEvidence:profile.staffEvidence?.count>0?{
+   count:Number(profile.staffEvidence.count),year:Number(profile.staffEvidence.year)||null,
+   approximate:Boolean(profile.staffEvidence.approximate),
+   source:String(profile.staffEvidence.source||"").slice(0,100),
+   sourceUrl:String(profile.staffEvidence.sourceUrl||"").slice(0,400),
+   basis:String(profile.staffEvidence.basis||"").slice(0,250)
+  }:null,
   checkedAt:String(profile.checkedAt||new Date().toISOString())};
 }
 function schedule(ms=15000){
