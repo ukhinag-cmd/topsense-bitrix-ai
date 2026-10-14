@@ -160,6 +160,7 @@ async function loop(){
  if(running)return;running=true;
  while(queue.length){
   const c=queue.shift();pending.delete(c.id);
+  if(require("./client-finalization").isComplete(c.id))continue;
   if(results.has(c.id))continue;
   try{
    const record=await scan(c);results.set(c.id,record);checked++;
