@@ -3,7 +3,7 @@
 // A completed company remains in the main registry; contacts, opportunities,
 // payments, ownership, and new CRM events continue to be refreshed read-only.
 const crypto=require("crypto");
-const valid=new Set(require("./company-types").types.map(t=>t.name));
+const valid={has:require("./client-taxonomy").known};
 const PREFIX="client:completed:v1:";
 const completed=new Map(),pending=new Map();
 let flushing=false,timer=null,restored=0,stored=0,errors=0,lastError="";
