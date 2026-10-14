@@ -138,6 +138,14 @@ function inferWebsiteActivity(pages,companyName){
  }
   let result=infer(chosen.map(p=>p.header).join(". "));
  if(!result)result=infer(core.slice(0,3500));
+ // A contractor name mentioned as a supplier or renovation partner on
+ // a factory's site is NOT proof that the factory is a general contractor.
+ if(result?.type==="Промышленный генподрядчик"){
+  const ownRoleName=infer(companyName)?.type==="Промышленный генподрядчик";
+  const firstPartyContract=/((?:мы|наша\s+компания|наше\s+предприятие)\s.{0,100}(?:выступа\w*\s+ген(?:еральн\w*)?\s*подрядчик|осуществля\w*\s+генподряд|выполня\w*\s+(?:функции|работы)\s+генподряд))|(?:явля[ею]мся|является)\s+ген(?:еральным\s+)?подрядчик|выполня(?:ем|ет)\s+функции\s+генерального\s+подрядчика/i.test(core);
+  if(!ownRoleName&&!firstPartyContract)
+   return {type:"",reason:"Подрядчик упомянут на сайте, но собственные генподрядные услуги организации не подтверждены"};
+ }
  if(result&&operatingTypes.has(result.type)&&!ownName&&!ownClaim){
   return {type:"",reason:"Отрасли потребителей упомянуты на сайте, но не являются деятельностью компании"};
  }
