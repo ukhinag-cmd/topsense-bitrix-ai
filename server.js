@@ -7402,6 +7402,21 @@ server.listen(PORT, "0.0.0.0", () => {
     }, 19000);
   }
 
+  // Continuous, idempotent paid classification for the approved 45-type
+  // client registry. It NEVER writes to Bitrix24 and is independently
+  // controlled from legacy AI automation. All calls are reserved in the
+  // private store before billing, with an explicit budget ceiling.
+  function paidClientCoverageTick(){
+    if (!analyticsReadOnly() ||
+        String(process.env.TOPSENSE_PAID_CLASSIFICATION_ENABLED||"").trim()!=="1")return;
+    require("./pilot4").runPilot().catch(error=>{
+      console.error(JSON.stringify({component:"topsense-paid-v4",event:"cycle-error",
+        message:String(error?.message||error).slice(0,180),at:new Date().toISOString()}));
+    });
+  }
+  setTimeout(paidClientCoverageTick,90000);
+  setInterval(paidClientCoverageTick,12*60*1000);
+
   // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
     await loadPersistedContractors();
