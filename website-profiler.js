@@ -1,7 +1,10 @@
 "use strict";
 const dns=require("dns").promises,net=require("net");
 const {inferWebsiteActivity}=require("./client-type-inference");
-const profiles=new Map(),visited=new Set(),queue=[],sourcePriority=new Map();
+const evidenceStore=require("./site-profile-store");
+const profiles=new Map(),visited=new Set(),queue=[],sourcePriority=new Map(),sourceFingerprints=new Map();
+const persistedProfiles=new Map(),deferredCompanies=[];
+let restoring=false,restored=false,restoredProfiles=0;
 let pagesScanned=0,checkedSites=0,lastProgressLogged=0;
 let active=0,lastAt=0;
 function publicIPv4(ip){
@@ -133,7 +136,9 @@ async function one(c){
   const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
-  profiles.set(c.id,{status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()});
+  const profile={status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()};
+  profiles.set(c.id,profile);
+  evidenceStore.queue(c,profile);
  }catch(error){if(evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM"))<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
 function pump(){
@@ -163,23 +168,55 @@ function evidenceRank(source){
  return 2;
 }
 function enqueue(companies){
- for(const c of companies){
-  const id=String(c.id||"");
-  const newRank=urls(c).length?evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM")):0;
+ // Restore already completed free site checks before starting a new crawl.
+ // Render instances are ephemeral; a restart must not erase classification.
+ if(!restored&&evidenceStore.configured()){
+  deferredCompanies.push(...(companies||[]));
+  if(!restoring){
+   restoring=true;
+   evidenceStore.load().then(map=>{
+    for(const [id,row] of map)persistedProfiles.set(id,row);
+   }).catch(()=>{}).finally(()=>{
+    restored=true;restoring=false;
+    const buffered=deferredCompanies.splice(0);
+    console.log(JSON.stringify({component:"site-profiler",event:"cache-loaded",rows:persistedProfiles.size}));
+    enqueue(buffered);
+   });
+  }
+  return;
+ }
+ for(const c of companies||[]){
+  const id=String(c?.id||"");if(!id)continue;
+  const hasSite=urls(c).length>0;
+  const newRank=hasSite?evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM")):0;
+  const signature=hasSite?evidenceStore.fingerprint(c):"";
   if(visited.has(id)){
-   if(newRank<=(sourcePriority.get(id)||0))continue;
-   sourcePriority.set(id,newRank);
-   if(!urls(c).length)continue;
-   queue.push(c);
+   const oldRank=sourcePriority.get(id)||0;
+   if(newRank<oldRank||(newRank===oldRank&&sourceFingerprints.get(id)===signature))continue;
+   sourcePriority.set(id,newRank);sourceFingerprints.set(id,signature);
+   // Changing a same-priority website must invalidate a previous site's type.
+   profiles.set(id,{status:hasSite?"site_pending":"site_absent",source:"Источник сайта изменился; нужна перепроверка"});
+   if(hasSite)queue.push(c);
    continue;
   }
-  visited.add(id);sourcePriority.set(id,newRank);
-  if(!urls(c).length){profiles.set(id,{status:"site_absent",source:"Нет подтверждённого сайта или корпоративного домена"});}
-  else queue.push(c);
+  visited.add(id);sourcePriority.set(id,newRank);sourceFingerprints.set(id,signature);
+  if(!hasSite){
+   profiles.set(id,{status:"site_absent",source:"Нет подтверждённого сайта или корпоративного домена"});
+   continue;
+  }
+  const cached=evidenceStore.restored(c,persistedProfiles.get(id));
+  if(cached){
+   profiles.set(id,cached);restoredProfiles++;continue;
+  }
+  queue.push(c);
  }
  pump();
- if(companies.length>25)console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",queued:queue.length,known:profiles.size}));
+ if((companies||[]).length>25)console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",queued:queue.length,known:profiles.size,restoredProfiles}));
 }
 function get(id){return profiles.get(String(id))||{status:"site_pending"}}
-function stats(){const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;return {queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,byStatus:by}}
+function stats(){
+ const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;
+ return {queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
+  restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
+}
 module.exports={enqueue,get,stats,fetchPage};
