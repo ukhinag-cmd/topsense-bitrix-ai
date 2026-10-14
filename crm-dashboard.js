@@ -221,11 +221,17 @@ function enqueueLinkedContactSites(){
  if(suggested.length)require("./website-profiler").enqueue(suggested);
 }
 function enqueueMissingSiteNameSearch(){
+ const requisites=require("./company-requisites");
+ // Wait for the read-only legal-requisites snapshot. Without it, name-based
+ // discovery cannot corroborate search results by INN and wastes a full pass.
+ if(requisites.stats().status!=="ready")return;
  const missing=[];
  for(const c of state.companies){
   if(c.siteCandidate||c.corporateDomain||c.verifiedOrgType)continue;
   const linked=state.linkedContacts.get(c.id);
-  missing.push({...c,contactEmails:linked?[...linked.emails]:[]});
+  const legal=requisites.get(c.id);
+  missing.push({...c,crmInn:legal.status==="inn_recorded"?legal.inn:"",
+   contactEmails:linked?[...linked.emails]:[]});
  }
  require("./name-site-search").enqueue(missing);
 }
@@ -588,7 +594,7 @@ setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
 setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
 setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 12000);
-setTimeout(() => require("./company-requisites").refresh().catch(()=>{}), 28000);
+setTimeout(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 28000);
 // Keep the CRM company/contact snapshot fresh without repeating paid AI research.
 // Site profiler fingerprints prevent unchanged completed site evidence being crawled again.
 setInterval(() => {
@@ -596,5 +602,5 @@ setInterval(() => {
  loadLinkedContacts().catch(()=>{});
 }, 2*60*60*1000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
-setInterval(() => require("./company-requisites").refresh().catch(()=>{}), 24*60*60*1000);
+setInterval(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 24*60*60*1000);
 module.exports={route,refresh,data};
