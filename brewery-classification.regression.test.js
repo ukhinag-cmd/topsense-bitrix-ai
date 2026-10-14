@@ -57,3 +57,25 @@ test("Actual construction contractors keep their industrial-contractor classific
  assert.equal(value.organizationType,"Промышленный генподрядчик");
  assert.equal(value.category,"Подрядчики");
 });
+
+test("Mentioning a construction contractor in another factory's site does not make that factory a general contractor",()=>{
+ const classifier=setup(null);
+ const pages=[{pageUrl:"https://industrial.example/about",meta:{
+  title:"О компании Производственный завод",
+  description:"Производство оборудования и компонентов",
+  headings:["Наш завод","Реконструкция"],
+  body:"Реконструкцию здания выполнял ООО Промстрой. Основное направление нашего завода — производство приборов."}}];
+ const result=classifier.inferWebsiteActivity(pages,"АО Завод измерительной техники");
+ assert.equal(result.type,"");
+ assert.match(result.reason,/собственные генподрядные услуги/);
+});
+test("First-party explicit general-contractor claims are still eligible",()=>{
+ const classifier=setup(null);
+ const pages=[{pageUrl:"https://construction.example/about",meta:{
+  title:"О компании Инжиниринг",
+  description:"Компания осуществляет комплексные строительные проекты",
+  headings:["Наши услуги"],
+  body:"Мы выполняем функции генерального подрядчика, осуществляем генподряд и строим промышленные объекты."}}];
+ const result=classifier.inferWebsiteActivity(pages,"ООО Компания Инжиниринг");
+ assert.equal(result.type,"Промышленный генподрядчик");
+});
