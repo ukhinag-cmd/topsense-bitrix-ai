@@ -119,7 +119,24 @@ const REVIEWED_PUBLIC_SITES=new Map([
  ["2334",{url:"https://gazoanalit.ru/",name:"НПП ГАЗОАНАЛИТ",primaryType:"Производитель газоаналитических приборов",source:"Публичный сайт gazoanalit.ru: ООО НПП ГазоАналит, собственное производство и газоаналитические системы, совпадает телефон и корпоративная почта"}],
  ["1134",{url:"https://gazoanalit.ru/",name:"НПП ГАЗОАНАЛИТ",primaryType:"Производитель газоаналитических приборов",source:"Публичный сайт gazoanalit.ru: ООО НПП ГазоАналит, производство систем газового анализа; в CRM указано то же полное юридическое наименование"}]
 ]);
-function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB),siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":(website(x.WEB)?"Сайт из CRM":""),verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),finance2025:require("./financial-2025").fromCompany(x),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
+// Company-specific websites independently tied to a CRM entity (name +
+// telephone + legal INN). These are not marked as official site content read
+// until the website profiler verifies the actual company behind the page.
+const IDENTIFIED_WEBSITE_REFERENCES=new Map([
+ ["114",{url:"https://avsv.gazprom-neft.ru/",companyName:"АВТОМАТИКА-СЕРВИС",
+  corporateGroup:"ПАО Газпром нефть",legalInn:"5501068136",
+  source:"Отраслевые каталоги производителей и партнёров: ООО Автоматика-Сервис, ИНН 5501068136, телефон +7 (3812) 27-77-27, сайт avsv.gazprom-neft.ru; проверить доступность",
+  crmPhoneSuffix:"277727"}]
+]);
+function referencedWebsite(id,company,phones){
+ const ref=IDENTIFIED_WEBSITE_REFERENCES.get(String(id));
+ if(!ref||String(company||"").toLowerCase().replace(/ё/g,"е").replace(/[^а-яa-z0-9]/g,"")!==
+  ref.companyName.toLowerCase().replace(/ё/g,"е").replace(/[^а-яa-z0-9]/g,""))return null;
+ const numbers=(Array.isArray(phones)?phones:[]).map(x=>String(x?.VALUE||x||"").replace(/\D/g,""));
+ if(!numbers.some(x=>x.endsWith(ref.crmPhoneSuffix)))return null;
+ return ref;
+}
+function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);const identified=referencedWebsite(id,x.TITLE,x.PHONE);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",corporateGroup:identified?.corporateGroup||"",legalInnReference:identified?.legalInn||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),finance2025:require("./financial-2025").fromCompany(x),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
