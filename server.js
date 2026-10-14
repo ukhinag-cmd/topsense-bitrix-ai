@@ -5,6 +5,8 @@ const net = require("net");
 const pdfParse = require("pdf-parse");
 
 const PORT = process.env.PORT || 10000;
+// Production analytics must never mutate Bitrix24 when this guard is active.
+function analyticsReadOnly(){return String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1";}
 const MAX_BODY = 1024 * 1024;
 
 function json(res, status, payload) {
@@ -7314,6 +7316,10 @@ const server = http.createServer((req, res) => {
         activityId: evt.activityId || null,
       });
 
+      if (analyticsReadOnly()) {
+        console.log(JSON.stringify({component:"topsense-dashboard",event:"bitrix-write-blocked",reason:"analytics-readonly",dealId:evt.dealId||null}));
+        return; // Event acknowledged; no CRM processing is executed.
+      }
       const upperEvent = String(evt.event || "").toUpperCase();
       const work = upperEvent === "ONCRMACTIVITYADD"
         ? processActivityEvent(evt)
@@ -7334,7 +7340,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`TOP-SENSE Bitrix receiver listening on port ${PORT}`);
 
   // Old test maintenance is opt-in only. It must not silently consume API credits.
-  if (String(process.env.TEST_MAINTENANCE_ENABLED || "").trim() === "1") {
+  if (!analyticsReadOnly() && String(process.env.TEST_MAINTENANCE_ENABLED || "").trim() === "1") {
     setTimeout(() => {
       reconcileRecentTestDeals().catch(error => {
         console.error("Unexpected reconciliation error", error);
@@ -7356,7 +7362,7 @@ server.listen(PORT, "0.0.0.0", () => {
 
   // Isolated read-only pilot: only if deliberately enabled on Render.
   // The legacy contractor automation retains its independent OPENAI_PAUSED setting.
-  if (String(process.env.TOPSENSE_PILOT_ENABLED || "").trim() === "1") {
+  if (!analyticsReadOnly() && String(process.env.TOPSENSE_PILOT_ENABLED || "").trim() === "1") {
     setTimeout(() => {
       require("./pilot").runPilot().catch((error) => {
         console.error(JSON.stringify({
@@ -7370,7 +7376,7 @@ server.listen(PORT, "0.0.0.0", () => {
   }
 
   // Independently authorized follow-on classification with cumulative $5 cap.
-  if (String(process.env.TOPSENSE_PILOT2_ENABLED || "").trim() === "1") {
+  if (!analyticsReadOnly() && String(process.env.TOPSENSE_PILOT2_ENABLED || "").trim() === "1") {
     setTimeout(() => {
       require("./pilot2").runPilot().catch((error) => {
         console.error(JSON.stringify({
@@ -7383,7 +7389,7 @@ server.listen(PORT, "0.0.0.0", () => {
   }
 
   // Authorized next cohort, subject to the existing cumulative $5 spending ceiling.
-  if (String(process.env.TOPSENSE_PILOT3_ENABLED || "").trim() === "1") {
+  if (!analyticsReadOnly() && String(process.env.TOPSENSE_PILOT3_ENABLED || "").trim() === "1") {
     setTimeout(() => {
       require("./pilot3").runPilot().catch((error) => {
         console.error(JSON.stringify({
@@ -7399,6 +7405,7 @@ server.listen(PORT, "0.0.0.0", () => {
   // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
     await loadPersistedContractors();
+    if (analyticsReadOnly())return;
     startContractorContinuousScan();
     dailyContractorScanTick().catch(error => {
       console.error("Unexpected daily contractor scan error", error);
@@ -7408,11 +7415,12 @@ server.listen(PORT, "0.0.0.0", () => {
   // Check periodically while awake. If Render slept through the evening,
   // the next wake catches up the missed previous day.
   setInterval(() => {
+    if (analyticsReadOnly())return;
     dailyContractorScanTick().catch(error => {
       console.error("Unexpected daily contractor scan error", error);
     });
 
-    if (String(process.env.TEST_MAINTENANCE_ENABLED || "").trim() === "1") {
+    if (!analyticsReadOnly() && String(process.env.TEST_MAINTENANCE_ENABLED || "").trim() === "1") {
       reconcileRecentTestDeals().catch(error => {
         console.error("Unexpected reconciliation error", error);
       });
