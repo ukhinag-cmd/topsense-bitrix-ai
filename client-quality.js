@@ -13,6 +13,8 @@ function summary(payload){
   groupStatuses[k]=(groupStatuses[k]||0)+1;
  }
  const covered=new Set(typed.map(c=>c.organizationType)).size;
+ const provisionalNameOnly=typed.filter(c=>String(c.segmentSource||"").includes("Название CRM, без подтверждения сайтом")).length;
+ const officialWebsite=typed.filter(c=>String(c.segmentConfidence||"").startsWith("Высокая — официальный сайт")).length;
  const audit=payload.salesAudit||{},dup=payload.duplicateStats||{},sites=payload.siteCrawl||{},mail=payload.mailAudit||{};
  const incomplete=typed.length!==customers.length||
   Number(dup.reviewGroupCount||0)>0||
@@ -22,7 +24,7 @@ function summary(payload){
  return {
   timestamp:new Date().toISOString(),status:payload.status,
   crmCards:Number(payload.crmCardTotal||0),customers:customers.length,typed:typed.length,
-  untyped:customers.length-typed.length,coveragePercent:customers.length?Math.round(typed.length/customers.length*1000)/10:0,
+  untyped:customers.length-typed.length,provisionalNameOnly,officialWebsite,coveragePercent:customers.length?Math.round(typed.length/customers.length*1000)/10:0,
   taxonomyTotal:validTypes.size,representedTypes:covered,unrepresentedTypes:validTypes.size-covered,
   duplicateGroups:Number(dup.groupedCount||0),duplicateReview:Number(dup.reviewGroupCount||0),
   duplicateIntegrity:dup.duplicateCoverageValidated===true,
@@ -42,10 +44,10 @@ function html(payload){
  const q=summary(payload);
  const metrics=[
   ["Сводных клиентов",q.customers],["Определён тип",q.typed],["Не определён",q.untyped],
-  ["Исходных CRM-карточек",q.crmCards],["Типов в базе",q.representedTypes+" / "+q.taxonomyTotal],
+  ["Исходных CRM-карточек",q.crmCards],["Только по названию (предварит.)",q.provisionalNameOnly],["Официальный сайт в CRM-проверке",q.officialWebsite],["Типов в базе",q.representedTypes+" / "+q.taxonomyTotal],
   ["Дублей на ручную проверку",q.duplicateReview],["Сайтов реально проверено",q.scannedSites],
   ["Сайтов восстановлено из хранилища",q.restoredProfiles],["Сайтов в очереди",q.siteQueue],
-  ["Без известного адреса сайта",q.siteAbsent],["Проверенных писем/карточек",q.mailChecked],
+  ["Без известного адреса сайта",q.siteAbsent],["Компаний проверено по почте",q.mailChecked],
   ["Связей сделок подтверждено",q.recoveryVerified]
  ];
  const lines=Object.entries(q.groupStatuses).sort((a,b)=>b[1]-a[1])
