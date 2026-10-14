@@ -123,6 +123,14 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
   const ids=c.crmIdList?.length?c.crmIdList:[c.id];
   const bought=String(c.saleInfo?.purchaseStatus||"").startsWith("БЫЛА");
   const website=companyWebsiteDetails(c),site=website.url;
+  const finance=c.finance2025||{},staff=c.staffEvidence||{};
+  const revenue=finance.year===2025&&Number.isFinite(finance.amountRUB)?
+   Number(finance.amountRUB).toLocaleString("ru-RU",{maximumFractionDigits:0})+" ₽":"нет подтверждённых данных";
+  const staffValue=Number.isInteger(staff.count)&&staff.count>0?
+   (staff.approximate?"около ":"")+Number(staff.count).toLocaleString("ru-RU")+
+   " чел. ("+(staff.year?String(staff.year)+" г.":"год не указан")+")":"нет подтверждённых данных";
+  const staffSource=staff.count&&staff.sourceUrl?
+   ' <a href="'+esc(staff.sourceUrl)+'" target="_blank" rel="noopener noreferrer">Источник ↗</a>':"";
   const companyTitle=esc(c.name||"Без названия");
   return '<article class="companyCard"><div class="companyTitle">'+
    (site?'<a class="companyWebsite" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer" title="'+(website.verified?"Перейти на изученный сайт":"Сайт-кандидат: принадлежность компании не подтверждена")+'">'+companyTitle+' ↗</a>':companyTitle)+'</div>'+
@@ -130,6 +138,8 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
    (c.corporateGroup?'<div class="companyMeta">Группа: '+esc(c.corporateGroup)+' · отдельное юридическое лицо</div>':"")+
    '<div class="companyMeta">'+(bought?"Подтверждена покупка по стадиям":"Покупка: не подтверждена / идёт проверка")+
    ' · '+(website.verified?"Сайт изучен":website.candidate?"Сайт-кандидат · требует подтверждения":"Сайт не найден")+'</div>'+   (site?'<div class="companyMeta websiteLine">Сайт: <a class="websiteAddress" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer">'+esc(website.domain)+' ↗</a></div>':"")+
+   '<div class="companyMeta financialLine">Выручка за 2025 год: '+esc(revenue)+'</div>'+
+   '<div class="companyMeta financialLine">Численность сотрудников: '+esc(staffValue)+staffSource+'</div>'+
    '<a href="'+esc(c.crmUrl||"")+'" target="_blank" rel="noopener noreferrer">Открыть в Bitrix24 ↗</a></article>';
   }).join("");
   if(group.length===1)return inner;
