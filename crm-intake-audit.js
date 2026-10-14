@@ -107,13 +107,19 @@ async function refresh(companySource){
 function snapshot(){return {status:state.status,updatedAt:state.updatedAt,leadStatus:state.leadStatus,
  dealStatus:state.dealStatus,contactStatus:state.contactStatus,errors:state.errors,stats:state.stats,items:state.items};}
 const num=x=>Number(x||0).toLocaleString("ru-RU");
-function html(){
+function html(options={}){
  const state=snapshot(),d=state.stats||{},days=Object.entries(d.byDay||{}).sort((a,b)=>a[0].localeCompare(b[0])),peak=Math.max(1,...days.map(x=>x[1]));
+ const kind=["all","lead","deal"].includes(String(options.kind))?String(options.kind):"all";
+ const link=["all","unlinked","linked"].includes(String(options.link))?String(options.link):"all";
+ const selected=state.items.filter(x=>(kind==="all"||x.kind===kind)&&(link==="all"||(link==="unlinked"?x.link==="unlinked":x.link!=="unlinked")));
+ const pages=Math.max(1,Math.ceil(selected.length/100));
+ const page=Math.min(pages,Math.max(1,parseInt(String(options.page||1),10)||1));
+ const path=(n)=>"/contractors/incoming?kind="+encodeURIComponent(kind)+"&link="+encodeURIComponent(link)+"&page="+n;
  const stats=[["Лиды",d.leads],["Сделки",d.deals],["Всего с 6 сентября",d.total],["С 1 октября",d.october],
   ["Без установленной компании",d.unlinked],["Связь через контакт",d.viaContact],["Возможные служебные",d.technical]]
   .map(([label,n])=>'<div class="tile"><b>'+num(n)+'</b><span>'+esc(label)+'</span></div>').join("");
  const chart=days.map(([day,n])=>'<div class="bar" title="'+esc(day)+': '+num(n)+'"><div style="height:'+Math.max(3,140*n/peak)+'px"></div><small>'+esc(day.slice(5))+'</small></div>').join("");
- const cards=state.items.slice(0,250).map(x=>'<div class="entry"><b>'+esc(x.title||"Без темы")+'</b><p>'+esc(x.kind==="lead"?"Лид":"Сделка")+' №'+esc(x.id)+' · '+esc(x.created)+'</p>'+
+ const cards=selected.slice((page-1)*100,page*100).map(x=>'<div class="entry"><b>'+esc(x.title||"Без темы")+'</b><p>'+esc(x.kind==="lead"?"Лид":"Сделка")+' №'+esc(x.id)+' · '+esc(x.created)+'</p>'+
   '<p>Ответственный CRM #'+esc(x.owner||"—")+' · стадия '+esc(x.stage||"—")+'</p>'+
   '<p>Компания: '+esc(x.companyId?"CRM #"+x.companyId:x.companyCandidate||"не установлена")+
   ' · '+esc(x.link)+(x.technical?' · Возможно служебное письмо':"")+'</p>'+
@@ -125,7 +131,9 @@ function html(){
  '<p class="note">Проверено: '+esc(state.updatedAt||"ожидаем")+' · статус: '+esc(state.status)+
  ' · лиды: '+esc(state.leadStatus)+' · сделки: '+esc(state.dealStatus)+' · '+esc(state.errors.join(", "))+'</p>'+
  '<div class="stats">'+stats+'</div><section><h2>Поступления по дням</h2><div class="timeline">'+chart+'</div></section>'+
- '<section><h2>Последние обращения</h2><p class="note">Показаны последние 250. Заявки без доказанной связи с компанией не объединяются по совпадению названий.</p>'+
+ '<section><h2>Обращения · '+num(selected.length)+'</h2><p class="note">Без доказанной связи с компанией не объединяем по совпадению названий.</p>'+
+ '<p class="note"><a href="/contractors/incoming?kind=all&link=all">Все</a> · <a href="/contractors/incoming?kind=lead&link=all">Лиды</a> · <a href="/contractors/incoming?kind=deal&link=all">Сделки</a> · <a href="/contractors/incoming?kind=all&link=unlinked">Без компании</a> · <a href="/contractors/incoming?kind=all&link=linked">Связанные</a></p>'+
+ '<p class="note">Страница '+num(page)+' из '+num(pages)+' '+(page>1?'<a href="'+esc(path(page-1))+'">← Назад</a>':'')+' '+(page<pages?'<a href="'+esc(path(page+1))+'">Далее →</a>':'')+'</p>'+
  '<div class="cards">'+(cards||"<p>Загрузка данных CRM</p>")+'</div></section></main></body></html>';
 }
 module.exports={refresh,snapshot,html,summarize,record,technical};
