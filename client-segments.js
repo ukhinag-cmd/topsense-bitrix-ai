@@ -6,7 +6,7 @@ const escape=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">"
 const jsonSafe=v=>JSON.stringify(v).replace(/</g,"\\u003c");
 function html(payload){
  const types=TYPES.map(x=>x.name);
- const records=(payload.companies||[]).map(x=>({id:x.id,name:display(x.name||"").name,opf:display(x.name||"").opf||"",sale:x.saleInfo||{},finance:x.finance2025||{},type:types.includes(x.organizationType)?x.organizationType:(types.includes(x.type)?x.type:"Не определён"),industryDescription:x.industryDescription||"",category:x.category||"",mailStatus:x.mailEvidence?.status||"not_started",signatureWebsite:x.mailEvidence?.signatureWebsite||"",cardAttachments:x.mailEvidence?.attachments||0,confidence:x.segmentConfidence||x.verification||"Не определено",source:x.segmentSource||"",nameSearch:x.nameSearch||{},siteStatus:x.siteStatus||"",siteInfo:companyWebsiteDetails(x),siteUrl:reviewedWebsiteUrl(x.siteProfileUrl||x.siteVerified||""),email:x.crmEmails||[],contactEmails:x.contactEmails||[],contacts:x.contactNames||[],url:x.crmUrl||"",crmIds:x.crmIdList||[x.id],members:x.mergedCrmCards||[],duplicateStatus:x.duplicateStatus||""}));
+ const records=(payload.companies||[]).map(x=>({id:x.id,name:display(x.name||"").name,opf:display(x.name||"").opf||"",sale:x.saleInfo||{},finance:x.finance2025||{},staff:x.staffEvidence||{},type:types.includes(x.organizationType)?x.organizationType:(types.includes(x.type)?x.type:"Не определён"),industryDescription:x.industryDescription||"",category:x.category||"",mailStatus:x.mailEvidence?.status||"not_started",signatureWebsite:x.mailEvidence?.signatureWebsite||"",cardAttachments:x.mailEvidence?.attachments||0,confidence:x.segmentConfidence||x.verification||"Не определено",source:x.segmentSource||"",nameSearch:x.nameSearch||{},siteStatus:x.siteStatus||"",siteInfo:companyWebsiteDetails(x),siteUrl:reviewedWebsiteUrl(x.siteProfileUrl||x.siteVerified||""),email:x.crmEmails||[],contactEmails:x.contactEmails||[],contacts:x.contactNames||[],url:x.crmUrl||"",crmIds:x.crmIdList||[x.id],members:x.mergedCrmCards||[],duplicateStatus:x.duplicateStatus||""}));
  const nTyped=records.filter(x=>x.type!=="Не определён").length;
  const typedCounts=[...new Set(records.map(x=>x.type).filter(x=>x!=="Не определён"))]
   .map(t=>({type:t,count:records.filter(c=>c.type===t).length}))
@@ -81,6 +81,9 @@ function html(payload){
   '<article class="visualClient"><b>'+(r.siteInfo?.url?'<a href="'+H(r.siteInfo.url)+'" target="_blank" rel="noopener noreferrer" title="Перейти на сайт компании">'+H(r.name)+' ↗</a>':H(r.name))+'</b><div class="vmeta">CRM '+H(r.crmIds.join(", "))+
   '<div>'+H(r.industryDescription||r.type)+'</div><div>'+H(purchaseLabel(r))+' · '+
   (emails(r).length?"Есть контакты":"Контакты требуют проверки")+'</div>'+
+  '<div>Выручка 2025: '+(r.finance?.year===2025&&Number.isFinite(r.finance.amountRUB)?H(Number(r.finance.amountRUB).toLocaleString("ru-RU")+" ₽"):"нет подтверждённых данных")+'</div>'+
+  '<div>Сотрудники: '+(r.staff?.count>0?H((r.staff.approximate?"около ":"")+r.staff.count+" чел. · "+(r.staff.year?r.staff.year+" г.":"год не указан")):"нет подтверждённых данных")+
+  (r.staff?.count>0&&r.staff.sourceUrl?' · <a href="'+H(r.staff.sourceUrl)+'" target="_blank" rel="noopener noreferrer">Источник ↗</a>':"")+'</div>'+
   (r.siteInfo?.url?'<div>Сайт: <a href="'+H(r.siteInfo.url)+'" target="_blank" rel="noopener noreferrer">'+H(r.siteInfo.domain)+' ↗</a> · '+(r.siteInfo.verified?"изучен":"не подтверждён")+'</div>':"")+'</div>'+
   '<a href="'+H(r.url)+'" target="_blank" rel="noopener noreferrer">Открыть в Bitrix24 ↗</a></article>').join("")+
   (a.length>60?'<p class="sub">Первые 60 компаний. Остальные — в подробном виде ниже.</p>':"");

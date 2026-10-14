@@ -139,7 +139,7 @@ function referencedWebsite(id,company,phones){
 function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);const identified=referencedWebsite(id,x.TITLE,x.PHONE);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",
  corporateGroup:identified?.corporateGroup||"",
  relatedWebsites:identified?.corporateGroupUrl?[{url:identified.corporateGroupUrl,relation:"corporate_group",label:"Сайт группы компаний",organization:identified.corporateGroup}]:[],
- legalInnReference:identified?.legalInn||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),finance2025:require("./financial-2025").fromCompany(x),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
+ legalInnReference:identified?.legalInn||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),finance2025:require("./financial-2025").fromCompany(x),staffEvidence:require("./staff-evidence").fromCompany(x),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
@@ -419,7 +419,10 @@ function data(known){
  const finalization=require("./client-finalization");
  const requisites=require("./company-requisites"),finances=require("./financial-2025");
  const typedRecords=require("./client-type-inference").apply(records)
-  .map(c=>finalization.apply({...c,finance2025:finances.withRequisite(c.finance2025,requisites.get(c.id))}));
+  .map(c=>finalization.apply({...c,
+   finance2025:finances.withRequisite(c.finance2025,requisites.get(c.id)),
+   staffEvidence:require("./staff-evidence").resolve(c,require("./website-profiler").get(c.id))
+  }));
  const virtual=require("./crm-duplicates").consolidate(typedRecords);
  // A virtual duplicate is never treated as independently proven identity.
  const duplicateIds=new Set([...virtual.duplicates,...virtual.review]
@@ -441,6 +444,7 @@ function data(known){
   sourceCrmCount:state.rawCrmTotal,
   virtualCustomerTotal:virtual.stats.customerCardCount,
   financial2025Coverage:virtual.companies.reduce((a,c)=>{const k=c.finance2025?.status||"no_data";a[k]=(a[k]||0)+1;return a},{}),
+  staffCoverage:virtual.companies.reduce((a,c)=>{const e=c.staffEvidence||{},key=e.count>0?(e.year===2025?"verified_2025":"other_or_unspecified_year"):"no_data";a[key]=(a[key]||0)+1;return a},{}),
   requisites:requisites.stats(),
   confirmed:virtual.companies.filter(x=>x.type&&!String(x.verification||"").startsWith("AI —")).length,
   relatedGroups:virtual.stats.groupedCount,
@@ -501,8 +505,8 @@ function route(req,res,pathname,known){
  if(pathname==="/contractors/list"){write(res,200,require("./client-segments").html(data(known)),"text/html; charset=utf-8");return true}
  if(["/contractors","/dashboard","/dashboard/contractors","/company-intel","/intel"].includes(pathname)){
   const query=new URL(req.url,"http://localhost").searchParams;
-  const section=query.get("section")||"Обзор",type=query.get("type")||"",page=query.get("page")||"1";
-  write(res,200,require("./client-overview").render(data(known),section,type,page),"text/html; charset=utf-8");return true;
+  const section=query.get("section")||"Обзор",type=query.get("type")||"",page=query.get("page")||"1",purchase=query.get("purchase")||"";
+  write(res,200,require("./client-overview").render(data(known),section,type,page,purchase),"text/html; charset=utf-8");return true;
  }
  write(res,404,{error:"Not found"});return true;
 }
