@@ -135,7 +135,9 @@ async function one(c){
   const pageIdentity=target.replace(/ё/g,"е").replace(/[^а-яa-z0-9]/g,"");
   const orphanNameConfirmed=fullCompanyName.length>=11&&pageIdentity.includes(fullCompanyName);
   const redirectedToOtherDomain=new URL(candidates[0].url).hostname.replace(/^www\./i,"")!==new URL(result.url).hostname.replace(/^www\./i,"");
-  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain;
+  const emailDomainOnly=!c.siteCandidate&&Boolean(c.corporateDomain);
+  const identifiedReference=String(c.siteSource||"").startsWith("Сайт организации, установленный по независимым источникам");
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
   const profile={status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()};
