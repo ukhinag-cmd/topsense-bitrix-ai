@@ -7415,7 +7415,7 @@ server.listen(PORT, "0.0.0.0", () => {
     });
   }
   setTimeout(paidClientCoverageTick,90000);
-  setInterval(paidClientCoverageTick,12*60*1000);
+  setInterval(paidClientCoverageTick,3*60*1000);
 
   // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
