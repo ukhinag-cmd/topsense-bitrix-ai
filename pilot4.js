@@ -295,9 +295,11 @@ async function runPilot(){
  try{
   const loaded=await store("load");
   const entries=Array.isArray(loaded.rows)?loaded.rows:[];
+  const completion=require("./client-finalization");
+  completion.ingest(entries);
   const existing=new Map(entries.filter(e=>/^pilot:v4:(result|reservation):\d+$/.test(String(e.key||""))).map(e=>[String(e.key),e.payload||{}]));
   const skip=priorPaidIds(entries);
-  const batch=(await crmCandidates()).map(x=>x.ids.find(id=>!skip.has(id))).filter(Boolean);
+  const batch=(await crmCandidates()).map(x=>x.ids.find(id=>!skip.has(id)&&!completion.isComplete(id))).filter(Boolean);
   const queue=batch.slice(0,MAX_QUEUE);
   recordsSeen=batch.length;
   const ledger=spentV4(entries);
@@ -317,7 +319,7 @@ async function runPilot(){
    while(!stop){
     const i=cursor++;if(i>=queue.length)return;
     const id=queue[i],key=NS+"result:"+id,reservation=NS+"reservation:"+id;
-    if(existing.has(key)||existing.has(reservation))continue;
+    if(existing.has(key)||existing.has(reservation)||completion.isComplete(id))continue;
     let preflightStage="company_read";
     try{
      const company=await b24Company(id);

@@ -2,6 +2,7 @@
 const dns=require("dns").promises,net=require("net");
 const {inferWebsiteActivity}=require("./client-type-inference");
 const evidenceStore=require("./site-profile-store");
+const completion=require("./client-finalization");
 const profiles=new Map(),visited=new Set(),queue=[],sourcePriority=new Map(),sourceFingerprints=new Map();
 const persistedProfiles=new Map(),deferredCompanies=[];
 let restoring=false,restored=false,restoredProfiles=0;
@@ -101,6 +102,7 @@ async function fetchPage(raw){
  throw Error("Много перенаправлений");
 }
 async function one(c){
+ if(completion.isComplete(c.id))return;
  const candidates=urls(c);
  if(!candidates.length){profiles.set(c.id,{status:"site_absent",source:"Карточка CRM не содержит сайт или корпоративный домен"});return}
  try{
@@ -144,7 +146,8 @@ async function one(c){
 function pump(){
  while(active<2&&queue.length){
   const now=Date.now();if(now-lastAt<1200){setTimeout(pump,1250);return}
-  const c=queue.shift();active++;lastAt=Date.now();
+  const c=queue.shift();if(completion.isComplete(c.id))continue;
+  active++;lastAt=Date.now();
   one(c).finally(()=>{
    active--;
    if(checkedSites-lastProgressLogged>=35||(!queue.length&&active===0)){
@@ -186,7 +189,7 @@ function enqueue(companies){
   return;
  }
  for(const c of companies||[]){
-  const id=String(c?.id||"");if(!id)continue;
+  const id=String(c?.id||"");if(!id||completion.isComplete(id))continue;
   const hasSite=urls(c).length>0;
   const newRank=hasSite?evidenceRank(c.siteSource||(c.siteCandidate?"Сайт из CRM":"Корпоративный домен e-mail CRM")):0;
   const signature=hasSite?evidenceStore.fingerprint(c):"";

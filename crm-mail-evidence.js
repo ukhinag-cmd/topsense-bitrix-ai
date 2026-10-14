@@ -160,6 +160,7 @@ async function loop(){
  if(running)return;running=true;
  while(queue.length){
   const c=queue.shift();pending.delete(c.id);
+  if(require("./client-finalization").isComplete(c.id))continue;
   if(results.has(c.id))continue;
   try{
    const record=await scan(c);results.set(c.id,record);checked++;
@@ -178,7 +179,7 @@ async function loop(){
 }
 function enqueue(items){
  for(const c of items){
-  const id=String(c.id||"");if(!id||results.has(id)||pending.has(id)||companies.size>=MAX_COMPANIES)continue;
+  const id=String(c.id||"");if(!id||require("./client-finalization").isComplete(id)||results.has(id)||pending.has(id)||companies.size>=MAX_COMPANIES)continue;
   companies.set(id,c);pending.add(id);queue.push(c);
  }
  setTimeout(()=>loop().catch(()=>{running=false}),50);

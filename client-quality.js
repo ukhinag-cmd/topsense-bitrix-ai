@@ -32,7 +32,8 @@ function summary(payload){
   scannedSites:Number(sites.checkedSites||0),restoredProfiles:Number(sites.restoredProfiles||0),
   siteQueue:Number(sites.queued||0),siteActive:Number(sites.active||0),
   siteAbsent:Number((sites.byStatus||{}).site_absent||0),
-  siteStore:sites.checkpoint||{},
+  siteStore:sites.checkpoint||{},researchCompletion:payload.researchCompletion||{},
+  incomingLeads:payload.incomingLeads||{},
   contactsAt:payload.contactsAt||null,mailChecked:Number(mail.checked||0),
   salesStatus:audit.status||"not_started",scannedDeals:Number(audit.scannedDeals||0),
   totalDeals:Number(audit.totalDeals||0),orphanDeals:Number((audit.orphanDeals||{}).orphanDeals||0),
@@ -49,7 +50,9 @@ function html(payload){
   ["Дублей на ручную проверку",q.duplicateReview],["Сайтов реально проверено",q.scannedSites],
   ["Сайтов восстановлено из хранилища",q.restoredProfiles],["Сайтов в очереди",q.siteQueue],
   ["Без известного адреса сайта",q.siteAbsent],["Компаний проверено по почте",q.mailChecked],
-  ["Связей сделок подтверждено",q.recoveryVerified]
+  ["Связей сделок подтверждено",q.recoveryVerified],
+  ["Исследования завершены",Number(q.researchCompletion.completed||0)],
+  ["Новые лиды на идентификации",Number(q.incomingLeads.pending||0)]
  ];
  const lines=Object.entries(q.groupStatuses).sort((a,b)=>b[1]-a[1])
   .map(([key,count])=>"<tr><td>"+esc(key)+"</td><td>"+num(count)+"</td></tr>").join("");
@@ -58,7 +61,7 @@ function html(payload){
  return '<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ТОП-СЕНС — качество клиентской базы</title><style>'+
  'body{margin:0;font:14px system-ui;background:#f0f5f7;color:#193b48}header{background:#103e51;color:white;padding:26px max(20px,calc((100% - 1150px)/2))}header h1{margin:0;font-size:23px}header p{color:#d3e8ed}main{max-width:1150px;margin:auto;padding:20px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}.tile,.panel{background:white;border:1px solid #d9e5ea;border-radius:12px;padding:16px}.tile strong{display:block;font-size:25px}.tile span{font-size:12px;color:#5a7884}.panel{margin:14px 0}h2{font-size:19px;margin:0 0 10px}.note{color:#627c87}a{color:#147b82}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:10px;border-bottom:1px solid #e2ecef}th{background:#edf6f8}.status{font-weight:700}nav{margin-bottom:16px}nav a{margin-right:16px}</style></head><body>'+
  '<header><h1>Контроль качества · ТОП-СЕНС</h1><p>45 типов организаций · без правок Bitrix24 · предварительные признаки не равны проверенным фактам</p></header><main>'+
- '<nav><a href="/contractors">База клиентов</a><a href="/contractors/duplicates">Дубли</a><a href="/contractors/excluded">Исключённые карточки</a></nav>'+
+ '<nav><a href="/contractors">База клиентов</a><a href="/contractors/duplicates">Дубли</a><a href="/contractors/excluded">Исключённые карточки</a><a href="/contractors/leads">Новые лиды</a></nav>'+
  '<div class="panel"><b>Статус проверки:</b> <span class="status">'+(q.incomplete?"НЕ ЗАВЕРШЕНА":"Нужна финальная независимая сверка")+'</span> · расчёт на '+esc(q.timestamp)+'. Источник: текущий защищённый снимок CRM/аналитики. Не следует считать процент типизации процентом юридически подтверждённых компаний.</div>'+
  '<div class="panel"><h2>Покрытие классификации</h2><strong style="font-size:34px">'+esc(q.coveragePercent)+'%</strong><div style="height:9px;background:#e3edf0;border-radius:8px;overflow:hidden;margin:11px 0"><div style="background:#13778a;height:100%;width:'+Math.max(0,Math.min(100,q.coveragePercent))+'%"></div></div></div>'+
  '<div class="grid">'+tiles+'</div>'+
