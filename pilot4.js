@@ -302,7 +302,7 @@ async function runPilot(){
   recordsSeen=batch.length;
   const ledger=spentV4(entries);
   let committed=ledger.committedUsd;
-  let processed=0,aiCalls=0,errors=0,modelSpend=0,stop=false;
+  let processed=0,aiCalls=0,errors=0,deferredCrmReads=0,modelSpend=0,stop=false;
   const counts={classified:0,review:0};
   if(!queue.length||committed+SEARCH_RESERVE_USD>budget){
    resultStatus=!queue.length?"queue_drained":"budget_exhausted";
@@ -318,8 +318,10 @@ async function runPilot(){
     const i=cursor++;if(i>=queue.length)return;
     const id=queue[i],key=NS+"result:"+id,reservation=NS+"reservation:"+id;
     if(existing.has(key)||existing.has(reservation))continue;
+    let preflightStage="company_read";
     try{
      const company=await b24Company(id);
+     preflightStage="site_evidence";
      const host1=candidateHost(firstField(company.WEB));
      const host2=emailHost(firstField(company.EMAIL));
      let evidence=null;
@@ -331,6 +333,7 @@ async function runPilot(){
      // Synchronous in-memory reservation before a network await; existing
      // private store receives the reservation BEFORE any paid model request.
      committed+=reserveUsd;
+     preflightStage="budget_reservation";
      await upsert(reservation,{recordType:"topsense-pilot-reservation",companyId:Number(id),reservedUsd:reserveUsd,searchMode,at:iso()});
      aiCalls++;
      let answer,modelFinished=false;
@@ -377,8 +380,19 @@ async function runPilot(){
       break;
      }
     }catch(e){
+     const msg=String(e.message||e).slice(0,150);
+     const retryable=/aborted due to timeout|timed? ?out|fetch failed|ECONNRESET|ETIMEDOUT|HTTP 50[0-9]|Bad CRM response 50[0-9]/i.test(msg);
+     // Transient CRM read failure happens before payment reservation.
+     // The company is retried in a later scheduled cycle, never paid now.
+     if(preflightStage==="company_read"&&retryable){
+      errors++;deferredCrmReads++;
+      log("crm-read-deferred",{id,error:msg,waitingForNextCycle:true});
+      await pause(300);
+      continue;
+     }
+     // After reservation begins, fail closed: no uncertain repeat charges.
      errors++;stop=true;resultStatus="preflight_error";
-     log("preflight-error",{id,error:String(e.message||e).slice(0,150)});
+     log("preflight-error",{id,stage:preflightStage,error:msg});
      break;
     }
     await pause(150);
@@ -387,10 +401,12 @@ async function runPilot(){
   await Promise.all(Array.from({length:4},()=>worker()));
   if(resultStatus==="unknown")resultStatus=stop?"stopped":"batch_complete";
   const summary={recordType:"topsense-paid-summary",status:resultStatus,processed,aiCalls,
-   classified:counts.classified,review:counts.review,errors,estimatedModelSpendUsd:modelSpend,
+   classified:counts.classified,review:counts.review,errors,deferredCrmReads,estimatedModelSpendUsd:modelSpend,
    committedUsd:committed,approvedLimitUsd:budget,
    remainingCandidates:Math.max(0,batch.length-processed),updatedAt:iso()};
-  await upsert(NS+"summary",summary);
+  // Fixed-key summary is idempotent; one safe retry changes no paid calls.
+  try{await upsert(NS+"summary",summary)}
+  catch(first){await pause(1200);await upsert(NS+"summary",summary)}
   log("pass-finished",summary);
   return summary;
  }finally{running=false;}
