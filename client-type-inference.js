@@ -90,6 +90,28 @@ function beverageManufacturerEvidence(company,site){
   &&/^https?:\/\//i.test(String(company?.siteVerified||""));
  return Boolean(firstParty||priorFirstParty);
 }
+// First-party industrial-contractor work outranks incidental mention of
+// schools, charity, accommodation, retail or suppliers on the same website.
+// Cached profiles contain service headings even if the crawler lost its body.
+function ownIndustrialContractingEvidence(site){
+ if(!site||site.status!=="site_profiled")return false;
+ const headings=(site.siteHeadings||[]).map(x=>String(x||"").toLowerCase().replace(/ё/g,"е"));
+ const words=headings.join(" ");
+ const construction=/капитальн[а-яё]*\s+строительств|строительств[а-яё]*\s+объектов/i.test(words);
+ const installation=/монтажн[а-яё]*\s+работ|строительно.?монтажн[а-яё]*\s+работ/i.test(words);
+ const sector=/теплоизоляционн[а-яё]*\s+работ|антикоррозионн[а-яё]*\s+(?:обработк|работ)|нефтехим|нефтепереработ|опо/i.test(words);
+ return construction&&installation&&sector;
+}
+function firstPartyGeneralContractorClaim(core,name){
+ const text=String(core||"").toLowerCase().replace(/ё/g,"е");
+ const legalName=String(name||"").toLowerCase().replace(/ё/g,"е")
+  .replace(/^(?:ооо|оао|ао|пао)\s*["«]?\s*/,"").replace(/["»]/g,"").trim();
+ const ownName=legalName.length>=5&&text.includes(legalName);
+ const selfClaim=/(?:мы\s+выполняем|наша\s+компания.{0,100}|компания\s+.{0,85}|предприятие\s+.{0,85}|общество\s+.{0,85})\s*(?:выполня(?:ет|ем|я)\s+функции\s+генерального\s+подрядчика|явля(?:ется|емся)\s+генеральным\s+подрядчиком|оказыва(?:ем|ет)\s+услуги\s+генподрядчика)/i.test(text);
+ const direct=/выполня(?:ет|ем|я)\s+функции\s+генерального\s+подрядчика|договор[аыу]?\s+генерального\s+подряда|выступа\w*\s+(?:в\s+качестве\s+)?генерального\s+подрядчика/i.test(text);
+ const projects=/нефтехим|нефтепереработ|нефтегаз|опасн\w*\s+производственн\w*\s+объект|промышленн\w*\s+объект/i.test(text);
+ return (selfClaim&&projects)||(ownName&&direct&&projects);
+}
 function inferWebsiteActivity(pages,companyName){
  const data=(pages||[]).map(p=>({
   header:[p.meta?.title,p.meta?.description,...(p.meta?.headings||[])].join(" ").toLowerCase().replace(/ё/g,"е"),
@@ -101,6 +123,8 @@ function inferWebsiteActivity(pages,companyName){
  const core=chosen.map(p=>p.header+" "+p.body.slice(0,3500)).join(" ");
  const combinedPages=data.map(p=>p.header+" "+p.body.slice(0,3800)).join(" ");
  const name=String(companyName||"").toLowerCase().replace(/ё/g,"е");
+ if(firstPartyGeneralContractorClaim(core,companyName))
+  return {type:"Промышленный генподрядчик",reason:"Сайт прямо подтверждает собственные генподрядные работы на промышленных объектах"};
  // The site may mention construction contractors among its suppliers.
  // Its own beer / malt production is a stronger first-party activity signal.
  if(beverageManufacturerEvidence({name:companyName},{
@@ -174,6 +198,20 @@ function apply(records){
   const previous=valid.has(c.organizationType)?c.organizationType:(valid.has(c.type)?c.type:"");
   const byName=infer(c.name);
   const officiallyVerifiedType=valid.has(c.verifiedOrgType)?c.verifiedOrgType:"";
+  // Reconcile previously persisted false non-profile site classifications;
+  // no new site crawling or paid model calls. An actual contractor's own
+  // service headings take precedence over a stray "charity"/"school" keyword.
+  if(ownIndustrialContractingEvidence(site) &&
+    (!previous||previous==="Непрофильный контрагент"||site.siteType==="Непрофильный контрагент")){
+   return {...c,organizationType:"Промышленный генподрядчик",
+    type:"Промышленный генподрядчик",proposedType:"",
+    category:"Подрядчики",siteStatus:"site_profiled",
+    siteProfileUrl:site.url||c.siteProfileUrl||"",siteVerified:site.url||c.siteVerified||"",
+    segmentConfidence:"Подтверждено профильными разделами официального сайта",
+    segmentSource:"Капитальное строительство, монтаж, теплоизоляция и антикоррозионные работы на сайте организации",
+    verification:"Исправлена ошибочная классификация «Непрофильный контрагент»",
+    industryDescription:"Генподряд, строительство, реконструкция и ремонт объектов нефтехимии и нефтепереработки"};
+  }
   // Reconcile persisted wrong website profiles too: a previous crawler
   // may have classified a beverage manufacturer as a general contractor
   // from construction keywords elsewhere on the site. No new paid calls.
@@ -225,4 +263,4 @@ function apply(records){
   return {...c,...websiteEvidence,organizationType:selected,proposedType:selected,segmentConfidence:confidence,segmentSource:basis,verification:"Предварительная классификация"};
  });
 }
-module.exports={infer,apply,inferWebsiteActivity,beverageManufacturerEvidence};
+module.exports={infer,apply,inferWebsiteActivity,beverageManufacturerEvidence,ownIndustrialContractingEvidence,firstPartyGeneralContractorClaim};
