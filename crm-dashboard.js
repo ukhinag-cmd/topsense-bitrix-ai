@@ -726,7 +726,7 @@ function route(req,res,pathname,known){
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
  if(pathname==="/contractors/holdings"){write(res,200,require("./client-holdings").page(data(known)),"text/html; charset=utf-8");return true}
- if(pathname==="/contractors/deal-only"){write(res,200,require("./client-deal-only").page(data(known)),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/deal-only"){const qs=new URL(req.url,"http://localhost").searchParams;write(res,200,require("./client-deal-only").page(data(known),{page:qs.get("page"),kind:qs.get("kind")}),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/leads"){const qs=new URL(req.url,"http://localhost").searchParams;write(res,200,require("./client-leads").html(data(known),{page:qs.get("page"),kind:qs.get("kind"),link:qs.get("link")}),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
