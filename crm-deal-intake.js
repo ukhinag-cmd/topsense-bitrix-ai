@@ -96,6 +96,26 @@ function companyCardAttachment(a){
  return docs.some(f=>/карточк|реквизит|анкета.?контрагента|company.?profile|карт[аы].?предприят/i
    .test(String(f?.NAME||f?.name||"")));
 }
+function extractLegalNameCandidates(raw,activityId){
+ // Only explicit fields in INBOUND mail, never a casual company mention.
+ // A different customer or forwarding chain might be quoted in an email:
+ // such names remain provisional until official requisites are corroborated.
+ const text=String(raw||"").slice(0,50000);
+ const regexp=/(?:^|[\n\r;])\s*(?:полное\s+наименование(?:\s+(?:организации|компании))?|наименование\s+(?:организации|компании|юридического\s+лица)|организация|юридическое\s+лицо)\s*[:\-]\s*((?:ООО|ПАО|ОАО|АО|ЗАО|НАО|ИП|ТОО)\s*[«"'“]?[^\n\r;]{3,140})/gimu;
+ const records=[];
+ for(const m of text.matchAll(regexp)){
+  const value=m[1].split(/\s+(?:ИНН|КПП|ОГРН|ОГРНИП|адрес|телефон|почта)\s*[:\-]?\s*/iu)[0]
+   .replace(/[.,:\s]+$/u,"").slice(0,160);
+  const parsed=require("./client-canonical-name").parse(value);
+  if(!parsed)continue;
+  const near=text.slice(m.index,m.index+220);
+  const inn=(near.match(/(?:ИНН|INN)\s*[:№#-]?\s*(\d{10}|\d{12})(?!\d)/iu)||[])[1]||"";
+  if(!records.some(x=>x.name===parsed.name))
+   records.push({name:parsed.name,activityId:String(activityId||""),inn});
+  if(records.length>=4)break;
+ }
+ return records;
+}
 function summarizeActivities(input){
  const rows=[...(input||[])].sort((a,b)=>Number(a.ID||0)-Number(b.ID||0));
  const incoming=rows.filter(isInbound);
@@ -104,7 +124,7 @@ function summarizeActivities(input){
  const firstSignals=signals(firstText);
  let laterSignals=signals(""),allSignals=signals("");
  let laterAttachments=0,companyCardAttachments=0,firstIncomingSeen=false;
- const inboundStrings=[];
+ const inboundStrings=[],legalNameCandidates=[];
  for(const a of rows){
   const txt=activityText(a);
   allSignals=mergeSignals(allSignals,signals(txt));
@@ -113,7 +133,10 @@ function summarizeActivities(input){
    laterSignals=mergeSignals(laterSignals,signals(txt));
    laterAttachments+=attachmentCount(a);
   }
-  if(isInbound(a))inboundStrings.push(txt);
+  if(isInbound(a)){
+   inboundStrings.push(txt);
+   legalNameCandidates.push(...extractLegalNameCandidates(a.DESCRIPTION||"",a.ID));
+  }
   if(companyCardAttachment(a))companyCardAttachments++;
  }
  // A personal mailbox (mail.ru etc.) can still carry reliable requisites
@@ -129,7 +152,8 @@ function summarizeActivities(input){
   signals:allSignals,attachmentCount:rows.reduce((n,x)=>n+attachmentCount(x),0),
   laterAttachmentCount:laterAttachments,companyCardAttachmentCount:companyCardAttachments,
   corporateDomains:mail.extract(inboundText).slice(0,8),
-  requisitesInnCandidates:[...new Set(requisites)].slice(0,8)};
+  requisitesInnCandidates:[...new Set(requisites)].slice(0,8),
+  legalNameCandidates:legalNameCandidates.slice(0,12)};
 }
 
 async function inspect(deal){
@@ -176,6 +200,7 @@ async function inspect(deal){
   out.companyCardAttachmentCount=evidence.companyCardAttachmentCount;
   out.correspondencePartial=partial;
   out.requisitesInnCandidates=evidence.requisitesInnCandidates;
+  out.legalNameCandidates=evidence.legalNameCandidates;
   out.signals=mergeSignals(out.signals,evidence.signals);
   out.corporateDomains=[...new Set([...out.corporateDomains,
    ...evidence.corporateDomains])].slice(0,8);
@@ -240,4 +265,4 @@ function forCompany(id){
   .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0)).slice(0,15);
 }
 function stats(){return {...state}}
-module.exports={queueDeals,get,forCompany,stats,signals,summarizeActivities};
+module.exports={queueDeals,get,forCompany,stats,signals,summarizeActivities,extractLegalNameCandidates};
