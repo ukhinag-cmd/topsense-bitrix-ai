@@ -87,6 +87,23 @@ async function search(name,inn=""){
  }
  return items;
 }
+function legalNameOnOwnSite(c,pages){
+ const printed=require("./company-name-format").display(c.name);
+ const form=String(printed.opf||"").toUpperCase();
+ if(!["ООО","АО","ПАО","ОАО","ЗАО","НАО"].includes(form))return false;
+ const full=cleanName(c.name).trim().replace(/ё/gi,"е");
+ // A weak company prefix or a short abbreviation is not enough.
+ if(normalized(full).length<12)return false;
+ const escaped=full.replace(/[-\/\\^$*+?.()|[\]{}]/g,"\\async function inspect(c,hit){")
+  .replace(/[\s\-–—]+/g,"[\\s\\-–—]+");
+ const re=new RegExp("(?:^|[^а-яa-z])"+form+"\\s*[«\\\"“]?\\s*"+escaped+"(?=$|[^а-яa-z0-9])","iu");
+ // The site's own title, heading or legal details; not generic mentions.
+ return (pages||[]).some(p=>{
+  const own=[p.meta?.title,...(p.meta?.headings||[]),p.meta?.identityText||""]
+   .filter(Boolean).join(" ").slice(0,11000).replace(/ё/gi,"е");
+  return re.test(own);
+ });
+}
 async function inspect(c,hit){
  const fetchSite=require("./website-profiler").fetchPage;
  const site=await require("./website-profiler").fetchCorporateHome(hit.url);
@@ -105,8 +122,12 @@ async function inspect(c,hit){
  if(!nameMatch&&!proof.innMatch)
   return {url:site.url,title:hit.title,status:"other_company",
    note:"Не совпали название и ИНН; телефон без названия недостаточен"};
- return {url:site.url,title:hit.title,status:proof.matched?"confirmed":"needs_review",
-  note:proof.matched?proof.proof:"Совпадает название, но не телефон или ИНН — принадлежность сайта не подтверждена"};
+ const preliminary=Boolean(nameMatch&&!proof.matched&&legalNameOnOwnSite(c,pages));
+ return {url:site.url,title:hit.title,status:proof.matched?"confirmed":
+   preliminary?"candidate_company_site":"needs_review",
+  note:proof.matched?proof.proof:preliminary?
+   "На сайте указаны совпадающие полное название и ОПФ. Принадлежность юрлицу по ИНН/телефону не подтверждена.":
+   "Совпадает название, но нет независимого подтверждения принадлежности сайта"};
 }
 async function scan(c,mode="name"){
  // A domain from incoming correspondence, a user-supplied link or a
@@ -147,10 +168,12 @@ async function scan(c,mode="name"){
  catch(e){unavailable++;return {status:supplied?"needs_review":"search_unavailable",
   candidates:supplied?[supplied]:[],note:String(e.message||e).slice(0,95)}}
  const results=supplied?[supplied]:[];
+ let preliminary=supplied?.status==="candidate_company_site"?supplied:null;
  for(const hit of hits.slice(0,c.dealOnlyResearch?6:4)){
   try{
    const candidate=await inspect(c,hit);
    results.push(candidate);
+   if(candidate.status==="candidate_company_site"&&!preliminary)preliminary=candidate;
    if(candidate.status==="confirmed"){
     confirmed++;
     if(mode==="inn")innConfirmed++;
@@ -159,9 +182,17 @@ async function scan(c,mode="name"){
    }
   }catch{results.push({url:hit.url,title:hit.title,status:"unavailable",note:"Не удалось проверить сайт"})}
  }
+ if(preliminary){
+  review++;
+  require("./website-profiler").enqueue([{...c,siteCandidate:preliminary.url,
+   siteSource:"Поиск по юридическому наименованию — предварительно"}]);
+  return {status:"candidate_company_site",site:preliminary.url,
+   candidates:results,note:preliminary.note};
+ }
  if(results.some(x=>x.status==="needs_review"))review++;
- return {status:results.some(x=>x.status==="needs_review")?"needs_review":hits.length?"no_confirmed_site":"not_found",
-  candidates:results,note:"Список сайтов-кандидатов без подтверждения принадлежности"};
+ return {status:results.some(x=>x.status==="needs_review")?"needs_review":
+   hits.length?"no_confirmed_site":"not_found",candidates:results,
+   note:"Список сайтов-кандидатов без подтверждения принадлежности"};
 }
 async function pump(){
  if(busy)return;busy=true;
@@ -217,4 +248,4 @@ function enqueueByInn(companies){
 }
 function get(id){return profiles.get(String(id))||{status:pending.has(String(id))?"queued":"not_started",candidates:[]}}
 function stats(){const count={};for(const p of profiles.values())count[p.status]=(count[p.status]||0)+1;return {attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length,count}}
-module.exports={enqueue,enqueuePriority,enqueueByInn,get,stats,cleanName,eligible,domainAllowed,legalOrPhoneMatch};
+module.exports={enqueue,enqueuePriority,enqueueByInn,get,stats,cleanName,eligible,domainAllowed,legalOrPhoneMatch,legalNameOnOwnSite};
