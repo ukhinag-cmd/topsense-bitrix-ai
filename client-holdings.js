@@ -8,6 +8,7 @@ function page(payload){
  ' · В аналитике: '+g.inAnalytics+' · К проверке: '+g.newCandidates.length+'</p>'+
  '<div class="tiles">'+g.members.map(m=>'<article class="member"><b>'+esc(m.name)+'</b>'+
  '<span>'+esc(m.role)+'</span><p>'+esc(m.researchStatus)+'</p>'+
+ (m.nextStep?'<p><b>Следующая проработка:</b> '+esc(m.nextStep)+'</p>':'')+
  '<div>Публичные контакты именно этой компании: '+(m.email?esc(m.email):'не подтверждены')+
  (m.phone?' · '+esc(m.phone):'')+'</div><p><a href="'+esc(safe(m.source))+
  '" target="_blank" rel="noopener noreferrer">Источник ↗</a>'+
