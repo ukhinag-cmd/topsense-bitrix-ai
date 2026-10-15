@@ -12,20 +12,20 @@ const entities=[
   note:"Тендерные и прямые запросы; статус поставки и юрлицо каждого обращения сверяются"},
  {key:"acron-fertilizers",name:"ПАО «Акрон»",type:"Производство удобрений",
   category:"Конечные потребители",
-  match:/пао\s*["«»]?\s*акрон\b/iu,
+  match:/пао\s*["«»]?\s*акрон(?=$|[^а-яёa-z0-9])/iu,
   websiteCandidate:"https://www.acron.ru/",
   websiteStatus:"Официальный сайт ПАО «Акрон»; связь сделки с юрлицом требует проверки",
   note:"Минеральные удобрения. Не путать с «Акрон Холдинг»"},
  {key:"akron-industrial-holding",name:"ГК «Акрон Холдинг»",type:"",
   category:"Смежные организации",
-  match:/\b(?:гк\s*)?акрон\s+холдинг\b/iu,
+  match:/(?:^|[^а-яёa-z0-9])(?:гк\s*)?акрон\s+холдинг(?=$|[^а-яёa-z0-9])/iu,
   websiteCandidate:"https://www.akron-holding.ru/",
   websiteStatus:"Официальный сайт другой группы, не ПАО «Акрон»",
   note:"Отдельная промышленная группа; запросы не приписывать ПАО «Акрон»"}
 ];
 let snapshot=new Map(),updatedAt=null,coverage="not_started";
 function norm(s){const d=display(s||"");return String(d.name||"").toLocaleLowerCase("ru-RU")
- .replace(/ё/g,"е").replace(/\b(?:ооо|оао|зао|ао|пао|гк)\b/gu,"")
+ .replace(/ё/g,"е").replace(/(?:,?\s*(?:ооо|оао|зао|ао|пао|гк)\s*)$/u,"").replace(/^(?:ооо|оао|зао|ао|пао|гк)\s+/u,"")
  .replace(/[^а-яa-z0-9]/g,"")}
 function identify(title){
  const value=String(title||"");
@@ -50,7 +50,7 @@ function ingest(deals,{complete=false}={}){
    stageId:String(deal.STAGE_ID||""),otherParty,
    url:"https://topsense.bitrix24.ru/crm/deal/details/"+encodeURIComponent(id)+"/"});
  }
- coverage=complete?"full_deal_snapshot":"partial_deal_snapshot";
+ coverage=complete?"full_deal_snapshot":coverage==="full_deal_snapshot"?coverage:"partial_deal_snapshot";
  updatedAt=new Date().toISOString();
  return stats();
 }
