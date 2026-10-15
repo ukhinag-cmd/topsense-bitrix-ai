@@ -55,7 +55,7 @@ function score(company,asOf=new Date()){
  const type=s(company.organizationType||company.type||"");
  const relevant=/подряд|ремонт|кипи|газ|хим|нефт|энерг|металл|проект|сервис|бур|промышлен|интеграт/i.test(type+" "+s(company.category));
  const components={
-  clientHistory:userConfirmed?32:0,
+  clientHistory:userConfirmed?45:0,
   verifiedPurchase:buyer?26:0,
   repeatDeals:deals.length>=5?23:deals.length>=3?18:deals.length>=2?14:deals.length===1?7:0,
   recentActivity:days<=365?12:days<=730?7:0,
