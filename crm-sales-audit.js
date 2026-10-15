@@ -165,6 +165,23 @@ async function run(companies){
   const deals=await allDeals();
   require("./deal-only-client-registry").ingest(deals,{complete:true});
   require("./crm-unlinked-discovery").ingest(deals,{complete:true});
+  // Focus the first bounded deep-read batch on repeat customer candidates
+  // that have no company card. Study each deal's earliest inbound email and
+  // subsequent correspondence, not just its title. CRM is read-only.
+  const unexplored=require("./crm-unlinked-discovery").group(companies||[]);
+  const prioritized=unexplored.filter(c=>!c.linkedExisting&&c.dealCount>=2)
+   .slice(0,45).flatMap(c=>[
+     c.dealRefs[c.dealRefs.length-1],c.dealRefs[0]
+   ].filter(Boolean));
+  const candidateDeals=[...new Set(prioritized.map(d=>String(d.id)))]
+   .slice(0,90).map(id=>deals.get(id)).filter(Boolean);
+  if(candidateDeals.length){
+   const accepted=require("./crm-deal-intake").queueDeals(candidateDeals);
+   console.log(JSON.stringify({component:"unlinked-client-discovery",
+    event:"chronological-mail-research-queued",
+    priorityCompanies:unexplored.filter(c=>!c.linkedExisting&&c.dealCount>=2).length,
+    proposedDeals:candidateDeals.length,queued:accepted}));
+  }
   // Compute relationship potential from full deal history BEFORE slow
   // procurement/attachment stage audits. Only direct CRM company links count.
   require("./client-relationship-potential").build(deals.values());
