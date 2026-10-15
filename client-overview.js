@@ -135,6 +135,9 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
   return '<article class="companyCard"><div class="companyTitle">'+
    (site?'<a class="companyWebsite" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer" title="'+(website.verified?"Перейти на изученный сайт":"Сайт-кандидат: принадлежность компании не подтверждена")+'">'+companyTitle+' ↗</a>':companyTitle)+'</div>'+
    '<div class="companyMeta">CRM '+esc(ids.join(", "))+' · '+esc(c.organizationType||c.industryDescription||"Тип требует проверки")+'</div>'+
+   (c.subdivisions?.length?
+    '<div class="companyMeta">Подразделения: '+c.subdivisions.map(x=>
+     esc(x.name)+' (CRM '+esc(x.id)+')').join('; ')+'</div>':'')+
    (c.corporateGroup?'<div class="companyMeta">Группа: '+esc(c.corporateGroup)+' · отдельное юридическое лицо</div>':"")+
    '<div class="companyMeta">'+(bought?"Подтверждена покупка по стадиям":"Покупка: не подтверждена / идёт проверка")+
    ' · '+(website.verified?"Сайт изучен":website.candidate?"Сайт-кандидат · требует подтверждения":"Сайт не найден")+'</div>'+   (site?'<div class="companyMeta websiteLine">Сайт: <a class="websiteAddress" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer">'+esc(website.domain)+' ↗</a></div>':"")+
