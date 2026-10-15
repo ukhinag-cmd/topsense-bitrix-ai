@@ -4,7 +4,7 @@
 const crypto=require("crypto");
 const PREFIX="site-profile:v1:";
 const TTL_MS=21*24*60*60*1000;
-const statuses=new Set(["site_profiled","site_read_no_clear_type","site_read_ambiguous_type","site_identity_unclear"]);
+const statuses=new Set(["site_profiled","site_preliminary_profiled","site_read_no_clear_type","site_read_ambiguous_type","site_identity_unclear"]);
 const pending=new Map();
 let timer=null,writing=false,loadedRows=0,storedRows=0,writeErrors=0,lastError="",batchLimit=4,consecutiveSuccesses=0;
 
@@ -38,7 +38,7 @@ function fingerprint(c){
 }
 function acceptable(profile){
  return Boolean(profile&&statuses.has(profile.status)&&
-  (profile.status!=="site_profiled"||String(profile.siteType||"").trim()));
+  (!["site_profiled","site_preliminary_profiled"].includes(profile.status)||String(profile.siteType||"").trim()));
 }
 function fresh(row,now=Date.now()){
  if(!row||row.recordType!=="topsense-site-profile"||!acceptable(row.profile))return false;
