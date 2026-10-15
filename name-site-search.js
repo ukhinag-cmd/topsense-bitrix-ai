@@ -92,9 +92,27 @@ function legalNameOnOwnSite(c,pages){
  const form=String(printed.opf||"").toUpperCase();
  if(!["ООО","АО","ПАО","ОАО","ЗАО","НАО"].includes(form))return false;
  const full=cleanName(c.name).trim().replace(/ё/gi,"е");
- // A weak company prefix or a short abbreviation is not enough.
  if(normalized(full).length<12)return false;
- const escaped=full.replace(/[-\/\\^$*+?.()|[\]{}]/g,"\\async function inspect(c,hit){")
+ const escaped=full.replace(/[-\/\\^$*+?.()|[\]{}]/g,"\\$&")
+  .replace(/[\s\-–—]+/g,"[\\s\\-–—]+");
+ const re=new RegExp("(?:^|[^а-яa-z])"+form+"\\s*[«\\\"“]?\\s*"+escaped+"(?=$|[^а-яa-z0-9])","iu");
+ return (pages||[]).some(p=>{
+  // Titles and the organization's own headings are stronger than a listing
+  // of customers or partners elsewhere on the site.
+  const self=[p.meta?.title,...(p.meta?.headings||[])]
+   .filter(Boolean).join(" ").replace(/ё/gi,"е");
+  if(re.test(self))return true;
+  // On the site's contact / requisites page, require a legal-details cue.
+  const ownText=String(p.meta?.identityText||"").slice(0,7000).replace(/ё/gi,"е");
+  const m=re.exec(ownText);
+  if(!m)return false;
+  const context=ownText.slice(Math.max(0,m.index-140),m.index+m[0].length+130);
+  const onIdentityPage=/(?:контакт|contact|rekvizit|requisite|реквизит|юридич|o-kompanii|about)/iu
+   .test(String(p.pageUrl||""));
+  return onIdentityPage&&/(?:реквизит|юридич|правообладат|полное\s+наименовани|©)/iu.test(context);
+ });
+}
+async function inspect(c,hit){")
   .replace(/[\s\-–—]+/g,"[\\s\\-–—]+");
  const re=new RegExp("(?:^|[^а-яa-z])"+form+"\\s*[«\\\"“]?\\s*"+escaped+"(?=$|[^а-яa-z0-9])","iu");
  // The site's own title, heading or legal details; not generic mentions.
