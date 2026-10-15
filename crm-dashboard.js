@@ -223,9 +223,9 @@ function enqueueLinkedContactSites(){
   const selected=ranked[0][0];
   suggested.push({...c,siteCandidate:"",corporateDomain:selected,siteSource:"Домен привязанного контакта"});
  }
- if(suggested.length)require("./website-profiler").enqueue(suggested);
- console.log(JSON.stringify({component:"topsense-dashboard",event:"linked-corporate-domain-discovery",
-  queuedCandidates:suggested.length,companiesWithMultipleContactDomains:multipleDomains}));
+ const actualQueued=suggested.length?require("./website-profiler").enqueue(suggested)||0:0;
+ if(actualQueued)console.log(JSON.stringify({component:"topsense-dashboard",event:"linked-corporate-domain-discovery",
+  queuedCandidates:actualQueued,candidatesConsidered:suggested.length,companiesWithMultipleContactDomains:multipleDomains}));
 }
 function resumeUnresolvedCompanySites(){
  if(!state.companies.length||!state.contactsAt)return;
@@ -286,8 +286,9 @@ function enqueuePreviousPilotSites(){
   suggestions.push({...c,siteCandidate:url,siteSource:"Кандидат из прежнего AI-пилота"});
  }
  if(suggestions.length){
-  require("./website-profiler").enqueue(suggestions);
-  console.log(JSON.stringify({component:"topsense-dashboard",event:"paid-site-leads-requeued",count:suggestions.length}));
+  const newQueued=require("./website-profiler").enqueue(suggestions)||0;
+  if(newQueued)console.log(JSON.stringify({component:"topsense-dashboard",
+   event:"paid-site-leads-queued",candidates:suggestions.length,newQueued}));
  }
 }
 // Fetch linked CRM contacts read-only. No contacts are sent to public source control.
