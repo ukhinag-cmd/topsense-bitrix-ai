@@ -119,7 +119,7 @@ function summarizeActivities(input){
  // A personal mailbox (mail.ru etc.) can still carry reliable requisites
  // and inquiry details; ignore the domain only as proof of website ownership.
  const inboundText=inboundStrings.join(" ").slice(0,100000);
- const requisites=[...inboundText.matchAll(/(?:ИНН|INN)\\s*[:№#-]?\\s*(\\d{10}|\\d{12})(?!\\d)/gi)]
+ const requisites=[...inboundText.matchAll(/(?:ИНН|INN)\s*[:№#-]?\s*(\d{10}|\d{12})(?!\d)/gi)]
    .map(m=>m[1]);
  return {activityCount:rows.length,incomingEmails:incoming.length,
   subsequentIncomingEmails:Math.max(0,incoming.length-1),
