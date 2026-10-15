@@ -85,9 +85,12 @@ function view(companies){
  // Generalizable discovery across ALL CRM deals, beyond the three
  // initially recovered customers. Keep unmatched title-only groups provisional.
  const crawler=require("./crm-unlinked-discovery");
- const alreadyNamed=new Set(entities.map(e=>crawler.normalize(e.name)));
- for(const found of crawler.group(companies)){
-  if(found.linkedExisting||alreadyNamed.has(found.key))continue;
+ const curatedAlreadyVisible=new Set(groups.map(g=>crawler.normalize(g.name)));
+ const freshGroups=crawler.group(companies);
+ const foundGroups=require("./deal-only-inventory").available(
+  companies,freshGroups,crawler.stats().scanCompleteness==="complete");
+ for(const found of foundGroups){
+  if(found.linkedExisting||curatedAlreadyVisible.has(found.key))continue;
   groups.push({id:"dealonly:discovered:"+found.key,name:found.name,
    organizationType:"",category:"Не определены",companyCardMissing:true,
    sourceType:"crm_unlinked_deal_titles",
