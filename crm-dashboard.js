@@ -144,6 +144,7 @@ function referencedWebsite(id,company,phones){
  return ref;
 }
 function company(x){const id=String(x.ID||"");const reviewedCandidate=REVIEWED_PUBLIC_SITES.get(id);
+ const crmActivityHint=require("./company-activity-notes").infer(x.COMMENTS);
  const gspSite=String(id)==="2790"||String(id)==="3682";
  const titleCheck=/^(?:(?:ооо|оао|ао)\s*)?["«»]?гсп[ -]?ремонт["«»]?$/i
   .test(String(x.TITLE||"").trim());
@@ -158,6 +159,7 @@ function company(x){const id=String(x.ID||"");const reviewedCandidate=REVIEWED_P
  const gspType=gspKnown?"Ремонтный подрядчик ОПО / остановочный ремонт":"";
  return {id,name:String(x.TITLE||""),category:gspKnown?"Подрядчики":category(x.TITLE),
   type:gspType,organizationType:gspType,
+  crmActivityHint:crmActivityHint?{type:crmActivityHint.type,confidence:crmActivityHint.confidence,source:crmActivityHint.source}:null,
   typeSource:gspKnown?"Профиль ООО ГСП Ремонт: официальный сайт; принадлежность каждой карточки и филиала сверяется отдельно":"",
 siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",
  corporateGroup:identified?.corporateGroup||"",
@@ -169,7 +171,7 @@ async function page(start){
  const endpoint=new URL("crm.company.list.json",base.endsWith("/")?base:base+"/");
  for(let attempt=0;attempt<4;attempt++){
   try{
-   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","PHONE","ADDRESS","ADDRESS_2","ADDRESS_CITY","ADDRESS_REGION","UF_CRM_AI_REVENUE","UF_CRM_AI_REVENUE_YEAR","UF_CRM_AI_INN","UF_CRM_AI_FIN_SOURCE","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
+   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","PHONE","ADDRESS","ADDRESS_2","ADDRESS_CITY","ADDRESS_REGION","COMMENTS","UF_CRM_AI_REVENUE","UF_CRM_AI_REVENUE_YEAR","UF_CRM_AI_INN","UF_CRM_AI_FIN_SOURCE","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
    const j=await r.json();
    if(!r.ok||j.error||!Array.isArray(j.result))throw Error(j.error_description||j.error||"Bad CRM response "+r.status);
    return j;
