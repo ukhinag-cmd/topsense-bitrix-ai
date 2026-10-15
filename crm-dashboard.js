@@ -537,7 +537,7 @@ function data(known){
   siteStatus.restorationComplete===true&&siteStatus.queued===0&&siteStatus.active===0&&
   siteStatus.processed+completedCount>=state.companies.length-5;
  const currentTyped=virtual.companies.filter(c=>require("./client-taxonomy").known(c.organizationType)).length;
- const classificationDisplay=require("./classification-census").display(virtual.stats.customerCardCount,currentTyped,classificationCensusReady);
+ const classificationDisplay=require("./classification-census").display(virtual.stats.customerCardCount,currentTyped,classificationCensusReady,state.companies.length);
  return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,
   classificationDisplay,classificationCensusReady,classificationCensusStore:require("./classification-census").stats(),
   classificationLedger:ledger.stats(),
