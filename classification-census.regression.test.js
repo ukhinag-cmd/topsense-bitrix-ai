@@ -44,12 +44,13 @@ test("real changes in source CRM inventory may update the finished census",()=>{
  assert.equal(p.typed,675);
  assert.equal(p.provisional,false);
 });
-test("does not misrepresent prior population if company total changes",()=>{
+test("new companies do not make the last completed historical census vanish",()=>{
  const p=census.display(1570,500,false);
- assert.equal(p.typed,500);
- assert.equal(p.untyped,1070);
+ assert.equal(p.typed,689);
+ assert.equal(p.total,1557);
+ assert.equal(p.untyped,868);
  assert.equal(p.provisional,true);
- assert.equal(p.source,"live_provisional");
+ assert.equal(p.source,"last_complete_crm_population_changed"===p.source||p.source==="last_complete_virtual_groups_changed"?p.source:"last_complete_crm_population_changed");
 });
 test("does not save provisional or redundant readings",()=>{
  assert.equal(census.consider(1557,496,1667,false),false);
