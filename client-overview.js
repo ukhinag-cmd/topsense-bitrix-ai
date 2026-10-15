@@ -168,8 +168,8 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  const coverageLabel=coverage===null?"—":coverage+"%";
  const coverageArc=coverage===null?0:coverage;
  const censusNote=census?.provisional?
-  (census.source.startsWith("last_complete")?
-   "Последний завершённый снимок ("+census.typed+" / "+census.total+") от "+census.completedAt+". Текущий пересчёт ещё идёт; временное уменьшение не публикуется.":
+  ((census.source.startsWith("last_complete")||census.source==="regression_under_review")?
+   "Последний завершённый снимок ("+census.typed+" / "+census.total+") от "+census.completedAt+". "+(census.source==="regression_under_review"?"Обнаружено снижение до "+census.observedTyped+"; требуется сверка перед обновлением результата.":"Текущий пересчёт ещё идёт; временное уменьшение не публикуется."):
    "Восстановление сохранённых исследований. Итоговый счётчик появится после завершения прохода."):
   "Текущие показатели рассчитаны по восстановленным данным.";
  const quality=String(payload.status||"starting");
