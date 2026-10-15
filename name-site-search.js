@@ -112,16 +112,6 @@ function legalNameOnOwnSite(c,pages){
   return onIdentityPage&&/(?:реквизит|юридич|правообладат|полное\s+наименовани|©)/iu.test(context);
  });
 }
-async function inspect(c,hit){")
-  .replace(/[\s\-–—]+/g,"[\\s\\-–—]+");
- const re=new RegExp("(?:^|[^а-яa-z])"+form+"\\s*[«\\\"“]?\\s*"+escaped+"(?=$|[^а-яa-z0-9])","iu");
- // The site's own title, heading or legal details; not generic mentions.
- return (pages||[]).some(p=>{
-  const own=[p.meta?.title,...(p.meta?.headings||[]),p.meta?.identityText||""]
-   .filter(Boolean).join(" ").slice(0,11000).replace(/ё/gi,"е");
-  return re.test(own);
- });
-}
 async function inspect(c,hit){
  const fetchSite=require("./website-profiler").fetchPage;
  const site=await require("./website-profiler").fetchCorporateHome(hit.url);
