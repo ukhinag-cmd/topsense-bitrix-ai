@@ -151,8 +151,8 @@ function company(x){const id=String(x.ID||"");const reviewedCandidate=REVIEWED_P
  const reviewed=gspSite&&(!titleCheck||!phoneCheck)?null:reviewedCandidate;
  const identified=referencedWebsite(id,x.TITLE,x.PHONE);
  const gspIds=new Set(["62","2790","2842","3682","3684","3690","3692"]);
- const gspTitle=/^(?:(?:ооо)\\s*)?["«»]?гсп[ -]?ремонт["«»]?$/i.test(String(x.TITLE||"").trim())||
-  /^филиал[\\s«"а-я]*сервисгазавтоматика[\\s»"]*ооо[\\s«"]*гсп[ -]?ремонт/i.test(String(x.TITLE||"").trim());
+ const gspTitle=/^(?:(?:ооо)\s*)?["«»]?гсп[ -]?ремонт["«»]?$/i.test(String(x.TITLE||"").trim())||
+  /^филиал[\s«"а-я]*сервисгазавтоматика[\s»"]*ооо[\s«"]*гсп[ -]?ремонт/i.test(String(x.TITLE||"").trim());
  const gspKnown=gspIds.has(id)&&gspTitle;
  const gspType=gspKnown?"Ремонтный подрядчик ОПО / остановочный ремонт":"";
  return {id,name:String(x.TITLE||""),category:gspKnown?"Подрядчики":category(x.TITLE),
