@@ -158,7 +158,20 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
   buyerButtons+
   '<div class="companyGrid">'+(cards||'<div class="empty">По выбранному типу компаний пока не обнаружено.</div>')+'</div>'+
   (totalPages>1?'<nav class="pages">'+pages+'</nav>':"")+'</section>';
- const coverage=pct(b.typed,b.total),quality=String(payload.status||"starting");
+ const census=section==="Обзор"?payload.classificationDisplay:null;
+ const effectiveTyped=census?.provisional?census.typed:b.typed;
+ const effectiveUntyped=census?.provisional?census.untyped:b.untyped;
+ const displayTyped=effectiveTyped===null?"—":nr(effectiveTyped);
+ const displayUntyped=effectiveUntyped===null?"—":nr(effectiveUntyped);
+ const coverage=effectiveTyped===null?null:pct(effectiveTyped,b.total);
+ const coverageLabel=coverage===null?"—":coverage+"%";
+ const coverageArc=coverage===null?0:coverage;
+ const censusNote=census?.provisional?
+  (census.source==="last_complete"?
+   "Последний завершённый снимок от "+census.completedAt+". Текущий пересчёт ещё идёт; временное уменьшение не публикуется.":
+   "Восстановление сохранённых исследований. Итоговый счётчик появится после завершения прохода."):
+  "Текущие показатели рассчитаны по восстановленным данным.";
+ const quality=String(payload.status||"starting");
  const checking=Number(payload.siteCrawl?.checkedSites||0),sitePending=Number(payload.siteCrawl?.queued||0);
  const reviewed=Number(payload.duplicateStats?.reviewGroupCount||0),grouped=Number(payload.duplicateStats?.groupedCount||0);
  const ai=payload.paidClassification||{};
@@ -192,10 +205,10 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  '<header><div class="brand">TOP–SENSE · АНАЛИТИКА CRM</div><h1>'+esc(section==="Обзор"?"База клиентов — 7 дашбордов":section)+'</h1><p>Визуальный контроль клиентской базы, сегментации, продаж и источников данных · защищённый доступ</p>'+
  '<div class="quick"><a href="/contractors?purchase=buyers#clients">Покупали у нас ↗</a><a href="/contractors#subtypes">Все подтипы ↗</a><a href="/contractors/quality">Контроль качества ↗</a><a href="/contractors/leads">Новые лиды ↗</a><a href="/contractors/duplicates">Проверка дублей ↗</a><a href="/contractors/list">Поиск конкретной компании ↗</a></div></header>'+
  '<main><nav class="tabs">'+tabs+'</nav><div class="status"><strong>'+esc(dataNote)+'</strong> · обновление CRM: '+esc(payload.updatedAt||"ещё нет")+' · последний показатель охвата на текущем снимке, а не подтверждение проверки всей базы. Автообновление страницы каждые 2 минуты.</div>'+
- '<div class="stats">'+
+ '<div class="status">'+esc(censusNote)+'</div><div class="stats">'+
  hero("Компании",nr(b.total),section==="Обзор"?"аналитических карточек из "+nr(payload.crmCardTotal||0)+" CRM": "в направлении "+section,"#174863")+
- hero("Тип определён",nr(b.typed),coverage+'% выбранных компаний · включая предварительные',"#168B8F")+
- hero("Не определён тип",nr(b.untyped),"Требуется проверка по источникам","#C7843E")+
+ hero("Тип определён",displayTyped,coverageLabel+' выбранных компаний · включая предварительные',"#168B8F")+
+ hero("Не определён тип",displayUntyped,"Требуется проверка по источникам","#C7843E")+
  hero("Клиенты с e-mail",nr(b.withEmail),"с контактным адресом CRM","#4B78B9")+
  hero("Подтверждения покупки",nr(b.buyers),"сделки по согласованным стадиям","#247A78")+
  hero("Проверенный сайт/профиль",nr(b.verifiedSite),"не всегда юридическая верификация","#6855B0")+
@@ -205,8 +218,8 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  hero("Лиды на идентификации",nr(payload.incomingLeads?.pending||0),"Отдельная очередь, не добавляются как подтверждённые компании","#A27129")+
  '</div><div class="grid">'+
  '<section class="panel"><div class="panelheading"><h2>Покрытие классификации</h2><span>Основная задача проекта</span></div>'+
- '<div class="ringWrap"><div class="ring" style="--n:'+coverage+'%"><div class="ring-inner"><strong>'+coverage+'%</strong><small>охват базы</small></div></div>'+
- '<div class="ringLegend"><p><strong>'+nr(b.typed)+'</strong> компаний получили тип</p><p><strong>'+nr(b.untyped)+'</strong> требуют анализа</p><p><strong>'+nr(b.provisional)+'</strong> тип присвоен только по названию</p><a href="/contractors/quality">Проверить надёжность →</a></div></div></section>'+
+ '<div class="ringWrap"><div class="ring" style="--n:'+coverageArc+'%"><div class="ring-inner"><strong>'+coverageLabel+'</strong><small>охват базы</small></div></div>'+
+ '<div class="ringLegend"><p><strong>'+displayTyped+'</strong> компаний получили тип</p><p><strong>'+displayUntyped+'</strong> требуют анализа</p><p><strong>'+nr(b.provisional)+'</strong> тип присвоен только по названию</p><a href="/contractors/quality">Проверить надёжность →</a></div></div></section>'+
  sectionsMarkup+typeBlock+
  '<section class="panel"><div class="panelheading"><h2>Сайты и источники</h2><span>По всей CRM</span></div>'+
  '<div class="stats" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:9px">'+
