@@ -9,12 +9,20 @@ function html(payload){
  const records=(payload.companies||[]).map(x=>({id:x.id,name:display(x.name||"").name,opf:display(x.name||"").opf||"",sale:x.saleInfo||{},finance:x.finance2025||{},staff:x.staffEvidence||{},type:types.includes(x.organizationType)?x.organizationType:(types.includes(x.type)?x.type:"Не определён"),industryDescription:x.industryDescription||"",category:x.category||"",mailStatus:x.mailEvidence?.status||"not_started",signatureWebsite:x.mailEvidence?.signatureWebsite||"",cardAttachments:x.mailEvidence?.attachments||0,confidence:x.segmentConfidence||x.verification||"Не определено",source:x.segmentSource||"",nameSearch:x.nameSearch||{},siteStatus:x.siteStatus||"",siteInfo:companyWebsiteDetails(x),siteUrl:reviewedWebsiteUrl(x.siteProfileUrl||x.siteVerified||""),email:x.crmEmails||[],contactEmails:x.contactEmails||[],contacts:x.contactNames||[],url:x.crmUrl||"",crmIds:x.crmIdList||[x.id],members:x.mergedCrmCards||[],duplicateStatus:x.duplicateStatus||""}));
  const nTyped=records.filter(x=>x.type!=="Не определён").length;
  const census=payload.classificationDisplay||{provisional:false};
- const countedTyped=census.provisional?census.typed:nTyped;
- const countedUntyped=census.provisional?census.untyped:records.length-nTyped;
+ const live=payload.classificationLive||{};
+ const liveUsable=live.ready===true&&Number.isSafeInteger(live.typed)&&
+  Number.isSafeInteger(live.total)&&live.typed<=live.total;
+ const countedTyped=liveUsable?live.typed:census.provisional?census.typed:nTyped;
+ const countedUntyped=liveUsable?live.untyped:census.provisional?census.untyped:records.length-nTyped;
  const countLabel=v=>v===null?"—":Number(v).toLocaleString("ru-RU");
- const censusNote=census.provisional?((census.source.startsWith("last_complete")||census.source==="regression_under_review")?
-  "Показаны показатели последнего завершённого снимка от "+census.completedAt+"; текущие карточки обновляются.":
-  "Выполняется восстановление. Полный счётчик временно не выводится."):
+ const censusNote=liveUsable?
+  "Текущие данные CRM: "+countLabel(live.typed)+" из "+countLabel(live.total)+
+  " компаний с типом."+(live.provisional?" Исследование сайтов продолжается.":"")+
+  (census.provisional?" Последний завершённый контрольный снимок: "+
+   countLabel(census.typed)+" из "+countLabel(census.total)+".":"")+
+  (live.recoveredCandidates?" Отдельно "+countLabel(live.recoveredCandidates)+
+   " компаний-кандидатов из сделок (проверяются независимо).":""):
+  census.provisional?"Идёт восстановление. Показан последний контрольный снимок.":
   "Показатели текущей полностью восстановленной базы.";
  const typedCounts=[...new Set(records.map(x=>x.type).filter(x=>x!=="Не определён"))]
   .map(t=>({type:t,count:records.filter(c=>c.type===t).length}))
