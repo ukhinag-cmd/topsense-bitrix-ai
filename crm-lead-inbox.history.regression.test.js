@@ -20,6 +20,7 @@ test("Historical CRM leads and all deal funnels from 6 Sep; safe contact links; 
  vm.runInNewContext(source,{module,exports:module.exports,URL,AbortSignal,fetch:fakeFetch,
   require:name=>{if(name==="./crm-deal-intake")return intake;
    if(name==="./deal-only-client-registry")return {ingest:()=>({})};
+   if(name==="./crm-unlinked-discovery")return {ingest:()=>({})};
    throw Error("unexpected "+name)},
   process:{env:{BITRIX_WEBHOOK_BASE:"https://bitrix.example/rest/"}},
   setTimeout:fn=>{fn();return 0},
