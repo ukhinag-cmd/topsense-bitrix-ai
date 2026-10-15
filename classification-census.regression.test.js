@@ -46,8 +46,8 @@ test("a new CRM company must not silently lower the finished typed count",()=>{
  assert.equal(p.observedTyped,500);
  assert.equal(census.consider(1567,500,1668,true),false);
 });
-test("real changes in source CRM inventory may update the finished census",()=>{
- const p=census.display(1567,675,true,1680);
+test("a reduced source CRM inventory is permitted to produce a genuinely different census",()=>{
+ const p=census.display(1567,675,true,1600);
  assert.equal(p.typed,675);
  assert.equal(p.provisional,false);
 });
