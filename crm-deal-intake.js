@@ -125,6 +125,9 @@ function summarizeActivities(input){
  let laterSignals=signals(""),allSignals=signals("");
  let laterAttachments=0,companyCardAttachments=0,firstIncomingSeen=false;
  const inboundStrings=[],legalNameCandidates=[];
+ const businessEmails=new Set(),websiteHints=new Set(),phoneHints=new Set();
+ const ownMail=/^(?:topsense\.su|detector-gaza\.ru|rutector\.email)$/i;
+ const blockedDomains=/^(?:bitrix24\.ru|google\.com|yandex\.ru|mail\.ru|t\.me|vk\.com|youtube\.com|telegram\.org)$/i;
  for(const a of rows){
   const txt=activityText(a);
   allSignals=mergeSignals(allSignals,signals(txt));
@@ -136,6 +139,21 @@ function summarizeActivities(input){
   if(isInbound(a)){
    inboundStrings.push(txt);
    legalNameCandidates.push(...extractLegalNameCandidates(a.DESCRIPTION||"",a.ID));
+   for(const c of Array.isArray(a.COMMUNICATIONS)?a.COMMUNICATIONS:[]){
+    for(const found of String(c.VALUE||"").matchAll(/[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})/giu)){
+     const addr=found[0].toLowerCase(),host=found[1].toLowerCase();
+     if(!ownMail.test(host)&&businessEmails.size<20)businessEmails.add(addr);
+    }
+   }
+   for(const m of String(a.DESCRIPTION||"").matchAll(/https?:\/\/[a-z0-9.-]+\.[a-z]{2,}(?:\/[a-z0-9%_\-./]*)?/giu)){
+    try{
+     const u=new URL(m[0]);
+     if(!blockedDomains.test(u.hostname)&&websiteHints.size<12)websiteHints.add(u.origin);
+    }catch{}
+   }
+   for(const m of String(a.DESCRIPTION||"").matchAll(/(?:\+7|8)[\s().-]*\d{3}[\s().-]*\d{3}[\s().-]*\d{2}[\s().-]*\d{2}/giu)){
+    if(phoneHints.size<12)phoneHints.add(m[0]);
+   }
   }
   if(companyCardAttachment(a))companyCardAttachments++;
  }
@@ -153,7 +171,8 @@ function summarizeActivities(input){
   laterAttachmentCount:laterAttachments,companyCardAttachmentCount:companyCardAttachments,
   corporateDomains:mail.extract(inboundText).slice(0,8),
   requisitesInnCandidates:[...new Set(requisites)].slice(0,8),
-  legalNameCandidates:legalNameCandidates.slice(0,12)};
+  legalNameCandidates:legalNameCandidates.slice(0,12),
+  senderEmails:[...businessEmails],websiteHints:[...websiteHints],phoneHints:[...phoneHints]};
 }
 
 async function inspect(deal){
@@ -201,6 +220,9 @@ async function inspect(deal){
   out.correspondencePartial=partial;
   out.requisitesInnCandidates=evidence.requisitesInnCandidates;
   out.legalNameCandidates=evidence.legalNameCandidates;
+  out.senderEmails=evidence.senderEmails;
+  out.websiteHints=evidence.websiteHints;
+  out.phoneHints=evidence.phoneHints;
   out.signals=mergeSignals(out.signals,evidence.signals);
   out.corporateDomains=[...new Set([...out.corporateDomains,
    ...evidence.corporateDomains])].slice(0,8);
