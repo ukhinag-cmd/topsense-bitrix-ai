@@ -68,27 +68,57 @@ async function dealPage(start){
  return call("crm.deal.list",{order:{ID:"ASC"},filter:{},
  select:["ID","TITLE","CONTACT_ID","COMPANY_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID","CURRENCY_ID","DATE_CREATE"],start});
 }
-async function allDeals(){
- const first=await dealPage(0);
- const initial=Array.isArray(first.result)?first.result:[];
- const total=Number(first.total||initial.length);
- if(total>75000)throw Error("Deal count above safety limit");
- state.totalDeals=total;
- const all=initial.slice();
- if(total>initial.length){
-  const size=Math.max(1,initial.length||50),starts=[];
-  for(let i=size;i<total;i+=size)starts.push(i);
-  for(let j=0;j<starts.length;j+=4){
-   const chunks=await Promise.all(starts.slice(j,j+4).map(dealPage));
-   chunks.forEach(c=>all.push(...(Array.isArray(c.result)?c.result:[])));
-   state.scannedDeals=all.length;
-   if(j%80===0)await sleep(200);
-  }
- }else if(first.next!=null){
-  let next=first.next,guard=0;while(next!=null&&guard++<1600){
-   const p=await dealPage(next);all.push(...(p.result||[]));next=p.next;
+// Preserve successfully fetched pages across API timeouts/retries. An
+// incomplete history must never replace the last completed client inventory.
+const historyPages=new Map();
+let historyTotal=0,historyPageSize=50;
+async function historicalPage(start){
+ for(let attempt=0;attempt<5;attempt++){
+  try{
+   const p=await dealPage(start);
+   if(!Array.isArray(p.result))throw Error("Invalid CRM deals page");
+   return p;
+  }catch(e){
+   if(attempt===4)throw e;
+   await sleep(1000*(attempt+1));
   }
  }
+}
+async function allDeals(){
+ const first=historyPages.get(0)||await historicalPage(0);
+ const initial=first.result||[];
+ const total=Number(first.total||initial.length);
+ if(total>75000)throw Error("Deal count above safety limit");
+ if(total<1)throw Error("Empty CRM deal inventory");
+ if(historyTotal&&total<historyTotal*0.9){
+  throw Error("CRM deal population unexpectedly shrank");
+ }
+ historyTotal=total;
+ historyPageSize=Math.max(1,initial.length||50);
+ historyPages.set(0,first);
+ state.totalDeals=total;
+ const starts=[];
+ for(let i=historyPageSize;i<total;i+=historyPageSize)starts.push(i);
+ let completed=0;
+ for(let j=0;j<starts.length;j+=2){
+  const batch=starts.slice(j,j+2).filter(start=>!historyPages.has(start));
+  const responses=await Promise.allSettled(batch.map(historicalPage));
+  let failed=0;
+  for(let k=0;k<batch.length;k++){
+   const x=responses[k];
+   if(x.status==="fulfilled")historyPages.set(batch[k],x.value);
+   else failed++;
+  }
+  completed=j+2;
+  state.scannedDeals=[...historyPages.values()].reduce((n,p)=>n+(p.result||[]).length,0);
+  if(failed){
+   console.warn(JSON.stringify({component:"sales-audit",event:"deal-page-retry-needed",
+    pagesSaved:historyPages.size,rowsSaved:state.scannedDeals,failedPages:failed}));
+   throw new Error("Incomplete historical deal scan; saved pages retained for retry");
+  }
+  if(completed%60===0)await sleep(300);
+ }
+ const all=[...historyPages.values()].flatMap(p=>p.result||[]);
  const map=new Map(all.filter(d=>d&&d.ID).map(d=>[String(d.ID),d]));
  if(map.size<total)throw Error("Incomplete CRM deal scan "+map.size+"/"+total);
  state.scannedDeals=map.size;
