@@ -95,7 +95,7 @@ function legalNameOnOwnSite(c,pages){
  if(normalized(full).length<12)return false;
  const escaped=full.replace(/[-\/\\^$*+?.()|[\]{}]/g,"\\$&")
   .replace(/[\s\-–—]+/g,"[\\s\\-–—]+");
- const re=new RegExp("(?:^|[^а-яa-z])"+form+"\\s*[«\\\"“]?\\s*"+escaped+"(?=$|[^а-яa-z0-9])","iu");
+ const re=new RegExp('(?:^|[^а-яa-z])'+form+'\\s*[«"“]?\\s*'+escaped+'(?=$|[^а-яa-z0-9])','iu');
  return (pages||[]).some(p=>{
   // Titles and the organization's own headings are stronger than a listing
   // of customers or partners elsewhere on the site.
