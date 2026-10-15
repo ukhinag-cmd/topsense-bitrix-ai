@@ -519,10 +519,18 @@ async function loadLinkedContacts(){
   console.log(JSON.stringify({component:"client-segments",event:"unlinked-contact-domain-candidates",
    unlinkedContacts:orphanContacts.length,siteCandidates:websiteCandidates.length}));
   state.linkedContacts=by;state.contactsAt=new Date().toISOString();
+  if(contactRetryTimer){clearTimeout(contactRetryTimer);contactRetryTimer=null;}
   enqueueMissingSiteNameSearch();
   enqueueLinkedContactSites();
   console.log(JSON.stringify({component:"client-segments",event:"linked-contacts-loaded",contacts:all.length,companies:by.size}));
- }catch(e){console.warn(JSON.stringify({component:"client-segments",event:"linked-contacts-error",error:String(e.message||e).slice(0,150)}))}
+ }catch(e){
+  console.warn(JSON.stringify({component:"client-segments",
+   event:"linked-contacts-error",error:String(e.message||e).slice(0,150),
+   retainedCompanyLinks:state.linkedContacts.size}));
+  if(!contactRetryTimer)contactRetryTimer=setTimeout(()=>{
+   contactRetryTimer=null;loadLinkedContacts().catch(()=>{});
+  },150000);
+ }
  finally{state.contactsLoading=false}
 }
 // Pull the authorized, private model-classification checkpoint from the existing store.
@@ -873,9 +881,12 @@ setInterval(coverageLog,240000);
 // Preload the read-only snapshot when the dashboard module is first requested.
 setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
-setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
-setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 800);
-setTimeout(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 28000);
+// First bring back the company register. The contacts/deal/requisite full
+// scans must not start together with CRM company pagination at process startup.
+setTimeout(() => loadLinkedContacts().catch(() => {}), 35000);
+setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 80000);
+setTimeout(() => require("./company-requisites").refresh()
+ .then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 170000);
 // Keep the CRM company/contact snapshot fresh without repeating paid AI research.
 // Site profiler fingerprints prevent unchanged completed site evidence being crawled again.
 setInterval(() => {
