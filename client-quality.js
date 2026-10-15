@@ -18,6 +18,9 @@ function summary(payload){
  const provisionalNameOnly=typed.filter(c=>String(c.segmentSource||"").includes("Название CRM, без подтверждения сайтом")).length;
  const officialWebsite=typed.filter(c=>String(c.segmentConfidence||"").startsWith("Высокая — официальный сайт")).length;
  const audit=payload.salesAudit||{},dup=payload.duplicateStats||{},sites=payload.siteCrawl||{},mail=payload.mailAudit||{};
+ const census=payload.classificationDisplay||{typed:typed.length,untyped:customers.length-typed.length,provisional:false,source:"current"};
+ const displayTyped=census.provisional?census.typed:typed.length;
+ const displayUntyped=census.provisional?census.untyped:customers.length-typed.length;
  const incomplete=typed.length!==customers.length||
   Number(dup.reviewGroupCount||0)>0||
   audit.status!=="complete"||
@@ -25,8 +28,9 @@ function summary(payload){
   Number((audit.orphanDeals||{}).unmatched||0)>0;
  return {
   timestamp:new Date().toISOString(),status:payload.status,
-  crmCards:Number(payload.crmCardTotal||0),customers:customers.length,typed:typed.length,
-  untyped:customers.length-typed.length,provisionalNameOnly,officialWebsite,coveragePercent:customers.length?Math.round(typed.length/customers.length*1000)/10:0,
+  crmCards:Number(payload.crmCardTotal||0),customers:customers.length,typed:displayTyped,
+  untyped:displayUntyped,census,provisionalNameOnly,officialWebsite,
+  coveragePercent:displayTyped===null?null:customers.length?Math.round(displayTyped/customers.length*1000)/10:0,
   taxonomyTotal:validTypes.size,representedTypes:covered,unrepresentedTypes:validTypes.size-covered,typeCounts,
   duplicateGroups:Number(dup.groupedCount||0),duplicateReview:Number(dup.reviewGroupCount||0),
   duplicateIntegrity:dup.duplicateCoverageValidated===true,
@@ -46,7 +50,7 @@ function summary(payload){
 function html(payload){
  const q=summary(payload);
  const metrics=[
-  ["Сводных клиентов",q.customers],["Определён тип",q.typed],["Не определён",q.untyped],
+  ["Сводных клиентов",q.customers],["Определён тип",q.typed===null?"—":q.typed],["Не определён",q.untyped===null?"—":q.untyped],
   ["Исходных CRM-карточек",q.crmCards],["Только по названию (предварит.)",q.provisionalNameOnly],["Официальный сайт в CRM-проверке",q.officialWebsite],["Типов в базе",q.representedTypes+" / "+q.taxonomyTotal],
   ["Дублей на ручную проверку",q.duplicateReview],["Сайтов реально проверено",q.scannedSites],
   ["Сайтов восстановлено из хранилища",q.restoredProfiles],["Сайтов в очереди",q.siteQueue],
@@ -79,7 +83,8 @@ function html(payload){
  '<header><h1>Контроль качества · ТОП-СЕНС</h1><p>' +num(q.taxonomyTotal)+' типов организаций · без правок Bitrix24 · предварительные признаки не равны проверенным фактам</p></header><main>'+
  '<nav><a href="/contractors">База клиентов</a><a href="/contractors/duplicates">Дубли</a><a href="/contractors/excluded">Исключённые карточки</a><a href="/contractors/leads">Новые лиды</a></nav>'+
  '<div class="panel"><b>Снимок типизации:</b> <span class="status">'+(q.classificationProvisional?"ПРЕДВАРИТЕЛЬНЫЙ — восстановление/обход ещё идёт":"ОБХОД ЗАВЕРШЁН — результат требует проверки")+'</span>. '+(q.restorationPending?"Сохранённые профили ещё загружаются; временное снижение счётчика не означает потерю классификаций. ":"")+'<b>Статус проверки:</b> <span class="status">'+(q.incomplete?"НЕ ЗАВЕРШЕНА":"Нужна финальная независимая сверка")+'</span> · расчёт на '+esc(q.timestamp)+'. Источник: текущий защищённый снимок CRM/аналитики. Не следует считать процент типизации процентом юридически подтверждённых компаний.</div>'+
- '<div class="panel"><h2>Покрытие классификации</h2><strong style="font-size:34px">'+esc(q.coveragePercent)+'%</strong><div style="height:9px;background:#e3edf0;border-radius:8px;overflow:hidden;margin:11px 0"><div style="background:#13778a;height:100%;width:'+Math.max(0,Math.min(100,q.coveragePercent))+'%"></div></div></div>'+
+ '<div class="panel"><h2>Покрытие классификации</h2><strong style="font-size:34px">'+(q.coveragePercent===null?'—':esc(q.coveragePercent)+'%')+'</strong><div style="height:9px;background:#e3edf0;border-radius:8px;overflow:hidden;margin:11px 0"><div style="background:#13778a;height:100%;width:'+Math.max(0,Math.min(100,q.coveragePercent||0))+'%"></div></div></div>'+
+ '<div class="panel"><b>Показатели типизации:</b> '+(q.census.provisional?(q.census.source==="last_complete"?"Последний завершённый снимок от "+esc(q.census.completedAt)+". Восстановление продолжается.":"Восстановление данных; полный счётчик пока не готов."):"Полный снимок после восстановления.")+'</div>'+
  '<div class="grid">'+tiles+'</div>'+ '<div class="panel"><h2>Сверка сохранённых AI-результатов</h2><p class="note">Подсчёт по исходным CRM ID до виртуального объединения. Статус review не означает подтверждённый тип; никакие AI-запросы здесь не выполняются.</p><div class="grid">'+aiTiles+'</div></div>'+
  '<div class="panel"><h2>Все '+num(q.taxonomyTotal)+' типов</h2><p>Без компаний в текущем срезе: '+num(q.unrepresentedTypes)+' типов. Нулевое значение не означает отсутствие компаний этого типа в CRM, оно означает отсутствие установленного типа.</p><details><summary>Показать разбивку по всем типам</summary><table><thead><tr><th>Тип организации</th><th>Компаний</th></tr></thead><tbody>'+typeRows+'</tbody></table></details></div>'+
  '<div class="panel"><h2>Контроль дубликатов</h2><p>Виртуально сгруппировано '+num(q.duplicateGroups)+' групп; требует ручной сверки '+num(q.duplicateReview)+' групп. Регрессионная целостность источников: '+(q.duplicateIntegrity?"проверена":"не подтверждена")+'. Никакие карточки в CRM не объединялись.</p></div>'+
