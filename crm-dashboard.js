@@ -372,6 +372,23 @@ function enqueueMissingSiteNameSearch(){
    contactEmails:linked?[...linked.emails]:[],
    suppliedSiteCandidate:require("./manual-website-candidates").get(c.id)?.url||""});
  }
+ const taxonomy=require("./client-taxonomy");
+ const ledger=require("./classification-ledger");
+ const infer=require("./client-type-inference").infer;
+ function alreadyTyped(c){
+  const pilot=state.pilot.get(String(c.id));
+  return taxonomy.known(c.verifiedOrgType)||
+    taxonomy.known(pilot?.status==="classified"?pilot?.primaryType:"")||
+    taxonomy.known(ledger.get(c.id)?.type)||
+    Boolean(infer(c.name)?.type);
+ }
+ function priority(c){
+  const name=String(c.name||"").replace(/^(?:ООО|АО|ПАО|ОАО|ЗАО)\s*/iu,"").trim();
+  return (alreadyTyped(c)?0:100)+
+   (c.crmInn?45:0)+(c.crmPhones?.length?25:0)+
+   (c.suppliedSiteCandidate?35:0)+(name.length>=12?15:0);
+ }
+ missing.sort((a,b)=>priority(b)-priority(a));
  require("./name-site-search").enqueue(missing);
 }
 function enqueuePreviousPilotSites(){
