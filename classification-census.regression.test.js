@@ -32,6 +32,13 @@ test("last complete census survives temporary changes in virtual duplicate group
  assert.equal(p.typed,689);
  assert.equal(p.source,"last_complete_virtual_groups_changed");
 });
+test("a new CRM card does not erase the prior completed census during startup",()=>{
+ const p=census.display(1567,496,false,1668);
+ assert.equal(p.typed,689);
+ assert.equal(p.total,1557);
+ assert.equal(p.provisional,true);
+ assert.equal(p.source,"last_complete_crm_population_changed");
+});
 test("real changes in source CRM inventory may update the finished census",()=>{
  const p=census.display(1567,675,true,1680);
  assert.equal(p.typed,675);
