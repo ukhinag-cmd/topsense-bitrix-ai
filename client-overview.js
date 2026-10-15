@@ -19,7 +19,7 @@ function reviewedWebsiteUrl(raw){
 }
 // Distinguish a reviewed site from an unverified CRM/domain candidate.
 function companyWebsiteDetails(c){
- const strong=new Set(["site_profiled","site_read_no_clear_type","official_site_verified","research_completed"]);
+ const strong=new Set(["site_profiled","site_read_no_clear_type","official_site_verified","research_completed","site_identity_verified"]);
  const profiled=reviewedWebsiteUrl(c?.siteProfileUrl);
  const declared=reviewedWebsiteUrl(c?.siteVerified);
  // Email domain can belong to an entire holding: never offer the shared root
