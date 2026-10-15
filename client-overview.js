@@ -163,12 +163,13 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  const effectiveUntyped=census?.provisional?census.untyped:b.untyped;
  const displayTyped=effectiveTyped===null?"—":nr(effectiveTyped);
  const displayUntyped=effectiveUntyped===null?"—":nr(effectiveUntyped);
- const coverage=effectiveTyped===null?null:pct(effectiveTyped,b.total);
+ const metricBase=census?.provisional&&census.source==="last_complete_virtual_groups_changed"?census.total:b.total;
+ const coverage=effectiveTyped===null?null:pct(effectiveTyped,metricBase);
  const coverageLabel=coverage===null?"—":coverage+"%";
  const coverageArc=coverage===null?0:coverage;
  const censusNote=census?.provisional?
-  (census.source==="last_complete"?
-   "Последний завершённый снимок от "+census.completedAt+". Текущий пересчёт ещё идёт; временное уменьшение не публикуется.":
+  (census.source.startsWith("last_complete")?
+   "Последний завершённый снимок ("+census.typed+" / "+census.total+") от "+census.completedAt+". Текущий пересчёт ещё идёт; временное уменьшение не публикуется.":
    "Восстановление сохранённых исследований. Итоговый счётчик появится после завершения прохода."):
   "Текущие показатели рассчитаны по восстановленным данным.";
  const quality=String(payload.status||"starting");
