@@ -317,7 +317,8 @@ function resumeUnresolvedCompanySites(){
      if(legal.status!=="inn_recorded")continue;
      const linked=state.linkedContacts.get(c.id);
      candidates.push({...c,crmInn:legal.inn,
-      contactEmails:linked?[...linked.emails]:[]});
+      contactEmails:linked?[...linked.emails]:[],
+      suppliedSiteCandidate:require("./manual-website-candidates").get(c.id)?.url||""});
     }
     innEligible=candidates.length;
     innQueued=nameSearch.enqueueByInn(candidates);
@@ -346,7 +347,8 @@ function enqueueMissingSiteNameSearch(){
   const linked=state.linkedContacts.get(c.id);
   const legal=requisites.get(c.id);
   missing.push({...c,crmInn:legal.status==="inn_recorded"?legal.inn:"",
-   contactEmails:linked?[...linked.emails]:[]});
+   contactEmails:linked?[...linked.emails]:[],
+   suppliedSiteCandidate:require("./manual-website-candidates").get(c.id)?.url||""});
  }
  require("./name-site-search").enqueue(missing);
 }
