@@ -2,7 +2,7 @@
 // Durable display checkpoint for the LAST COMPLETED classification census.
 // Counts are not company evidence and never create or change a classification.
 const KEY="meta:topsense-classification-census:v1";
-let saved=null,pending=null,writing=false,writeErrors=0,lastError="",timer=null;
+let saved=null,pending=null,writing=false,writeErrors=0,lastError="",timer=null,lastRegression="";
 const finiteInt=n=>Number.isSafeInteger(n)&&n>=0;
 function valid(p){
  return Boolean(p&&p.recordType==="topsense-classification-census"&&
@@ -18,6 +18,10 @@ function ingest(rows){
  return saved;
 }
 function display(total,typed,ready,crmCards){
+ if(ready&&saved&&saved.crmCards===crmCards&&typed<saved.typed)return {
+  total:saved.total,typed:saved.typed,untyped:saved.total-saved.typed,
+  provisional:true,completedAt:saved.completedAt,source:"regression_under_review",
+  observedTyped:typed,observedTotal:total};
  if(ready)return {total,typed,untyped:total-typed,provisional:false,completedAt:null,source:"current"};
  // Virtual deduplication can change while site/domain evidence restores.
  // When the underlying CRM card population has not changed, retain the last
@@ -30,6 +34,17 @@ function display(total,typed,ready,crmCards){
 }
 function consider(total,typed,crmCards,ready){
  if(!ready||![total,typed,crmCards].every(finiteInt)||typed>total||total>crmCards)return false;
+ if(saved&&saved.crmCards===crmCards&&typed<saved.typed){
+  const signature=[saved.typed,typed,total,crmCards].join(":");
+  if(lastRegression!==signature){
+   lastRegression=signature;
+   console.warn(JSON.stringify({component:"classification-census",event:"confirmed-count-regressed",
+    previousTyped:saved.typed,observedTyped:typed,previousTotal:saved.total,
+    observedTotal:total,crmCards,checkpointUnchanged:true}));
+  }
+  return false;
+ }
+ lastRegression="";
  if(saved&&saved.total===total&&saved.typed===typed&&saved.crmCards===crmCards)return false;
  if(pending&&pending.total===total&&pending.typed===typed&&pending.crmCards===crmCards)return false;
  pending={recordType:"topsense-classification-census",total,typed,crmCards,completedAt:new Date().toISOString()};
