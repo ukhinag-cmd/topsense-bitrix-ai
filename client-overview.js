@@ -25,8 +25,12 @@ function companyWebsiteDetails(c){
  // Email domain can belong to an entire holding: never offer the shared root
  // as this distinct legal entity's website without independent proof.
  const candidate=reviewedWebsiteUrl(c?.siteCandidate);
- const verified=(strong.has(String(c?.siteStatus||""))&&Boolean(profiled||declared))||
-  (c?.verificationStatus==="confirmed"&&Boolean(declared));
+ const tentativeLegalNameSite=
+  /по юридическому наименованию — предварительно/i.test(
+   [c?.siteSource,c?.segmentSource,c?.verification,c?.segmentConfidence].filter(Boolean).join(" "));
+ const verified=!tentativeLegalNameSite&&
+  ((strong.has(String(c?.siteStatus||""))&&Boolean(profiled||declared))||
+   (c?.verificationStatus==="confirmed"&&Boolean(declared)));
  const url=verified?(profiled||declared):(profiled||declared||candidate);
  let domain="";try{domain=new URL(url).hostname.replace(/^www[.]/,"")}catch{}
  return {url,domain,verified:Boolean(url&&verified),candidate:Boolean(url&&!verified)};
