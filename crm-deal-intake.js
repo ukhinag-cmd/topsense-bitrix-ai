@@ -48,22 +48,90 @@ async function call(method,params){
  return data.result;
 }
 async function activities(id){
- const filter={BINDINGS:[{OWNER_TYPE_ID:2,OWNER_ID:Number(id)}]};
- const params={order:{ID:"DESC"},filter,
-  select:["ID","TYPE_ID","DIRECTION","PROVIDER_ID","DESCRIPTION",
-   "SUBJECT","COMMUNICATIONS","FILES","STORAGE_ELEMENT_IDS"],start:0};
- let data;
- try{data=await call("crm.activity.list",params)}
- catch{
-  params.filter={OWNER_TYPE_ID:2,OWNER_ID:Number(id)};
-  data=await call("crm.activity.list",params);
+ // Always start with the original correspondence, then read subsequent
+ // activities in ascending ID order. Bitrix paginates activity lists.
+ // Never silently take only the newest 35 activities.
+ const standardFilter={BINDINGS:[{OWNER_TYPE_ID:2,OWNER_ID:Number(id)}]};
+ const fallbackFilter={OWNER_TYPE_ID:2,OWNER_ID:Number(id)};
+ let fallback=false,start=0,rows=[];
+ for(let page=0;page<100;page++){
+  const params={order:{ID:"ASC"},filter:fallback?fallbackFilter:standardFilter,
+   select:["ID","TYPE_ID","DIRECTION","PROVIDER_ID","CREATED","START_TIME",
+    "DESCRIPTION","SUBJECT","COMMUNICATIONS","FILES","STORAGE_ELEMENT_IDS"],start};
+  let data;
+  try{data=await call("crm.activity.list",params)}
+  catch(e){
+   if(fallback)throw e;
+   fallback=true;params.filter=fallbackFilter;
+   data=await call("crm.activity.list",params);
+  }
+  if(!Array.isArray(data))throw Error("CRM activity pagination unavailable");
+  rows.push(...data);
+  if(data.length<50)return {rows,partial:false};
+  start+=data.length;
  }
- return (Array.isArray(data)?data:[]).slice(0,35);
+ // Extreme correspondence beyond 5000 activities must be explicitly marked
+ // partial rather than misrepresented as fully reviewed.
+ return {rows,partial:true};
 }
 function attachmentCount(a){
  const raw=[a?.FILES,a?.STORAGE_ELEMENT_IDS];
  return raw.reduce((n,x)=>n+(Array.isArray(x)?x.length:typeof x==="string"&&x.trim()?1:0),0);
 }
+function mergeSignals(a,b){
+ return {gases:[...new Set([...(a?.gases||[]),...(b?.gases||[])])],
+  portable:Boolean(a?.portable||b?.portable),fixed:Boolean(a?.fixed||b?.fixed),
+  service:Boolean(a?.service||b?.service),tender:Boolean(a?.tender||b?.tender)};
+}
+function isMail(a){return String(a.PROVIDER_ID||"").toUpperCase()==="CRM_EMAIL"||
+ String(a.TYPE_ID||"")==="4"}
+function isInbound(a){return isMail(a)&&String(a.DIRECTION||"")==="1"}
+function activityText(a){
+ return [a.SUBJECT,a.DESCRIPTION,
+  ...(Array.isArray(a.COMMUNICATIONS)?a.COMMUNICATIONS.map(x=>value(x.VALUE||x)):[])]
+  .map(value).join(" ").slice(0,25000);
+}
+function companyCardAttachment(a){
+ const docs=Array.isArray(a.FILES)?a.FILES:[];
+ return docs.some(f=>/карточк|реквизит|анкета.?контрагента|company.?profile|карт[аы].?предприят/i
+   .test(String(f?.NAME||f?.name||"")));
+}
+function summarizeActivities(input){
+ const rows=[...(input||[])].sort((a,b)=>Number(a.ID||0)-Number(b.ID||0));
+ const incoming=rows.filter(isInbound);
+ const first=incoming[0]||null;
+ const firstText=first?activityText(first):"";
+ const firstSignals=signals(firstText);
+ let laterSignals=signals(""),allSignals=signals("");
+ let laterAttachments=0,companyCardAttachments=0,firstIncomingSeen=false;
+ const inboundStrings=[];
+ for(const a of rows){
+  const txt=activityText(a);
+  allSignals=mergeSignals(allSignals,signals(txt));
+  if(first&&String(a.ID)===String(first.ID)){firstIncomingSeen=true}
+  else if(firstIncomingSeen){
+   laterSignals=mergeSignals(laterSignals,signals(txt));
+   laterAttachments+=attachmentCount(a);
+  }
+  if(isInbound(a))inboundStrings.push(txt);
+  if(companyCardAttachment(a))companyCardAttachments++;
+ }
+ // A personal mailbox (mail.ru etc.) can still carry reliable requisites
+ // and inquiry details; ignore the domain only as proof of website ownership.
+ const inboundText=inboundStrings.join(" ").slice(0,100000);
+ const requisites=[...inboundText.matchAll(/(?:ИНН|INN)\\s*[:№#-]?\\s*(\\d{10}|\\d{12})(?!\\d)/gi)]
+   .map(m=>m[1]);
+ return {activityCount:rows.length,incomingEmails:incoming.length,
+  subsequentIncomingEmails:Math.max(0,incoming.length-1),
+  firstIncomingAt:text(first?.CREATED||first?.START_TIME),
+  firstIncomingSubject:text(first?.SUBJECT).slice(0,160),
+  firstIncomingSignals:firstSignals,laterCorrespondenceSignals:laterSignals,
+  signals:allSignals,attachmentCount:rows.reduce((n,x)=>n+attachmentCount(x),0),
+  laterAttachmentCount:laterAttachments,companyCardAttachmentCount:companyCardAttachments,
+  corporateDomains:mail.extract(inboundText).slice(0,8),
+  requisitesInnCandidates:[...new Set(requisites)].slice(0,8)};
+}
+
 async function inspect(deal){
  const id=text(deal.ID),base={id,companyId:text(deal.COMPANY_ID),
   contactId:text(deal.CONTACT_ID),ownerId:text(deal.ASSIGNED_BY_ID),
@@ -94,25 +162,28 @@ async function inspect(deal){
   }
  }catch{out.evidenceSources.push("deal_fields_unavailable")}
  try{
-  const rows=await activities(id);
-  out.activityCount=rows.length;
-  const inbound=rows.filter(x=>String(x.DIRECTION||"")==="1"&&
-   (String(x.PROVIDER_ID||"").toUpperCase()==="CRM_EMAIL"||
-    String(x.TYPE_ID||"")==="4"));
-  out.incomingEmails=inbound.length;
-  out.attachmentCount=rows.reduce((n,x)=>n+attachmentCount(x),0);
-  const messages=inbound.map(x=>[x.SUBJECT,x.DESCRIPTION,
-   (x.COMMUNICATIONS||[]).map(v=>value(v.VALUE||v)).join(" ")].join(" ")).join(" ").slice(0,22000);
-  const more=signals(messages);
-  out.signals={gases:[...new Set([...out.signals.gases,...more.gases])],
-   portable:out.signals.portable||more.portable,
-   fixed:out.signals.fixed||more.fixed,
-   service:out.signals.service||more.service,
-   tender:out.signals.tender||more.tender};
-  out.corporateDomains=[...new Set([...out.corporateDomains,...mail.extract(messages)])].slice(0,8);
-  if(inbound.length)out.evidenceSources.push("inbound_deal_email");
+  const {rows,partial}=await activities(id);
+  const evidence=summarizeActivities(rows);
+  out.activityCount=evidence.activityCount;
+  out.incomingEmails=evidence.incomingEmails;
+  out.subsequentIncomingEmails=evidence.subsequentIncomingEmails;
+  out.firstIncomingAt=evidence.firstIncomingAt;
+  out.firstIncomingSubject=evidence.firstIncomingSubject;
+  out.firstIncomingSignals=evidence.firstIncomingSignals;
+  out.laterCorrespondenceSignals=evidence.laterCorrespondenceSignals;
+  out.attachmentCount=evidence.attachmentCount;
+  out.laterAttachmentCount=evidence.laterAttachmentCount;
+  out.companyCardAttachmentCount=evidence.companyCardAttachmentCount;
+  out.correspondencePartial=partial;
+  out.requisitesInnCandidates=evidence.requisitesInnCandidates;
+  out.signals=mergeSignals(out.signals,evidence.signals);
+  out.corporateDomains=[...new Set([...out.corporateDomains,
+   ...evidence.corporateDomains])].slice(0,8);
+  if(out.incomingEmails)out.evidenceSources.push("inbound_deal_email_chronological");
+  if(out.subsequentIncomingEmails)out.evidenceSources.push("followup_inbound_email");
   if(out.attachmentCount)out.evidenceSources.push("deal_attachment_present");
-  out.status=out.status==="deal_read"?"deal_and_activities_read":"activities_read";
+  if(out.companyCardAttachmentCount)out.evidenceSources.push("company_card_attachment_candidate");
+  if(partial)out.evidenceSources.push("correspondence_exceeds_safe_page_limit");
  }catch{out.evidenceSources.push("deal_activities_unavailable")}
  // No original email bodies, files, full contact details or inferred company
  // names are logged or shared with external public AI services.
@@ -169,4 +240,4 @@ function forCompany(id){
   .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0)).slice(0,15);
 }
 function stats(){return {...state}}
-module.exports={queueDeals,get,forCompany,stats,signals};
+module.exports={queueDeals,get,forCompany,stats,signals,summarizeActivities};
