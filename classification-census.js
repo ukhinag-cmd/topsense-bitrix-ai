@@ -17,11 +17,15 @@ function ingest(rows){
  }
  return saved;
 }
-function display(total,typed,ready){
- // If the CRM population changed, NEVER present an old census as current.
+function display(total,typed,ready,crmCards){
  if(ready)return {total,typed,untyped:total-typed,provisional:false,completedAt:null,source:"current"};
- if(saved&&saved.total===total)return {total:saved.total,typed:saved.typed,
-  untyped:saved.total-saved.typed,provisional:true,completedAt:saved.completedAt,source:"last_complete"};
+ // Virtual deduplication can change while site/domain evidence restores.
+ // When the underlying CRM card population has not changed, retain the last
+ // finished census, explicitly labelling its former population as historical.
+ if(saved&&(saved.total===total||saved.crmCards===crmCards))return {
+  total:saved.total,typed:saved.typed,untyped:saved.total-saved.typed,
+  provisional:true,completedAt:saved.completedAt,
+  source:saved.total===total?"last_complete":"last_complete_virtual_groups_changed"};
  return {total,typed,untyped:total-typed,provisional:true,completedAt:null,source:"live_provisional"};
 }
 function consider(total,typed,crmCards,ready){
