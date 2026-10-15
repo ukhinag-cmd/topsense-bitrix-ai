@@ -125,12 +125,12 @@ function consolidate(companies){
   const hasOmittedForm=set.some(c=>!identity(c).opf);
   if(!hasOmittedForm||forms.length!==1||base.length<9)continue;
   const inns=distinct(set.map(c=>String(c.finance2025?.inn||c.crmInn||c.legalInnReference||"")
-   .replace(/\\D/g,"")).filter(n=>n.length===10||n.length===12));
+   .replace(/\D/g,"")).filter(n=>n.length===10||n.length===12));
   if(inns.length>1)continue; // Different legal entities, regardless of name.
   const companySites=distinct(set.flatMap(c=>
    [domain(c.siteCandidate),domain(c.siteProfileUrl),domain(c.siteVerified)]).filter(Boolean));
   const sharedInns=inns.length===1&&set.every(c=>{
-   const raw=String(c.finance2025?.inn||c.crmInn||c.legalInnReference||"").replace(/\\D/g,"");
+   const raw=String(c.finance2025?.inn||c.crmInn||c.legalInnReference||"").replace(/\D/g,"");
    return !raw||raw===inns[0];
   });
   // One group domain is not sufficient to link different entities, but an
@@ -286,8 +286,8 @@ function consolidate(companies){
  const rowById=new Map(rows.map(c=>[String(c.id),c]));
  function statedParent(c){
   const raw=String(c.name||"").trim();
-  if(!/^филиал\\s/i.test(raw))return null;
-  const m=raw.match(/^филиал\\s+.+?\\s+(ООО|АО|ПАО|ОАО|ЗАО)\\s*["«“]?([^"»”]+)["»”]?\\s*$/iu);
+  if(!/^филиал\s/i.test(raw))return null;
+  const m=raw.match(/^филиал\s+.+?\s+(ООО|АО|ПАО|ОАО|ЗАО)\s*["«“]?([^"»”]+)["»”]?\s*$/iu);
   if(!m)return null;
   return {opf:m[1].toUpperCase(),base:normalize(m[2])};
  }
@@ -301,7 +301,7 @@ function consolidate(companies){
   const group=groups[0];
   const existing=group.crmIdList.map(id=>rowById.get(String(id))).filter(Boolean);
   const inns=distinct([...existing,branch].map(c=>String(c.finance2025?.inn||c.crmInn||c.legalInnReference||"")
-   .replace(/\\D/g,"")).filter(x=>x.length===10||x.length===12));
+   .replace(/\D/g,"")).filter(x=>x.length===10||x.length===12));
   if(inns.length>1)continue;
   const attached=merge([...existing,branch],"explicit_branch_parent");
   attached.duplicateStatus="Сводная карточка юридического лица и явно названного филиала; оригинальные CRM-записи и история филиала сохранены";
