@@ -16,16 +16,16 @@ test("Verified website appears visibly as an address and clickable company title
  assert.ok(output.includes("https://contractor.example/works"));
  assert.ok(output.includes("Открыть в Bitrix24 ↗"));
 });
-test("A corporate domain or CRM candidate is visible, but NOT called a verified website",()=>{
- for(const info of [
-  {corporateDomain:"contractor.example",siteStatus:"site_absent"},
-  {siteCandidate:"https://contractor.example",siteStatus:"site_pending"}
- ]){
-  const output=page(info);
-  assert.ok(output.includes("Сайт-кандидат · требует подтверждения"));
-  assert.ok(output.includes("contractor.example ↗"));
-  assert.ok(!output.includes("Сайт изучен"));
- }
+test("A bare corporate email domain is a search lead, never an official company website",()=>{
+ const output=page({corporateDomain:"contractor.example",siteStatus:"site_absent"});
+ assert.ok(output.includes("Сайт не найден"));
+ assert.ok(!output.includes('class="websiteAddress"'));
+});
+test("An explicit CRM website candidate is visible but not marked verified",()=>{
+ const output=page({siteCandidate:"https://contractor.example",siteStatus:"site_pending"});
+ assert.ok(output.includes("Сайт-кандидат · требует подтверждения"));
+ assert.ok(output.includes("contractor.example ↗"));
+ assert.ok(!output.includes("Сайт изучен"));
 });
 test("Missing website never creates an invented URL",()=>{
  const output=page({siteStatus:"site_absent"});
