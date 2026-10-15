@@ -41,7 +41,7 @@ function urls(c){
    "Сайт из карточки компании, присланной письмом"].includes(c.siteSource);
  const fromEmail=!pinned&&Boolean(c.corporateDomain)&&selected==="https://"+c.corporateDomain;
  const origin=fromEmail?(
-   ["Домен привязанного контакта","Альтернативный домен привязанного контакта",
+   ["Домен привязанного контакта","Альтернативный домен привязанного контакта","Домен из входящей сделки",
     "Непривязанные CRM-контакты: совпали название и корпоративный домен"].includes(c.siteSource)
      ?c.siteSource:"Корпоративный домен e-mail CRM"
    ):(c.siteSource||"Сайт из CRM");
@@ -191,7 +191,7 @@ async function one(c){
   const identifiedReference=String(c.siteSource||"").startsWith("Сайт организации, установленный по независимым источникам");
   // HTTP-only fallback must corroborate company identity on the page.
   const insecureTransport=new URL(result.url).protocol==="http:";
-  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Альтернативный домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport;
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Альтернативный домен привязанного контакта"||c.siteSource==="Домен из входящей сделки"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
   const profile={status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,
@@ -220,7 +220,7 @@ function evidenceRank(source){
  if(source==="Сайт из подписи входящего письма")return 7;
  if(source==="Сайт из карточки компании, присланной письмом")return 6;
  if(source==="Корпоративный домен e-mail CRM")return 4;
- if(source==="Домен привязанного контакта"||source==="Альтернативный домен привязанного контакта")return 3;
+ if(["Домен привязанного контакта","Альтернативный домен привязанного контакта","Домен из входящей сделки"].includes(source))return 3;
  if(source==="Непривязанные CRM-контакты: совпали название и корпоративный домен")return 3;
  if(source==="Поиск по названию — подтверждено независимыми реквизитами")return 0.5;
  if(source==="Сайт из CRM")return 2;
