@@ -220,6 +220,10 @@ async function run(companies){
    eligible.push({id:dealId,companyId});
   }
   for(const rec of accum.values())rec.purchaseStatus="БЫЛА";
+  // Save positive stage proof before the lengthy per-deal document pass.
+  // A timeout during document inspection must not erase verified buyers.
+  summary=new Map([...summary,...accum]);
+  purchaseCheckpoint.queue(accum);
   state.companiesWithPurchaseEvidence=accum.size;
   // Product rows only for deals reaching shipment or payment stages.
   let n=0;
