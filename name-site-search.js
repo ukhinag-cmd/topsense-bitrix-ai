@@ -20,8 +20,9 @@ function eligible(c){
  // Short identifiers (e.g. "ИС-16") are admissible when CRM has independent
  // identifiers for website verification. A short name alone is insufficient.
  if(uninformative||name.length<4||(name.length<9&&!/^(?:\d{10}|\d{12})$/.test(inn)&&!phone))return false;
- if(c.siteCandidate||c.corporateDomain||c.verifiedOrgType)return false;
+ if(!c.dealOnlyResearch&&(c.siteCandidate||c.corporateDomain||c.verifiedOrgType))return false;
  const free=/^(?:gmail\.com|mail\.ru|list\.ru|bk\.ru|yandex\.ru|ya\.ru|outlook\.com|rambler\.ru|hotmail\.com|icloud\.com|topsense\.su|detector-gaza\.ru)$/i;
+ if(c.dealOnlyResearch)return true;
  return ![...(c.crmEmails||[]),...(c.contactEmails||[])].some(e=>{
   const d=String(e||"").split("@");return d.length>1&&d[d.length-1].includes(".")&&!free.test(d[d.length-1]);
  });
@@ -108,23 +109,27 @@ async function inspect(c,hit){
   note:proof.matched?proof.proof:"Совпадает название, но не телефон или ИНН — принадлежность сайта не подтверждена"};
 }
 async function scan(c,mode="name"){
- // A URL supplied by a customer/user is only a candidate, not proof.
- // Check site contacts/requisites against live read-only CRM first.
+ // A domain from incoming correspondence, a user-supplied link or a
+ // signature is only a site CANDIDATE. Inspect each independently and
+ // confirm name plus exact independent identity evidence.
  let supplied=null;
- if(c.suppliedSiteCandidate){
+ const hints=[...new Set([c.suppliedSiteCandidate,...(c.suppliedSiteCandidates||[])].filter(Boolean))].slice(0,4);
+ const inspected=new Set();
+ for(const hint of hints){
   try{
-   const candidate=domainAllowed(c.suppliedSiteCandidate);
-   if(candidate){
-    supplied=await inspect(c,{url:candidate,title:"Сайт-кандидат (пользователь)"});
-    if(supplied.status==="confirmed"){
-     confirmed++;
-     require("./website-profiler").enqueue([{...c,siteCandidate:supplied.url,
-      siteSource:"Поиск по названию — подтверждено независимыми реквизитами"}]);
-     return {status:"confirmed",site:supplied.url,candidates:[supplied],
-      source:"Сайт-кандидат, проверенный по реквизитам CRM",note:supplied.note};
-    }
+   const candidate=domainAllowed(hint);
+   if(!candidate||inspected.has(candidate))continue;
+   inspected.add(candidate);
+   const result=await inspect(c,{url:candidate,title:"Сайт-кандидат из переписки"});
+   if(!supplied||result.status==="needs_review")supplied=result;
+   if(result.status==="confirmed"){
+    confirmed++;
+    require("./website-profiler").enqueue([{...c,siteCandidate:result.url,
+     siteSource:"Поиск по названию — подтверждено независимыми реквизитами"}]);
+    return {status:"confirmed",site:result.url,candidates:[result],
+     source:"Домен письма или сайт-кандидат, сверенный по реквизитам",note:result.note};
    }
-  }catch{ /* Keep the hint for review and continue independent search. */ }
+  }catch{ /* Continue other leads; failures must not mask other sites. */ }
  }
  let hits;
  try{hits=await search(cleanName(c.name),mode==="inn"?String(c.crmInn||""):"")}
@@ -171,6 +176,18 @@ function enqueue(companies){
  if(added)console.log(JSON.stringify({component:"name-site-search",event:"queued",count:added,remaining:queue.length}));
  pump().catch(()=>{busy=false});
 }
+function enqueuePriority(companies,limit=25){
+ let added=0;
+ for(const c of (companies||[]).slice(0,Math.min(45,Math.max(1,limit)))){
+  const id=String(c?.id||"");
+  if(!id||pending.has(id)||profiles.has(id)||completion.isComplete(id)||!eligible(c))continue;
+  pending.add(id);queue.unshift(c);added++;
+ }
+ if(added)console.log(JSON.stringify({component:"name-site-search",
+  event:"deal-only-sites-prioritized",queued:added,remaining:queue.length}));
+ if(added)pump().catch(()=>{busy=false});
+ return added;
+}
 function enqueueByInn(companies){
  let added=0;
  for(const c of companies||[]){
@@ -189,4 +206,4 @@ function enqueueByInn(companies){
 }
 function get(id){return profiles.get(String(id))||{status:pending.has(String(id))?"queued":"not_started",candidates:[]}}
 function stats(){const count={};for(const p of profiles.values())count[p.status]=(count[p.status]||0)+1;return {attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length,count}}
-module.exports={enqueue,enqueueByInn,get,stats,cleanName,eligible,domainAllowed,legalOrPhoneMatch};
+module.exports={enqueue,enqueuePriority,enqueueByInn,get,stats,cleanName,eligible,domainAllowed,legalOrPhoneMatch};
