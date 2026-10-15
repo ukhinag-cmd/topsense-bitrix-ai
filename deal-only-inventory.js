@@ -125,7 +125,7 @@ function available(existingCompanies=[],freshGroups=[],complete=false){
  // full-history evidence until a new completed scan supersedes it.
  return valid;
 }
-function stats(){return {restored,stored,pending:pending.length,failures,lastError,
+function stats(){return {restored,stored:saved,pending:pending.length,failures,lastError,
   available:Boolean(snapshot),groups:snapshot?.groups.length||0,
   sourceDeals:snapshot?.totalDeals||0,savedAt:snapshot?.at||null,
   source:"last_completed_full_historical_scan"}}
