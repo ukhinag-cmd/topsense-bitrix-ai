@@ -5,7 +5,7 @@
 const emailDomains=require("./company-email-domains");
 const nameSites=require("./name-site-search");
 const profiler=require("./website-profiler");
-const state={lastQueuedAt:null,submitted:0,attempted:0};
+const state={lastQueuedAt:null,lastAttemptMs:0,submitted:0,attempted:0};
 const str=x=>String(x??"").trim();
 function evidenceFor(client,read){
  const dealRefs=(client?.dealRefs||[]).slice(0,45);
@@ -58,6 +58,13 @@ function prepare(client,evidence){
 }
 function enqueue(clients,{read,limit=22}={}){
  if(typeof read!=="function")return 0;
+ // The UI may be refreshed often. Avoid repeatedly scheduling remote
+ // website research or growing the public-search queue without a bound.
+ const now=Date.now();
+ if(now-state.lastAttemptMs<120000)return 0;
+ if(nameSites.stats().remaining>90)return 0;
+ state.lastAttemptMs=now;
+ state.attempted++;
  const scored=(clients||[]).filter(c=>c?.companyCardMissing)
   .map(c=>({client:c,evidence:evidenceFor(c,read)}))
   .sort((a,b)=>Number(b.client.crmDealCount||0)-Number(a.client.crmDealCount||0)||
