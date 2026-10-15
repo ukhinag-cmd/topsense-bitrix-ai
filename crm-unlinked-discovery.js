@@ -89,6 +89,27 @@ function ingest(deals,{complete=false}={}){
   scanCompleteness:complete?"complete":state.scanCompleteness==="complete"?"complete":"partial"});
  return stats();
 }
+function namesFromInbound(d){
+ // A generic or badly entered deal title may contain no usable company name.
+ // Revisit the initial incoming email AND subsequent incoming letters.
+ const p=require("./crm-deal-intake").get(d.id);
+ const candidates=p?.legalNameCandidates||[];
+ if(!candidates.length)return [];
+ const parsed=candidates.map(x=>require("./client-canonical-name").parse(x.name))
+  .filter(Boolean);
+ const unique=new Map(parsed.map(x=>[x.opf+"|"+x.key,x]));
+ // Contradictory names in one thread (including a forwarded exchange):
+ // require human review rather than picking whichever occurs first.
+ if(unique.size!==1)return [];
+ return [...unique.values()].map(x=>({name:x.name,base:normalize(x.name),
+  opf:x.opf,reason:"inbound_email_requisites"}));
+}
+function effectiveNames(d){
+ if(d.names.length===0)return namesFromInbound(d);
+ // A valid explicit legal name in the title remains an association candidate
+ // until independent evidence confirms a different person/company.
+ return d.names;
+}
 function group(companies=[],exclusions=[]){
  const existing=new Map(),invalidNames=new Set((exclusions||[]).map(normalize));
  for(const c of companies||[]){
@@ -99,8 +120,10 @@ function group(companies=[],exclusions=[]){
  }
  const groups=new Map(),conflicting=new Set();
  for(const d of map.values()){
-  if(d.companyId&&d.companyId!=="0"||d.names.length!==1)continue;
-  const n=d.names[0],key=n.base;
+  if(d.companyId&&d.companyId!=="0")continue;
+  const names=effectiveNames(d);
+  if(names.length!==1)continue;
+  const n=names[0],key=n.base;
   if(invalidNames.has(key))continue;
   if(!groups.has(key))groups.set(key,[]);
   groups.get(key).push({deal:d,identity:n});
@@ -116,7 +139,7 @@ function group(companies=[],exclusions=[]){
    conflicting.add(key);continue;
   }
   const matchedExisting=prior.length>0;
-  const directlyLinked=items.filter(x=>x.identity.reason==="legal_name_in_deal_title");
+  const directlyLinked=items.filter(x=>["legal_name_in_deal_title","inbound_email_requisites"].includes(x.identity.reason));
   const repeated=items.length>=2;
   if(!matchedExisting&&!directlyLinked.length&&!repeated)continue;
   const links=items.map(({deal:d})=>({
@@ -138,4 +161,4 @@ function group(companies=[],exclusions=[]){
  return result;
 }
 function stats(){return {...state}}
-module.exports={ingest,group,stats,candidateNames,normalize};
+module.exports={ingest,group,stats,candidateNames,normalize,namesFromInbound,effectiveNames};
