@@ -117,7 +117,13 @@ const REVIEWED_PUBLIC_SITES=new Map([
  ["1016",{url:"https://ndt-innovation.ru/",name:"НК-ИННОВАЦИИ ЮГ",primaryType:"Дилер промышленного оборудования",source:"Официальный сайт: /contacts и /information/informacziya/o-kompanii, юридическое наименование и ОГРН"}],
  ["2336",{url:"https://gaz-analitik.ru/",name:"ГАЗ-АНАЛИТИК",primaryType:"Дилер промышленного оборудования",source:"Публичный сайт gaz-analitik.ru: официальный дилер, совпадают телефон +7 495 724-99-35 и адрес корпоративной почты zakaz@gaz-analitik.ru"}],
  ["2334",{url:"https://gazoanalit.ru/",name:"НПП ГАЗОАНАЛИТ",primaryType:"Производитель газоаналитических приборов",source:"Публичный сайт gazoanalit.ru: ООО НПП ГазоАналит, собственное производство и газоаналитические системы, совпадает телефон и корпоративная почта"}],
- ["1134",{url:"https://gazoanalit.ru/",name:"НПП ГАЗОАНАЛИТ",primaryType:"Производитель газоаналитических приборов",source:"Публичный сайт gazoanalit.ru: ООО НПП ГазоАналит, производство систем газового анализа; в CRM указано то же полное юридическое наименование"}]
+ ["1134",{url:"https://gazoanalit.ru/",name:"НПП ГАЗОАНАЛИТ",primaryType:"Производитель газоаналитических приборов",source:"Публичный сайт gazoanalit.ru: ООО НПП ГазоАналит, производство систем газового анализа; в CRM указано то же полное юридическое наименование"}],
+ ["2790",{url:"https://www.gsp-r.ru/",name:"ГСП РЕМОНТ",
+  primaryType:"Ремонтный подрядчик ОПО / остановочный ремонт",
+  source:"Официальный сайт gsp-r.ru/contacts/: ООО ГСП Ремонт, ИНН 7737106202, телефон +7 (495) 221-38-73 совпадает с CRM №2790"}],
+ ["3682",{url:"https://www.gsp-r.ru/",name:"ГСП РЕМОНТ",
+  primaryType:"Ремонтный подрядчик ОПО / остановочный ремонт",
+  source:"Официальный сайт gsp-r.ru/contacts/: ООО ГСП Ремонт, ИНН 7737106202, телефон +7 (495) 221-38-73 совпадает с CRM №3682"}]
 ]);
 // Company-specific websites independently tied to a CRM entity (name +
 // telephone + legal INN). These are not marked as official site content read
@@ -136,7 +142,14 @@ function referencedWebsite(id,company,phones){
  if(!numbers.some(x=>x.endsWith(ref.crmPhoneSuffix)))return null;
  return ref;
 }
-function company(x){const id=String(x.ID||"");const reviewed=REVIEWED_PUBLIC_SITES.get(id);const identified=referencedWebsite(id,x.TITLE,x.PHONE);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",
+function company(x){const id=String(x.ID||"");const reviewedCandidate=REVIEWED_PUBLIC_SITES.get(id);
+ const gspSite=String(id)==="2790"||String(id)==="3682";
+ const titleCheck=/^(?:(?:ооо|оао|ао)\\s*)?["«»]?гсп[ -]?ремонт["«»]?$/i
+  .test(String(x.TITLE||"").trim());
+ const phoneCheck=(Array.isArray(x.PHONE)?x.PHONE:[])
+  .some(z=>String(z?.VALUE||z||"").replace(/\\D/g,"").endsWith("4952213873"));
+ const reviewed=gspSite&&(!titleCheck||!phoneCheck)?null:reviewedCandidate;
+ const identified=referencedWebsite(id,x.TITLE,x.PHONE);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",
  corporateGroup:identified?.corporateGroup||"",
  relatedWebsites:identified?.corporateGroupUrl?[{url:identified.corporateGroupUrl,relation:"corporate_group",label:"Сайт группы компаний",organization:identified.corporateGroup}]:[],
  legalInnReference:identified?.legalInn||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),crmAddress:[x.ADDRESS,x.ADDRESS_2].filter(Boolean).join(", ").slice(0,280),finance2025:require("./financial-2025").fromCompany(x),staffEvidence:require("./staff-evidence").fromCompany(x),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
@@ -655,9 +668,11 @@ function data(known){
   incomingLeads:require("./crm-lead-inbox").view(virtual.companies),
   mailAudit:require("./crm-mail-evidence").stats(),
   salesAudit:require("./crm-sales-audit").stats(),
+  relationshipPotential:require("./client-relationship-potential").stats(),
   nameSiteSearch:require("./name-site-search").stats(),
   dealIntake:require("./crm-deal-intake").stats(),
-  companies:virtual.companies.map(c=>({...c,name:format(c.name).name}))
+  companies:virtual.companies.map(c=>({...c,name:format(c.name).name,
+   relationshipPotential:require("./client-relationship-potential").score(c)}))
  };
 }
 function route(req,res,pathname,known){
