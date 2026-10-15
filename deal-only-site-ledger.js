@@ -37,6 +37,8 @@ function get(id){return saved.get(str(id))||null}
 function apply(client){
  const r=get(client?.id);
  if(!r||!validate(r,str(client.id)))return client;
+ if(client.websiteResearch?.status==="confirmed"&&client.websiteResearch?.checkedSite&&
+    client.websiteResearch.checkedSite!==r.site)return client;
  return {...client,siteCandidate:r.site,
   siteSource:"Подтверждённый сайт из архивного исследования сделок",
   siteStatus:r.stage==="profile_read"?"site_profiled":"site_identity_verified",
