@@ -23,9 +23,14 @@ function page(payload,options={}){
  (c.siteCandidate?'<p>Сайт: '+link(c.siteCandidate,c.siteCandidate)+' · '+esc(c.siteCandidateStatus)+'</p>':'')+
  '<p><strong>Сделок-кандидатов:</strong> '+Number(c.crmDealCount??c.dealRefs?.length??0)+
  ' · покупка и юридическая связь пока не подтверждены</p>'+
+ '<p>Углублённо изучено писем и истории: '+Number(c.emailAnalysedDeals||0)+' сделок · '+'<strong>приоритет:</strong> повторные обращения</p>'+
  '<details><summary>Из каких сделок собрана карточка</summary><div class="deals">'+
  (c.dealRefs||[]).map(d=>'<p>'+link('Сделка №'+d.id,d.url)+' · '+esc(d.title)+
- ' · '+esc(d.relationshipEvidence||'Название требует независимой сверки')+'</p>').join('')+
+ ' · '+esc(d.relationshipEvidence||'Название требует независимой сверки')+
+ (d.emailAnalysis?' · проверено входящих писем: '+Number(d.emailAnalysis.incomingEmails||0)+
+  ', последующих: '+Number(d.emailAnalysis.subsequentIncomingEmails||0)+
+  ', вложений: '+Number(d.emailAnalysis.attachmentCount||0):' · переписка ещё ожидает анализа')+
+ '</p>').join('')+
  '</div></details></article>').join('');
  const menu='<nav><a href="/contractors">← Дашборд</a> · <a href="/contractors/holdings">Холдинги</a> · '+
  '<a href="/contractors/deal-only?kind=all">Все кандидаты</a> · '+
