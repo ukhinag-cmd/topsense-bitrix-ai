@@ -92,6 +92,27 @@ function discoverLinks(html,base){
  for(const candidate of list){if(picked.length>=5)break;if(urls.has(candidate.url))continue;picked.push(candidate);urls.add(candidate.url)}
  return picked.slice(0,5).map(x=>x.url);
 }
+function homepageVariants(raw){
+ const list=[String(raw||"")];
+ try{
+  const u=new URL(raw);
+  // Corporate domains frequently serve HTTP without HTTPS. Retrying the
+  // same hostname through HTTP is safe only after fetchPage rechecks its IP.
+  if(u.protocol==="https:"&&!u.port){
+   u.protocol="http:";
+   list.push(u.toString());
+  }
+ }catch{}
+ return list;
+}
+async function fetchCorporateHome(raw){
+ let lastError;
+ for(const candidate of homepageVariants(raw)){
+  try{return await fetchPage(candidate)}
+  catch(error){lastError=error}
+ }
+ throw lastError||Error("Сайт не открылся");
+}
 async function fetchPage(raw){
  let current=raw;
  for(let n=0;n<3;n++){
@@ -117,7 +138,7 @@ async function one(c){
  if(!candidates.length){profiles.set(c.id,{status:"site_absent",source:"Карточка CRM не содержит сайт или корпоративный домен"});return}
  try{
   const currentRank=evidenceRank(candidates[0].origin);
-  const result=await fetchPage(candidates[0].url);
+  const result=await fetchCorporateHome(candidates[0].url);
   if(currentRank<(sourcePriority.get(String(c.id))||0))return;
   // The homepage often contains marketing but not the company's actual activity.
   // Look at up to three same-host About / Services / Products pages.
@@ -238,4 +259,4 @@ function stats(){
   queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
   restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
 }
-module.exports={enqueue,get,stats,fetchPage};
+module.exports={enqueue,get,stats,fetchPage,homepageVariants};
