@@ -210,6 +210,12 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
     nr(census.typed)+" из "+nr(census.total)+".":"Текущая классификация построена по данным CRM.";
  const quality=String(payload.status||"starting");
  const checking=Number(payload.siteCrawl?.checkedSites||0),sitePending=Number(payload.siteCrawl?.queued||0);
+ const crawlStatuses=payload.siteCrawl?.byStatus||{};
+ const studiedCompanySites=["site_profiled","site_preliminary_profiled",
+  "site_read_ambiguous_type","site_read_no_clear_type"].reduce((n,k)=>
+   n+Number(crawlStatuses[k]||0),0);
+ const unresolvedSiteType=Number(crawlStatuses.site_read_ambiguous_type||0)+
+  Number(crawlStatuses.site_read_no_clear_type||0);
  const reviewed=Number(payload.duplicateStats?.reviewGroupCount||0),grouped=Number(payload.duplicateStats?.groupedCount||0);
  const ai=payload.paidClassification||{};
  const barColor=colors[Math.max(0,sections.indexOf(section))];
@@ -261,7 +267,11 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  hero("Не определён тип",displayUntyped,"Требуется проверка по источникам","#C7843E")+
  hero("Клиенты с e-mail",nr(b.withEmail),"с контактным адресом CRM","#4B78B9")+
  hero("Подтверждения покупки",nr(b.buyers),"сделки по согласованным стадиям","#247A78")+
- hero("Проверенный сайт/профиль",nr(b.verifiedSite),"не всегда юридическая верификация","#6855B0")+
+ hero("Сайты исследованы",nr(studiedCompanySites),
+  "CRM-карточек с прочитанными страницами; "+nr(unresolvedSiteType)+
+  " без однозначного типа","#6855B0")+
+ hero("Проверенный сайт/профиль",nr(b.verifiedSite),
+  "профиль источника и юридическая принадлежность проверяются отдельно","#6855B0")+
  hero("Выручка 2025: источники",b.with2025?nr(b.with2025):"Нет данных","Пока нет подтверждённых финансовых сведений ФНС","#587D87")+
  hero("Типов, встречающихся в базе",b.typeUsed+" / "+types.length,"все доступные подтипы видны в справочнике","#947244")+
  hero("Исследование завершено",nr(payload.researchCompletion?.completed||0),"Не отправляются на повторную проверку компании","#155f55")+
