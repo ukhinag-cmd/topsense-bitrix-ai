@@ -227,6 +227,36 @@ function enqueueLinkedContactSites(){
  console.log(JSON.stringify({component:"topsense-dashboard",event:"linked-corporate-domain-discovery",
   queuedCandidates:suggested.length,companiesWithMultipleContactDomains:multipleDomains}));
 }
+function resumeUnresolvedCompanySites(){
+ if(!state.companies.length||!state.contactsAt)return;
+ const profiler=require("./website-profiler");
+ const stats=profiler.stats();
+ if(!stats.restorationComplete||stats.queued||stats.active)return;
+ let candidates=0;
+ for(const c of state.companies){
+  if(candidates>=120)break;
+  // Previously verified legal-entity sites must never be replaced by a
+  // different contact domain. Only unresolved corporate sites are eligible.
+  if(c.verifiedOrgType||!c.corporateDomain)continue;
+  if(["Официальный сайт, проверенный по юридическим данным",
+      "Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены"].includes(c.siteSource))continue;
+  const current=profiler.get(c.id);
+  if(!["site_unavailable","site_identity_unclear","site_read_no_clear_type"].includes(current.status))continue;
+  const linked=state.linkedContacts.get(c.id);
+  if(!linked||!linked.emails.size)continue;
+  const alternate=mailDomains.ranked(linked.emails)
+   .map(x=>x[0]).find(d=>d!==c.corporateDomain);
+  if(!alternate)continue;
+  candidates+=profiler.enqueue([{...c,siteCandidate:"",corporateDomain:alternate,
+   siteSource:"Альтернативный домен привязанного контакта"}])||0;
+ }
+ if(candidates){
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"alternate-contact-sites-queued",count:candidates}));
+ }else{
+  const retried=profiler.retryTransient(state.companies);
+  if(retried)console.log(JSON.stringify({component:"topsense-dashboard",event:"transient-site-retry-batch",count:retried}));
+ }
+}
 function enqueueMissingSiteNameSearch(){
  const requisites=require("./company-requisites");
  // Wait for the read-only legal-requisites snapshot. Without it, name-based
@@ -635,6 +665,10 @@ setInterval(() => {
  refresh().catch(()=>{});
  loadLinkedContacts().catch(()=>{});
 }, 2*60*60*1000);
+// Explore an alternate linked-contact domain only after a primary site failed.
+// Bounded retries are conditional on temporary transport failures and cooldown.
+setTimeout(resumeUnresolvedCompanySites,10*60*1000);
+setInterval(resumeUnresolvedCompanySites,30*60*1000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
 setInterval(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 24*60*60*1000);
 module.exports={route,refresh,data};
