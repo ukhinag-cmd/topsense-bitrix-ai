@@ -10,11 +10,15 @@ function parse(raw){
  const d=display(raw);
  const opf=str(d.opf).toUpperCase();
  if(!forms.has(opf))return null;
- const companyName=d.name.replace(new RegExp(",\\s*"+opf+"$","iu"),"").trim();
+ // Keep the legal entity's original letter case from the official/email
+ // source instead of blindly uppercasing it as the dashboard's old formatter.
+ let companyName=str(raw).replace(/^(?:общество с ограниченной ответственностью|публичное акционерное общество|открытое акционерное общество|закрытое акционерное общество|акционерное общество)\s+/iu,"");
+ companyName=companyName.replace(new RegExp("^"+opf+"(?:\\s|[,.:—-])+","iu"),"")
+  .replace(new RegExp("(?:[,.:—-]?\\s+)"+opf+"$","iu"),"")
+  .replace(/^[«"“'\s]+|[»"”'\s]+$/gu,"").trim();
  if(!companyName||companyName.length<3||companyName.length>170)return null;
  if(/^(?:без названия|неизвестно|тест|клиент|компания)$/iu.test(companyName))return null;
- return {opf,base:companyName,key:normalized(companyName),
-  name:opf+" «"+companyName.replace(/^[«"'\s]+|[»"'\s]+$/gu,"")+"»"};
+ return {opf,base:companyName,key:normalized(companyName),name:opf+" «"+companyName+"»"};
 }
 function comparable(a,b){
  if(a===b)return true;
