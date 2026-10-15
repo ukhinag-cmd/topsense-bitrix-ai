@@ -15,8 +15,19 @@ function page(payload,options={}){
  const link=(label,uri)=>'<a href="'+esc(safe(uri))+'" target="_blank" rel="noopener noreferrer">'+esc(label)+' ↗</a>';
  const tile=(value,label)=>'<div class="metric"><b>'+esc(value)+'</b><span>'+esc(label)+'</span></div>';
  const cards=records.map(c=>'<article class="card"><h2>'+esc(c.name)+'</h2>'+
- '<div class="status">'+(c.candidateReview?'Предварительный клиент — требуется сверка переписки и реквизитов':
- 'Клиент выявлен из сделок, CRM-компания не заведена')+'</div>'+
+ '<div class="status">'+(c.nameStatus==="legal_name_verified"?
+ 'Юридическое название подтверждено независимыми реквизитами':
+ c.nameStatus==="legal_name_from_incoming_requisites"?
+ 'Юридическое название найдено в переписке · требует внешней сверки':
+ c.nameStatus==="identity_conflict"?
+ 'Противоречивые реквизиты · требуется проверка':
+ 'Предварительное название из сделки · требуется проверка')+'</div>'+
+ (c.originalName&&c.originalName!==c.name?
+ '<p><b>Было в аналитике:</b> '+esc(c.originalName)+' → <b>установлено:</b> '+esc(c.name)+'</p>':'')+
+ (c.aliases?.length>1?'<p><b>Синонимы и прежние названия:</b> '+
+ c.aliases.filter(x=>x!==c.name).slice(0,6).map(esc).join('; ')+'</p>':'')+
+ (c.nameEvidence?.length?'<p><b>Основание названия:</b> '+
+ c.nameEvidence.map(e=>esc(e.sourceRef||e.source)).slice(0,3).join('; ')+'</p>':'')+
  '<p><strong>Направление:</strong> '+esc(c.category)+' · '+esc(c.organizationType||"Тип требует проверки")+'</p>'+
  (c.relationStatus?'<p>'+esc(c.relationStatus)+'</p>':'')+
  (c.evidenceNote?'<p>'+esc(c.evidenceNote)+'</p>':'')+
