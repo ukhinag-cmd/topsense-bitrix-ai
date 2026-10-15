@@ -66,7 +66,7 @@ async function stages(){
 }
 async function dealPage(start){
  return call("crm.deal.list",{order:{ID:"ASC"},filter:{},
- select:["ID","TITLE","CONTACT_ID","COMPANY_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID","CURRENCY_ID"],start});
+ select:["ID","TITLE","CONTACT_ID","COMPANY_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID","CURRENCY_ID","DATE_CREATE"],start});
 }
 async function allDeals(){
  const first=await dealPage(0);
@@ -165,6 +165,33 @@ async function run(companies){
   const stageMap=await stages();
   if(!stageMap.size)throw Error("Отгрузка и оплата не найдены среди названий стадий доступных воронок CRM");
   const deals=await allDeals();
+  // Historical enquiries matter for unresolved clients, not only new leads.
+  // Queue a bounded sample of their real linked deals for chronological
+  // read-only evidence review; never create, change or link CRM records.
+  const historicalCompanies=(companies||[])
+   .filter(c=>!c.verifiedOrgType&&!c.siteCandidate&&!c.corporateDomain).slice(0,50);
+  const historicalIds=new Set(historicalCompanies.map(c=>String(c.id)));
+  const historicalByCompany=new Map();
+  for(const deal of deals.values()){
+   const id=String(deal.COMPANY_ID||"");
+   if(!historicalIds.has(id))continue;
+   if(!historicalByCompany.has(id))historicalByCompany.set(id,[]);
+   historicalByCompany.get(id).push(deal);
+  }
+  const historicalSample=[];
+  for(const company of historicalCompanies){
+   const linked=historicalByCompany.get(String(company.id))||[];
+   linked.sort((a,b)=>Date.parse(a.DATE_CREATE||0)-Date.parse(b.DATE_CREATE||0));
+   // Both oldest and newer deals may contain different purchasing needs.
+   historicalSample.push(...linked.slice(0,2),...linked.slice(-2));
+  }
+  const uniqueHistoric=[...new Map(historicalSample.filter(d=>d?.ID)
+   .map(d=>[String(d.ID),d])).values()];
+  if(uniqueHistoric.length){
+   const queued=require("./crm-deal-intake").queueDeals(uniqueHistoric);
+   console.log(JSON.stringify({component:"sales-audit",event:"historical-deal-research-queued",
+    unresolvedCompanies:historicalCompanies.length,linkedDealCandidates:uniqueHistoric.length,queued}));
+  }
   const linker=require("./crm-orphan-deals");
   const contactIndex=await linker.fetchContactIndex(deals,call);
   const orphan=linker.reconcile(deals,companies,contactIndex.contacts);
