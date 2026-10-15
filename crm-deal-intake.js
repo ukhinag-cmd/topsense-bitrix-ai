@@ -6,7 +6,15 @@ const mail=require("./company-email-domains");
 const state={status:"not_started",attempted:0,inspected:0,errors:0,withEmail:0,
  withAttachments:0,withNeeds:0,updatedAt:null,lastError:"",queued:0};
 const queue=[],pending=new Set(),visited=new Set(),profiles=new Map();
-let working=false;
+let working=false,nextBatchTimer=null;
+function scheduleNextBatch(){
+ if(nextBatchTimer||working||!queue.length)return;
+ nextBatchTimer=setTimeout(()=>{
+  nextBatchTimer=null;
+  if(queue.length&&!working)void pump();
+ },250);
+ if(typeof nextBatchTimer?.unref==="function")nextBatchTimer.unref();
+}
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const text=v=>String(v??"").trim();
 const value=v=>Array.isArray(v)?v.map(value).filter(Boolean).join("; "):v&&typeof v==="object"?text(v.VALUE||v.value||""):text(v);
@@ -117,7 +125,7 @@ function queueDeals(deals){
  for(const d of sorted){
   const id=text(d.ID);
   if(visited.has(id)||pending.has(id))continue;
-  if(queue.length>=100)break;
+  if(queue.length>=200)break;
   pending.add(id);queue.push(d);added++;
  }
  state.queued=queue.length;
@@ -148,7 +156,12 @@ async function pump(){
    attempted:state.attempted,inspected:state.inspected,pending:queue.length,
    withEmail:state.withEmail,withAttachments:state.withAttachments,
    withNeeds:state.withNeeds,errors:state.errors}));
- }finally{working=false}
+  }finally{
+  working=false;
+  // The previous implementation processed one group of 18 then stopped
+  // despite having unprocessed deals waiting.
+  scheduleNextBatch();
+ }
 }
 function get(id){return profiles.get(text(id))||null}
 function forCompany(id){
