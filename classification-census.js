@@ -29,7 +29,7 @@ function display(total,typed,ready,crmCards){
  if(saved)return {
   total:saved.total,typed:saved.typed,untyped:saved.total-saved.typed,
   provisional:true,completedAt:saved.completedAt,
-  source:saved.crmCards!==crmCards?"last_complete_crm_population_changed":
+  source:Number.isInteger(crmCards)&&saved.crmCards!==crmCards?"last_complete_crm_population_changed":
    saved.total===total?"last_complete":"last_complete_virtual_groups_changed"};
  return {total,typed,untyped:total-typed,provisional:true,completedAt:null,source:"live_provisional"};
 }
