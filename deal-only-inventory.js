@@ -14,8 +14,8 @@ function shortRecord(g){
   linkedExisting:Boolean(g.linkedExisting),
   existingCrmIds:(g.existingCrmIds||[]).slice(0,12).map(str),
   dealCount:Math.max(0,Number(g.dealCount)||0),
-  dealRefs:(g.dealRefs||[]).slice(0,12).map(d=>({
-   id:str(d.id),title:str(d.title).slice(0,180),
+  dealRefs:(g.dealRefs||[]).slice(0,8).map(d=>({
+   id:str(d.id),title:str(d.title).slice(0,140),
    createdAt:str(d.createdAt).slice(0,40),
    url:"https://topsense.bitrix24.ru/crm/deal/details/"+encodeURIComponent(str(d.id))+"/",
    relationshipEvidence:"Название из сделки — юрлицо требует проверки"}))};
@@ -74,7 +74,15 @@ function queue(fullGroups,context={}){
  if(snapshot?.hash===checksum)return false;
  const id=hashId(checksum);
  const parts=[];
- for(let i=0;i<groups.length;i+=22)parts.push(groups.slice(i,i+22));
+ let current=[],chars=0;
+ for(const group of groups){
+  const size=JSON.stringify(group).length+5;
+  if(current.length&&(chars+size>24000||current.length>=32)){
+   parts.push(current);current=[];chars=0;
+  }
+  current.push(group);chars+=size;
+ }
+ if(current.length)parts.push(current);
  if(!parts.length||parts.length>180)return false;
  const at=new Date().toISOString();
  const rows=parts.map((chunk,i)=>({key:chunkKey(id,i+1),
