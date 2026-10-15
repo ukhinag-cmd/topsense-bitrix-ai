@@ -494,7 +494,7 @@ function data(known){
   if(x&&x.companyId&&["confirmed","rejected"].includes(x.verificationStatus))registry.set(String(x.companyId),x);
  }
  const seeds=analyticSeeds();
- const records=state.companies.map(base=>{ const linked=state.linkedContacts.get(base.id);const c={...base,contactEmails:linked?[...linked.emails]:[],contactNames:linked?linked.names:[],mailEvidence:require("./crm-mail-evidence").get(base.id),saleInfo:require("./crm-sales-audit").get(base.id),nameSearch:require("./name-site-search").get(base.id)};
+ const records=state.companies.map(base=>{ const linked=state.linkedContacts.get(base.id);const c={...base,contactEmails:linked?[...linked.emails]:[],contactNames:linked?linked.names:[],mailEvidence:require("./crm-mail-evidence").get(base.id),saleInfo:require("./crm-sales-audit").get(base.id),nameSearch:require("./name-site-search").get(base.id),dealEvidence:require("./crm-deal-intake").forCompany(base.id)};
   const r=registry.get(c.id);
   const ai=state.pilot.get(c.id);
   const seed=seeds.get(c.id);
@@ -629,6 +629,7 @@ function data(known){
   mailAudit:require("./crm-mail-evidence").stats(),
   salesAudit:require("./crm-sales-audit").stats(),
   nameSiteSearch:require("./name-site-search").stats(),
+  dealIntake:require("./crm-deal-intake").stats(),
   companies:virtual.companies.map(c=>({...c,name:format(c.name).name}))
  };
 }
