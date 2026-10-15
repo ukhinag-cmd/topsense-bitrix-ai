@@ -12,10 +12,12 @@ const normalize=raw=>{
  const d=display(raw||"");
  return safe(d.name.replace(/,\s*(?:ООО|ПАО|ОАО|АО|ЗАО|НАО|ИП|ТОО)$/iu,""));
 };
-function acceptable(name){
+function acceptable(name,hasLegalForm=false){
  const n=normalize(name);
- return n.length>=7&&n.length<=90&&!generic.test(n)&&
-  n.split(" ").some(w=>w.length>=4)&&!/^\d+$/.test(n);
+ // Short legal brand + distinguishing number is valid (ИС-16, ГСП-7).
+ const shortLegal=hasLegalForm&&n.length>=4&&/\d/.test(n)&&/[а-яa-z]/i.test(n);
+ return (n.length>=7||shortLegal)&&n.length<=90&&!generic.test(n)&&
+  (n.split(" ").some(w=>w.length>=4)||shortLegal)&&!/^\d+$/.test(n);
 }
 function clean(raw){
  return String(raw||"").trim()
@@ -34,7 +36,7 @@ function candidateNames(title){
   // Quoted text is the legal name, not the product description. In particular,
   // "ГСП Ремонт" must retain "Ремонт" as part of the company name.
   let company=m[2]?String(m[2]).trim():clean(m[3]||"");
-  if(!acceptable(company))continue;
+  if(!acceptable(company,true))continue;
   out.push({name:opf+" "+company,base:normalize(company),opf,reason:"legal_name_in_deal_title"});
  }
  // Fallback: only recognizable starting phrase, product information follows.
