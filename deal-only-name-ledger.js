@@ -39,6 +39,8 @@ function ingest(rows){
 function apply(c){
  const id=str(c?.id),v=entries.get(id);
  if(!v||!valid(v,id))return c;
+ if(c.nameStatus==="legal_name_verified"&&c.identityVerified===true&&!v.verified)return c;
+ if(c.nameStatus==="identity_conflict")return c;
  // Reapply only the display identity; all deal IDs, amounts, opportunities,
  // CRM references and immutable analytical key stay untouched.
  const raw=str(c.originalName||c.name);
