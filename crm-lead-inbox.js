@@ -102,7 +102,8 @@ async function refresh(){
   state.updatedAt=new Date().toISOString();
   console.log(JSON.stringify({component:"lead-inbox",event:"read-only-refreshed",inbound:state.total,
    crmLeads:leads.status==="fulfilled"?leads.value.length:0,
-   incomingDeals:deals.status==="fulfilled"?deals.value.length:0,status:state.status}));
+   incomingDeals:state.history.incomingDeals,otherPipelineDeals:state.history.otherPipelineDeals,
+   allDeals:deals.status==="fulfilled"?deals.value.length:0,status:state.status}));
  }catch(e){
   state.status=state.updatedAt?"stale":"unavailable";state.error=str(e.message||e).slice(0,150);
   console.warn(JSON.stringify({component:"lead-inbox",event:"read-only-unavailable",reason:state.error}));
