@@ -12,7 +12,7 @@ function html(payload){
  const countedTyped=census.provisional?census.typed:nTyped;
  const countedUntyped=census.provisional?census.untyped:records.length-nTyped;
  const countLabel=v=>v===null?"—":Number(v).toLocaleString("ru-RU");
- const censusNote=census.provisional?(census.source.startsWith("last_complete")?
+ const censusNote=census.provisional?((census.source.startsWith("last_complete")||census.source==="regression_under_review")?
   "Показаны показатели последнего завершённого снимка от "+census.completedAt+"; текущие карточки обновляются.":
   "Выполняется восстановление. Полный счётчик временно не выводится."):
   "Показатели текущей полностью восстановленной базы.";
