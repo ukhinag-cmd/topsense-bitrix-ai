@@ -144,10 +144,10 @@ function referencedWebsite(id,company,phones){
 }
 function company(x){const id=String(x.ID||"");const reviewedCandidate=REVIEWED_PUBLIC_SITES.get(id);
  const gspSite=String(id)==="2790"||String(id)==="3682";
- const titleCheck=/^(?:(?:ооо|оао|ао)\\s*)?["«»]?гсп[ -]?ремонт["«»]?$/i
+ const titleCheck=/^(?:(?:ооо|оао|ао)\s*)?["«»]?гсп[ -]?ремонт["«»]?$/i
   .test(String(x.TITLE||"").trim());
  const phoneCheck=(Array.isArray(x.PHONE)?x.PHONE:[])
-  .some(z=>String(z?.VALUE||z||"").replace(/\\D/g,"").endsWith("4952213873"));
+  .some(z=>String(z?.VALUE||z||"").replace(/\D/g,"").endsWith("4952213873"));
  const reviewed=gspSite&&(!titleCheck||!phoneCheck)?null:reviewedCandidate;
  const identified=referencedWebsite(id,x.TITLE,x.PHONE);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",
  corporateGroup:identified?.corporateGroup||"",
