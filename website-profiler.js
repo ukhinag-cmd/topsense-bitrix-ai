@@ -268,7 +268,7 @@ function enqueue(companies){
  return added;
 }
 function retryTransient(companies,now=Date.now()){
- if(!restored||queue.length||active)return 0;
+ if((!restored&&evidenceStore.configured())||queue.length||active)return 0;
  let accepted=0;
  for(const c of companies||[]){
   if(accepted>=20)break;
@@ -284,7 +284,7 @@ function retryTransient(companies,now=Date.now()){
   const last=Date.parse(profile.checkedAt||"");
   if(!Number.isFinite(last)||now-last<RETRY_AFTER_MS)continue;
   const candidates=urls(c);
-  if(!candidates.length)continue;
+  if(!candidates.length||evidenceStore.fingerprint(c)!==sourceFingerprints.get(id))continue;
   transientRetries.set(id,previous+1);
   profiles.set(id,{...profile,status:"site_pending",source:"Повторная проверка временно недоступного сайта"});
   queue.push(c);accepted++;
