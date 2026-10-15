@@ -82,12 +82,16 @@ async function refresh(){
    .filter(x=>Date.parse(x.createdAt||0)>=Date.parse(cutoff))
    .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0)||Number(b.id)-Number(a.id));
   state.total=state.items.length;
+  // Read the deal and its inbound e-mails before trusting manually filled CRM cards.
+  require("./crm-deal-intake").queueDeals(dealRows);
   state.leadStatus=leads.status==="fulfilled"?"complete":"unavailable";
   state.dealStatus=deals.status==="fulfilled"?"complete":"unavailable";
   state.history={since:cutoff,leads:leadRows.length,deals:dealRows.length,
    incomingDeals:dealRows.filter(x=>str(x.CATEGORY_ID)==="0").length,
    otherPipelineDeals:dealRows.filter(x=>str(x.CATEGORY_ID)!=="0").length,
    october:state.items.filter(x=>Date.parse(x.createdAt||0)>=Date.parse("2026-10-01T00:00:00+03:00")).length,
+   last7Days:state.items.filter(x=>Date.parse(x.createdAt||0)>=Date.now()-7*24*60*60*1000).length,
+   recentDeals7Days:dealRows.filter(x=>Date.parse(x.DATE_CREATE||0)>=Date.now()-7*24*60*60*1000).length,
    withoutCompanyDirect:state.items.filter(x=>!x.companyId||x.companyId==="0").length,
    contactLinksChecked:linkedContacts.size,contactLinkError};
   state.status=leads.status==="fulfilled"&&deals.status==="fulfilled"?"ready":"partial";
@@ -109,13 +113,15 @@ function view(companies){
   const fromContact=state.contactCompanyMap.get(l.contactId)||"";
   const throughContact=!direct&&known.has(fromContact);
   const companyId=direct?l.companyId:throughContact?fromContact:"";
-  return {...l,companyId,linkStatus:companyId?"known_company":"pending_identification",
+  const dealEvidence=l.kind==="lead"?null:require("./crm-deal-intake").get(l.id);
+  return {...l,companyId,dealEvidence,linkStatus:companyId?"known_company":"pending_identification",
    linkSource:direct?"company_id":throughContact?"contact_company_id":"unlinked",
    possibleServiceMail:/undeliverable|delivery status notification|mail delivery failed|ошибка доставки|сбой доставки|рассылка|спам|security alert|password reset/i.test(l.title)};
  });
  return {status:state.status,error:state.error,updatedAt:state.updatedAt,total:classified.length,
   linked:classified.filter(l=>l.linkStatus==="known_company").length,
   pending:classified.filter(l=>l.linkStatus==="pending_identification").length,
-  history:state.history||{},leadStatus:state.leadStatus,dealStatus:state.dealStatus,items:classified};
+  history:state.history||{},leadStatus:state.leadStatus,dealStatus:state.dealStatus,
+  dealIntake:require("./crm-deal-intake").stats(),items:classified};
 }
 module.exports={refresh,view,state};
