@@ -10,6 +10,7 @@ function companyFromSource(){
   if(p==="fs")return {readFileSync:()=>""};
   if(p==="path")return {join:()=>"/test"};
   if(p==="./company-types")return require("./company-types");
+  if(p==="./company-email-domains")return require("./company-email-domains");
   if(p==="./financial-2025")return{fromCompany:()=>({year:2025,amountRUB:null})};
   throw Error("Unexpected import "+p);
  };
