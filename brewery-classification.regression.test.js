@@ -48,7 +48,7 @@ test("First-party beverage manufacturing beats third-party construction terms in
   headings:["О производстве","Безалкогольные напитки","Солод"],
   body:"В истории реконструкции упоминались Промстрой, генеральный подряд и строительные организации. Мы производим напитки и солод."}}];
  const found=classifier.inferWebsiteActivity(pages,'АО "Брянскпиво"');
- assert.equal(found.type,"");
+ assert.equal(found.type,"Производство напитков");
 });
 test("Actual construction contractors keep their industrial-contractor classification",()=>{
  const site={status:"site_profiled",url:"https://stroy.example",siteTitle:"Генподрядные работы",
