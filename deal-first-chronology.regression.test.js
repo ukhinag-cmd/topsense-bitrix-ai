@@ -41,3 +41,15 @@ test("matching name alone never confirms an external website",()=>{
   headings:[],body:"Нижневартовск",identityText:""}}];
  assert.equal(sites.legalOrPhoneMatch(company,pages).matched,false);
 });
+
+test("a personal contact mailbox and full street address can corroborate company identity",()=>{
+ const company={name:"ИС -16",crmPhones:[],crmEmails:["is16@mail.ru"],
+  crmAddress:"улица Кузоваткина 5"};
+ const pages=[{meta:{title:"ИС-16",description:"",
+  headings:[],body:"Наш адрес: улица Кузоваткина 5, e-mail: is16@mail.ru",
+  identityText:"Контакты: is16@mail.ru"}}];
+ const proof=sites.legalOrPhoneMatch(company,pages);
+ assert.equal(proof.emailMatch,true);
+ assert.equal(proof.addressMatch,true);
+ assert.equal(proof.matched,true);
+});
