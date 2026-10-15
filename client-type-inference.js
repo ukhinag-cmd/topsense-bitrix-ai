@@ -226,17 +226,24 @@ function apply(records){
     segmentSource:"Официальный сайт предприятия и ранее сохранённый AI-профиль",
     verification:"Исправлена ошибочная классификация подрядчика — не является генподрядчиком по найденным сведениям"};
   }
-  const bySite=site?.status==="site_profiled"&&valid.has(site.siteType)?{type:site.siteType}:null;
+  const provisionalOwnLegalSite=site?.status==="site_preliminary_profiled";
+  const bySite=["site_profiled","site_preliminary_profiled"].includes(site?.status)&&valid.has(site.siteType)?{type:site.siteType}:null;
   const siteBelongs=site?.status==="site_profiled"||site?.status==="site_read_no_clear_type";
   const websiteEvidence={
    siteStatus:site?.status||"site_pending",
    siteProfileUrl:siteBelongs?(site?.url||""):"",
    siteProfileTitle:siteBelongs?(site?.siteTitle||""):"",
-   siteProfileDescription:siteBelongs?(site?.siteDescription||""):""
+   siteProfileDescription:siteBelongs?(site?.siteDescription||""):"",
+   ...(provisionalOwnLegalSite?{
+    siteCandidate:site.url||c.siteCandidate||"",
+    siteSource:"Поиск по юридическому наименованию — предварительно",
+    siteIdentityVerified:false,
+    siteActivityEvidenceStatus:"preliminary_legal_name_match"
+   }:{})
   };
   // An inspected first-party product site is more specific than a broad
   // legacy chemical/manufacturing label, even if that older label is stored.
-  if(bySite&&["Производство бытовой химии","Производство табачных изделий","Производство удобрений","Производство напитков"].includes(bySite.type)&&
+  if(bySite&&!provisionalOwnLegalSite&&["Производство бытовой химии","Производство табачных изделий","Производство удобрений","Производство напитков"].includes(bySite.type)&&
    (previous!==bySite.type||officiallyVerifiedType!==bySite.type)){
    return {...c,...websiteEvidence,organizationType:bySite.type,type:bySite.type,
     category:"Конечные потребители",proposedType:"",
@@ -253,9 +260,9 @@ function apply(records){
   if(previous)return {...c,...websiteEvidence,organizationType:previous,segmentConfidence:c.verification||"Ранее назначен",segmentSource:"Ранее сохранённая аналитика / классификация"};
   let selected=null,confidence="",basis="";
   if(bySite&&byName&&bySite.type===byName.type){
-   selected=bySite.type;confidence="Выше средней";basis=(site.siteActivityReason||"Основная деятельность на сайте")+"; совпадает с названием организации";
+   selected=bySite.type;confidence=provisionalOwnLegalSite?"Предварительная — принадлежность сайта не подтверждена":"Выше средней";basis=(site.siteActivityReason||"Основная деятельность на сайте")+"; совпадает с названием организации";
   }else if(bySite){
-   selected=bySite.type;confidence="Предварительная";basis=(site.siteActivityReason||"Публичные сведения о собственной деятельности компании")+" · "+(site.source||"проверенный сайт CRM");
+   selected=bySite.type;confidence="Предварительная — принадлежность сайта не подтверждена";basis=(site.siteActivityReason||"Публичные сведения о собственной деятельности компании")+" · "+(site.source||"сайт-кандидат");
   }else if(byName){
    selected=byName.type;confidence=byName.confidence;basis="Название CRM, без подтверждения сайтом";
   }
