@@ -168,7 +168,9 @@ async function one(c){
   const redirectedToOtherDomain=new URL(candidates[0].url).hostname.replace(/^www\./i,"")!==new URL(result.url).hostname.replace(/^www\./i,"");
   const emailDomainOnly=["Корпоративный домен e-mail CRM","Домен привязанного контакта"].includes(candidates[0].origin);
   const identifiedReference=String(c.siteSource||"").startsWith("Сайт организации, установленный по независимым источникам");
-  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference;
+  // HTTP-only fallback must corroborate company identity on the page.
+  const insecureTransport=new URL(result.url).protocol==="http:";
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
   const profile={status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,
