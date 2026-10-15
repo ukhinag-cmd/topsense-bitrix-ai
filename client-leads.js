@@ -17,6 +17,11 @@ function html(payload,options={}){
    '<p><strong>Сделка — первичный источник:</strong> '+esc(l.dealEvidence.status)+
    ' · входящих писем: '+Number(l.dealEvidence.incomingEmails||0)+
    ' · вложений: '+Number(l.dealEvidence.attachmentCount||0)+'</p>'+
+   '<p>Первое входящее письмо: '+esc(l.dealEvidence.firstIncomingAt||"не найдено")+
+   ' · последующих входящих: '+Number(l.dealEvidence.subsequentIncomingEmails||0)+
+   ' · вложений после первого письма: '+Number(l.dealEvidence.laterAttachmentCount||0)+
+   ' · карточек/реквизитов среди вложений: '+Number(l.dealEvidence.companyCardAttachmentCount||0)+
+   (l.dealEvidence.correspondencePartial?" · часть переписки за пределами лимита чтения":"")+'</p>'+
    '<p>Потребность по тексту сделки/письма (предварительно): '+
    esc([...(l.dealEvidence.signals?.gases||[]),
     l.dealEvidence.signals?.portable?"переносные":"",
