@@ -579,6 +579,7 @@ async function loadPilot(){
   require("./classification-ledger").ingest(entries);
   require("./deal-only-name-ledger").ingest(entries);
   require("./deal-only-site-ledger").ingest(entries);
+  require("./name-site-search-checkpoint").ingest(entries);
   require("./purchase-checkpoint").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
