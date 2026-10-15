@@ -658,8 +658,22 @@ function data(known){
   siteStatus.processed+completedCount>=state.companies.length-5;
  const currentTyped=virtual.companies.filter(c=>require("./client-taxonomy").known(c.organizationType)).length;
  const classificationDisplay=require("./classification-census").display(virtual.stats.customerCardCount,currentTyped,classificationCensusReady,state.companies.length);
+ // LIVE observed coverage is separate from the last immutable full census.
+ // Site crawling can take hours; its incomplete queue must not freeze the
+ // actual typed-company counter. Never count tentative deal-only company
+ // names as an independently verified legal entity.
+ const liveReady=state.status==="ready"&&siteStatus.restorationComplete&&
+  Boolean(state.contactsAt)&&Boolean(state.pilotUpdatedAt);
+ const recoveredTyped=dealOnlyClients.filter(c=>require("./client-taxonomy").known(c.organizationType)).length;
+ const classificationLive={
+  ready:liveReady,provisional:!classificationCensusReady,
+  total:virtual.stats.customerCardCount,typed:currentTyped,
+  untyped:virtual.stats.customerCardCount-currentTyped,
+  recoveredCandidates:dealOnlyClients.length,recoveredTyped,
+  checkedAt:new Date().toISOString(),source:"live_company_classification"
+ };
  return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,
-  classificationDisplay,classificationCensusReady,classificationCensusStore:require("./classification-census").stats(),
+  classificationDisplay,classificationLive,classificationCensusReady,classificationCensusStore:require("./classification-census").stats(),
   classificationLedger:ledger.stats(),
   total:allAnalyticCompanies.length,
   dealOnlyClientCount:dealOnlyClients.length,
@@ -753,6 +767,7 @@ function coverageLog(){
   const companyList=snap.companies||[];
   const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   require("./classification-census").consider(companyList.length,typed.length,state.companies.length,snap.classificationCensusReady);
+  if(snap.classificationLive?.ready)console.log(JSON.stringify({component:"topsense-dashboard",event:"live-classification-counter",typed:snap.classificationLive.typed,total:snap.classificationLive.total,oldSnapshot:snap.classificationDisplay?.typed,censusReady:snap.classificationCensusReady}));
   const distinctTypes=new Set(typed.map(x=>x.organizationType));
   // Aggregate diagnostics: a missing type is not the same as a missing site.
   const untypedCompanies=companyList.filter(x=>!require("./client-taxonomy").known(x.organizationType));
