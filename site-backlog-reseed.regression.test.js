@@ -20,6 +20,7 @@ function harness(){
   if(x==="./website-profiler")return profiler;
   if(x==="./crm-deal-intake")return {forCompany:id=>dealCases.get(String(id))||[]};
   if(x==="./company-requisites")return {stats:()=>({status:"ready"}),get:id=>legalMap.get(String(id))||{status:"not_found"}};
+  if(x==="./manual-website-candidates")return require("./manual-website-candidates");
   if(x==="./name-site-search")return {stats:()=>({remaining:0}),enqueueByInn:list=>{innQueued.push(...list);return list.length}};
   throw Error("Unexpected top-level or scheduler import "+x);
  };
