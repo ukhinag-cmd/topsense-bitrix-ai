@@ -231,6 +231,18 @@ function evidenceRank(source){
  if(source==="Кандидат из прежнего AI-пилота")return 1;
  return 2;
 }
+function restorePreliminaryNameProfile(c,row){
+ // When CRM has no website, recover a previously researched provisional
+ // own-legal-name site from our private store. Do not silently turn this
+ // into a verified website: the profile status remains preliminary.
+ const profile=row?.profile;
+ if(profile?.status!=="site_preliminary_profiled"||
+    profile.source!=="Поиск по юридическому наименованию — предварительно"||
+    !profile.url)return null;
+ const sameIdentity={...c,siteCandidate:profile.url,corporateDomain:"",
+  siteSource:profile.source};
+ return evidenceStore.restored(sameIdentity,row);
+}
 function enqueue(companies){
  // Restore already completed free site checks before starting a new crawl.
  // Render instances are ephemeral; a restart must not erase classification.
@@ -277,6 +289,8 @@ function enqueue(companies){
   visited.add(id);sourcePriority.set(id,newRank);sourceFingerprints.set(id,signature);
   if(hasSite)fingerprints.add(signature);
   if(!hasSite){
+   const prior=restorePreliminaryNameProfile(c,persistedProfiles.get(id));
+   if(prior){profiles.set(id,prior);restoredProfiles++;continue}
    profiles.set(id,{status:"site_absent",source:"Нет подтверждённого сайта или корпоративного домена"});
    continue;
   }
@@ -326,4 +340,4 @@ function stats(){
   queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
   restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
 }
-module.exports={enqueue,get,stats,retryTransient,fetchPage,fetchCorporateHome,homepageVariants};
+module.exports={enqueue,get,stats,retryTransient,fetchPage,fetchCorporateHome,homepageVariants,restorePreliminaryNameProfile};
