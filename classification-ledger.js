@@ -3,7 +3,12 @@
 // This is NOT a CRM edit, and provisional types remain explicitly provisional.
 const crypto=require("crypto");
 const taxonomy=require("./client-taxonomy");
-const PREFIX="classification:type:v1:";
+// Existing Google Apps Script read bridge returns the original site-profile
+// namespace but does not consistently return newly introduced key families.
+// Reserved synthetic numeric IDs share that readable namespace without
+// ever becoming website profiles: the recordType remains type-ledger only.
+const PREFIX="site-profile:v1:900000000000";
+const LEGACY_PREFIX="classification:type:v1:";
 const records=new Map(),pending=new Map();
 let timer=null,writing=false,restored=0,stored=0,errors=0,lastError="";
 const str=v=>String(v??"").trim();
@@ -32,8 +37,9 @@ function ingest(rows){
  let count=0;
  for(const entry of rows||[]){
   const key=str(entry?.key);
-  if(!key.startsWith(PREFIX))continue;
-  const id=key.slice(PREFIX.length),row=entry.payload;
+  const prefix=key.startsWith(PREFIX)?PREFIX:key.startsWith(LEGACY_PREFIX)?LEGACY_PREFIX:null;
+  if(!prefix)continue;
+  const id=key.slice(prefix.length),row=entry.payload;
   if(!valid(row,id))continue;
   const old=records.get(id);
   if(old&&Date.parse(old.savedAt)>=Date.parse(row.savedAt))continue;
@@ -116,4 +122,4 @@ async function flush(){
  }finally{writing=false;if(pending.size)schedule(lastError?18000:2200)}
 }
 function stats(){return {loaded:records.size,restored,stored,pending:pending.size,errors,lastError}}
-module.exports={PREFIX,identity,rank,valid,ingest,apply,offer,offerMany,flush,stats,get};
+module.exports={PREFIX,LEGACY_PREFIX,identity,rank,valid,ingest,apply,offer,offerMany,flush,stats,get};
