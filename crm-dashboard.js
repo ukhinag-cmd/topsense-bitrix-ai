@@ -508,6 +508,7 @@ async function loadPilot(){
   require("./classification-census").ingest(entries);
   require("./classification-ledger").ingest(entries);
   require("./deal-only-name-ledger").ingest(entries);
+  require("./deal-only-site-ledger").ingest(entries);
   require("./purchase-checkpoint").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
@@ -665,6 +666,7 @@ function data(known){
   dealOnlyClients,holdings:holdingGroups,
   dealOnlyRegistry:require("./deal-only-client-registry").stats(),
   dealOnlyNames:require("./deal-only-name-ledger").stats(),
+  dealOnlySites:require("./deal-only-site-ledger").stats(),
   unlinkedDiscovery:require("./crm-unlinked-discovery").stats(),
   crmCardTotal:virtual.stats.rawCompanyCount,
   excludedCompanyCount:state.excludedCompanies.length,
