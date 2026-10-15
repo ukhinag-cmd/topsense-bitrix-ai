@@ -121,7 +121,7 @@ function queueDeals(deals){
   pending.add(id);queue.push(d);added++;
  }
  state.queued=queue.length;
- if(added&&!working)void pump();
+ if(queue.length&&!working)void pump();
  return added;
 }
 async function pump(){
