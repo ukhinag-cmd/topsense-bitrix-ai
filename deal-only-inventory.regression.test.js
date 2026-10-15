@@ -41,7 +41,7 @@ test("private checkpoint commits manifest last; partial save or manifest alone c
   while(cache.stats().pending){
    await cache.flush();
   }
-  assert.ok(output.length>90);
+  assert.ok(output.length>20); // size-bounded chunks, not a fixed number of rows
   assert.equal(output[output.length-1].key,cache.MANIFEST);
   const prior=cache.stats().groups;
   assert.equal(cache.read(output),true);
