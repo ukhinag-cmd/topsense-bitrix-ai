@@ -38,15 +38,15 @@ function legalOrPhoneMatch(c,site){
  const location=(city.length>=5&&content.includes(city))||(region.length>=6&&content.includes(region));
  const legal=String(c.crmInn||"").replace(/\D/g,"");
  const legalMatch=legal.length>=10&&content.includes(legal);
- const websiteEmails=new Set([...content.matchAll(/[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}/gi)].map(m=>m[0]));
+ const websiteEmails=new Set([...content.matchAll(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)].map(m=>m[0]));
  const crmEmails=[...(c.crmEmails||[]),...(c.contactEmails||[])]
   .map(e=>String(e||"").toLowerCase().trim()).filter(e=>e.includes("@"));
  // Exact matching of a free/public mailbox is useful evidence even though
  // its DOMAIN is not a company identifier.
  const email=crmEmails.some(e=>websiteEmails.has(e));
  const normalizedAddress=String(c.crmAddress||"").toLowerCase().replace(/ё/g,"е")
-  .replace(/[^а-яa-z0-9]+/g," ").trim().replace(/\\s+/g," ");
- const normalizedPage=content.replace(/[^а-яa-z0-9]+/g," ").replace(/\\s+/g," ");
+  .replace(/[^а-яa-z0-9]+/g," ").trim().replace(/\s+/g," ");
+ const normalizedPage=content.replace(/[^а-яa-z0-9]+/g," ").replace(/\s+/g," ");
  const address=normalizedAddress.length>=13&&normalizedPage.includes(normalizedAddress);
  const matched=phone||legalMatch||email||address;
  const proof=[legalMatch?"ИНН":"",phone?"телефон":"",email?"e-mail":"",address?"адрес":""]
