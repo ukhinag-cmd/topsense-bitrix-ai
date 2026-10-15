@@ -363,6 +363,7 @@ async function loadPilot(){
    event:"new-subtypes-restored",count:addedTypes,total:taxonomy.stats().total}));
   require("./client-finalization").ingest(entries);
   require("./classification-census").ingest(entries);
+  require("./purchase-checkpoint").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
   state.paidControl={
