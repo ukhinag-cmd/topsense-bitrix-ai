@@ -31,7 +31,27 @@ function page(payload,options={}){
  '<p><strong>Направление:</strong> '+esc(c.category)+' · '+esc(c.organizationType||"Тип требует проверки")+'</p>'+
  (c.relationStatus?'<p>'+esc(c.relationStatus)+'</p>':'')+
  (c.evidenceNote?'<p>'+esc(c.evidenceNote)+'</p>':'')+
- (c.siteCandidate?'<p>Сайт: '+link(c.siteCandidate,c.siteCandidate)+' · '+esc(c.siteCandidateStatus)+'</p>':'')+
+ (c.siteCandidate?'<p>Сайт: '+link(c.siteCandidate,c.siteCandidate)+' · '+
+   esc(c.websiteResearch?.status==="confirmed"?
+    "Принадлежность подтверждена по реквизитам":
+    c.siteCandidateStatus||"Сайт-кандидат — требуется сверка")+'</p>':'')+
+ (c.websiteResearch?'<p><b>Исследование сайта:</b> '+esc({
+   confirmed:"Сайт установлен и сверяется его профиль",
+   queued:"Поиск запланирован",
+   not_started:"Поиск ожидает очереди",
+   needs_review:"Найдены кандидаты, принадлежность требует подтверждения",
+   no_confirmed_site:"Ни один сайт пока не подтверждён",
+   not_found:"Поиск пока не дал результата",
+   search_unavailable:"Поисковый источник временно недоступен",
+   error:"Не удалось проверить сайт"
+  }[c.websiteResearch.status]||c.websiteResearch.status)+
+  ' · разобрано сделок с перепиской: '+Number(c.websiteResearch.dealProfilesRead||0)+
+  (c.websiteResearch.activityTypeConfirmedBySite?
+   ' · вид деятельности проверен по страницам сайта':' · вид деятельности ещё проверяется')+'</p>':'')+
+ (c.websiteResearch?.candidateSites?.length?
+  '<details><summary>Сайты-кандидаты (ещё не все подтверждены)</summary>'+
+  c.websiteResearch.candidateSites.slice(0,5).map(site=>'<p>'+link(site,site)+'</p>').join('')+
+  '</details>':'')+
  '<p><strong>Сделок-кандидатов:</strong> '+Number(c.crmDealCount??c.dealRefs?.length??0)+
  ' · покупка и юридическая связь пока не подтверждены</p>'+
  '<p>Углублённо изучено писем и истории: '+Number(c.emailAnalysedDeals||0)+' сделок · '+'<strong>приоритет:</strong> повторные обращения</p>'+
