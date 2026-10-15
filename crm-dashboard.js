@@ -602,6 +602,12 @@ function data(known){
  if(state.pilotUpdatedAt&&require("./website-profiler").stats().restorationComplete)
   ledger.offerMany(typedRecords);
  const virtual=require("./crm-duplicates").consolidate(typedRecords);
+ const baseAnalyticCompanies=virtual.companies.map(c=>({...c,
+  name:require("./company-name-format").display(c.name).name,
+  relationshipPotential:require("./client-relationship-potential").score(c)}));
+ const dealOnlyClients=require("./deal-only-client-registry").view(baseAnalyticCompanies);
+ const allAnalyticCompanies=require("./holding-network").decorate([...baseAnalyticCompanies,...dealOnlyClients]);
+ const holdingGroups=require("./holding-network").view(allAnalyticCompanies);
  // A virtual duplicate is never treated as independently proven identity.
  const duplicateIds=new Set([...virtual.duplicates,...virtual.review]
   .flatMap(group=>(group.members||group.mergedCrmCards||[]).map(m=>String(m.id))));
@@ -653,7 +659,10 @@ function data(known){
  return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,
   classificationDisplay,classificationCensusReady,classificationCensusStore:require("./classification-census").stats(),
   classificationLedger:ledger.stats(),
-  total:virtual.stats.customerCardCount,
+  total:allAnalyticCompanies.length,
+  dealOnlyClientCount:dealOnlyClients.length,
+  dealOnlyClients,holdings:holdingGroups,
+  dealOnlyRegistry:require("./deal-only-client-registry").stats(),
   crmCardTotal:virtual.stats.rawCompanyCount,
   excludedCompanyCount:state.excludedCompanies.length,
   excludedCompanies:state.excludedCompanies.map(c=>({...c,name:format(c.name).name})),
@@ -680,8 +689,7 @@ function data(known){
   relationshipPotential:require("./client-relationship-potential").stats(),
   nameSiteSearch:require("./name-site-search").stats(),
   dealIntake:require("./crm-deal-intake").stats(),
-  companies:virtual.companies.map(c=>({...c,name:format(c.name).name,
-   relationshipPotential:require("./client-relationship-potential").score(c)}))
+  companies:allAnalyticCompanies
  };
 }
 function route(req,res,pathname,known){
@@ -716,6 +724,8 @@ function route(req,res,pathname,known){
  if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
+ if(pathname==="/contractors/holdings"){write(res,200,require("./client-holdings").page(data(known)),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/deal-only"){write(res,200,require("./client-deal-only").page(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/leads"){const qs=new URL(req.url,"http://localhost").searchParams;write(res,200,require("./client-leads").html(data(known),{page:qs.get("page"),kind:qs.get("kind"),link:qs.get("link")}),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
