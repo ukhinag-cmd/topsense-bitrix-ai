@@ -18,6 +18,7 @@ function setup(site){
  const module={exports:{}};
  const fakeRequire=n=>{
   if(n==="./company-types")return{types};
+  if(n==="./client-taxonomy")return require("./client-taxonomy");
   if(n==="./website-profiler")return{get:()=>site};
   if(n==="./client-finalization")return{isComplete:()=>false,apply:c=>c};
   if(n==="./corporate-role-evidence")return{classify:()=>null};
@@ -30,14 +31,14 @@ test("Brewery 2872 keeps its verified site but is never an industrial general co
  const value=setup(bryanskProfile).apply([bryanskCard])[0];
  assert.equal(value.id,"2872");
  assert.equal(value.category,"Конечные потребители");
- assert.equal(value.organizationType,"");
+ assert.equal(value.organizationType,"Производство напитков");
  assert.match(value.industryDescription,/пива.*солода/);
  assert.equal(value.siteProfileUrl,"https://bryanskpivo.ru");
 });
 test("Old paid classification evidence provides fallback while website cache is restoring",()=>{
  const value=setup(null).apply([bryanskCard])[0];
  assert.equal(value.category,"Конечные потребители");
- assert.equal(value.organizationType,"");
+ assert.equal(value.organizationType,"Производство напитков");
 });
 test("First-party beverage manufacturing beats third-party construction terms in site text",()=>{
  const classifier=setup(bryanskProfile);
