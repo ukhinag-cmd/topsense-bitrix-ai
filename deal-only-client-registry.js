@@ -82,6 +82,25 @@ function view(companies){
     dealCount:dealRefs.length,score:null,userConfirmed:Boolean(entity.userRelationship)},
    evidenceNote:entity.note});
  }
+ // Generalizable discovery across ALL CRM deals, beyond the three
+ // initially recovered customers. Keep unmatched title-only groups provisional.
+ const crawler=require("./crm-unlinked-discovery");
+ const alreadyNamed=new Set(entities.map(e=>crawler.normalize(e.name)));
+ for(const found of crawler.group(companies)){
+  if(found.linkedExisting||alreadyNamed.has(found.key))continue;
+  groups.push({id:"dealonly:discovered:"+found.key,name:found.name,
+   organizationType:"",category:"Не определены",companyCardMissing:true,
+   sourceType:"crm_unlinked_deal_titles",
+   candidateReview:true,identityConfidence:found.confidence,
+   crmIdList:[],crmUrl:"",dealRefs:found.dealRefs.slice(0,30),
+   crmDealCount:found.dealCount,siteCandidate:"",crmEmails:[],
+   contactEmails:[],contactNames:[],evidenceNote:
+    "Восстановлено из повторяющихся названий в сделках без компании. Для подтверждения нужны исходные письма, адреса, реквизиты и история.",
+   relationStatus:"Кандидат на идентификацию — не подтверждённая юридическая связь",
+   saleInfo:{purchaseStatus:"ПРОВЕРЯЕТСЯ",purchaseItems:[],purchaseDealCount:0},
+   relationshipPotential:{status:"pending_reconciliation",level:"Требует оценки",
+    dealCount:found.dealCount,score:null,userConfirmed:false}});
+ }
  return groups;
 }
 function stats(){return {status:coverage,updatedAt,matchedDeals:snapshot.size,
