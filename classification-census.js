@@ -18,7 +18,7 @@ function ingest(rows){
  return saved;
 }
 function display(total,typed,ready,crmCards){
- if(ready&&saved&&saved.crmCards===crmCards&&typed<saved.typed)return {
+ if(ready&&saved&&crmCards>=saved.crmCards&&typed<saved.typed)return {
   total:saved.total,typed:saved.typed,untyped:saved.total-saved.typed,
   provisional:true,completedAt:saved.completedAt,source:"regression_under_review",
   observedTyped:typed,observedTotal:total};
@@ -35,7 +35,7 @@ function display(total,typed,ready,crmCards){
 }
 function consider(total,typed,crmCards,ready){
  if(!ready||![total,typed,crmCards].every(finiteInt)||typed>total||total>crmCards)return false;
- if(saved&&saved.crmCards===crmCards&&typed<saved.typed){
+ if(saved&&crmCards>=saved.crmCards&&typed<saved.typed){
   const signature=[saved.typed,typed,total,crmCards].join(":");
   if(lastRegression!==signature){
    lastRegression=signature;
