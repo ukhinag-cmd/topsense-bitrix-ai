@@ -44,6 +44,7 @@ test("A timed-out CRM company is deferred before paid reservation; next companie
   if(x==="net")return{isIP:()=>0};
   if(x==="./company-types")return{types:[{name:"Интегратор АСУ ТП"}]};
   if(x==="./client-finalization")return{ingest:()=>0,isComplete:()=>false};
+  if(x==="./client-taxonomy")return require("./client-taxonomy");
   if(x==="./crm-dashboard")return{data:()=>({status:"ready",companies:registry})};
   throw Error("Unexpected import "+x);
  };
