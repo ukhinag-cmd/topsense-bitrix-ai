@@ -4,7 +4,7 @@ const vm=require("node:vm"),fs=require("node:fs"),path=require("node:path");
 const source=fs.readFileSync(path.join(__dirname,"crm-dashboard.js"),"utf8");
 const email=require("./company-email-domains");
 function harness(){
- const submitted=[],known=new Map(),retry=[];
+ const submitted=[],known=new Map(),retry=[],legalMap=new Map(),innQueued=[];
  const profiler={
   get:id=>({status:known.get(String(id))||"site_absent"}),
   stats:()=>({restorationComplete:true,queued:0,active:0}),
@@ -18,6 +18,8 @@ function harness(){
   if(x==="./company-types")return require("./company-types");
   if(x==="./company-email-domains")return email;
   if(x==="./website-profiler")return profiler;
+  if(x==="./company-requisites")return {stats:()=>({status:"ready"}),get:id=>legalMap.get(String(id))||{status:"not_found"}};
+  if(x==="./name-site-search")return {stats:()=>({remaining:0}),enqueueByInn:list=>{innQueued.push(...list);return list.length}};
   throw Error("Unexpected top-level or scheduler import "+x);
  };
  const mod={exports:{}},logs=[];
@@ -27,7 +29,7 @@ function harness(){
   {filename:"crm-dashboard.js"});
  const state=mod.exports.__state;
  state.companies=[];state.contactsAt="2026-10-15";
- return {state,profiler,known,submitted,retry,logs,resume:mod.exports.__resume};
+ return {state,profiler,known,submitted,retry,legalMap,innQueued,logs,resume:mod.exports.__resume};
 }
 test("exhausted queue recovers a missing site from a linked contact domain",()=>{
  const h=harness();
@@ -58,4 +60,14 @@ test("there is an explicit queue exhaustion event rather than a fake processing 
  h.resume();
  assert.equal(h.submitted.length,0);
  assert.ok(h.logs.some(x=>x.event==="research-queue-exhausted"));
+});
+
+test("exhausted site queue schedules distinct verified-INN lookup",()=>{
+ const h=harness();
+ h.state.companies=[{id:"31",name:"OOO Industrial Automation",crmEmails:[],corporateDomain:"",siteCandidate:""}];
+ h.legalMap.set("31",{status:"inn_recorded",inn:"7707083893"});
+ h.resume();
+ assert.equal(h.innQueued.length,1);
+ assert.equal(h.innQueued[0].crmInn,"7707083893");
+ assert.ok(h.logs.some(x=>x.event==="inn-site-discovery-started"&&x.queued===1));
 });
