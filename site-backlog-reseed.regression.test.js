@@ -22,7 +22,7 @@ function harness(){
  };
  const mod={exports:{}},logs=[];
  vm.runInNewContext(source+"\nmodule.exports.__resume=resumeUnresolvedCompanySites;module.exports.__state=state;",
-  {require:req,module:mod,exports:mod.exports,process:{env:{}},URL,URLSearchParams,Buffer,
+  {require:req,module:mod,exports:mod.exports,process:{env:{}},URL,URLSearchParams,Buffer,__dirname:"/test",
    setTimeout:()=>0,setInterval:()=>0,console:{log:x=>logs.push(JSON.parse(x)),warn:()=>{}}},
   {filename:"crm-dashboard.js"});
  const state=mod.exports.__state;
