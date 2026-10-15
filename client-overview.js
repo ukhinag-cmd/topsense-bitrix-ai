@@ -215,6 +215,14 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  const barColor=colors[Math.max(0,sections.indexOf(section))];
  const tabs=sections.map((s,i)=>'<a class="tab '+(s===section?"active":"")+'" href="/contractors'+(i?"?section="+encodeURIComponent(s):"")+'">'+esc(s)+'</a>').join("");
  const dataNote=quality==="ready"?"CRM доступна":quality==="stale"?"Данные устарели — CRM обновляется":quality==="error"?"Ошибка CRM — доступен прежний снимок":"Идёт загрузка CRM";
+ const historicPending=payload.unlinkedDiscovery?.scanCompleteness!=="complete"&&
+  !payload.recoveredInventory?.available;
+ const historicText=historicPending?
+  "Полная история сделок сейчас восстанавливается. Видимое число компаний временно включает только CRM-карточки и часть найденных клиентов. Ранее обнаруженные компании не удалены из Битрикс24.":
+  payload.recoveredInventory?.available?
+  "Исторические клиенты восстановлены из сохранённого снимка ("+
+   nr(payload.recoveredInventory.groups)+" групп). Новые сделки продолжают обрабатываться.":
+  "";
  const sectionsMarkup=section==="Обзор"?
   '<div class="panel"><div class="panelheading"><h2>Коммерческие направления</h2><span>6 дашбордов</span></div>'+
   '<div class="segments">'+b.groups.map((g,i)=>'<a class="segment" href="/contractors?section='+encodeURIComponent(g.name)+'"><span class="dot" style="background:'+colors[(i+1)%colors.length]+'"></span><span class="segment-main"><b>'+esc(g.name)+'</b><small>Назначен тип: '+nr(g.typed)+' / '+nr(g.value)+'</small></span><strong>'+nr(g.value)+'</strong><span class="arrow">↗</span></a>').join("")+'</div>'+
@@ -243,11 +251,12 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  '<div class="quick"><a href="/contractors?purchase=buyers#clients">Покупали у нас ↗</a><a href="/contractors#subtypes">Все подтипы ↗</a><a href="/contractors/quality">Контроль качества ↗</a><a href="/contractors/leads">Новые лиды ↗</a><a href="/contractors/deal-only">Клиенты из сделок ↗</a><a href="/contractors/holdings">Холдинги ↗</a><a href="/contractors/duplicates">Проверка дублей ↗</a><a href="/contractors/list">Поиск конкретной компании ↗</a></div></header>'+
  '<main><nav class="tabs">'+tabs+'</nav><div class="status"><strong>'+esc(dataNote)+'</strong> · обновление CRM: '+esc(payload.updatedAt||"ещё нет")+' · последний показатель охвата на текущем снимке, а не подтверждение проверки всей базы. Автообновление страницы каждые 2 минуты.</div>'+
  '<div class="status">'+esc(censusNote)+'</div>'+
+ (historicText?'<div class="status">'+esc(historicText)+'</div>':'')+
  (Number(payload.dealOnlyClientCount||0)?
  '<div class="status"><strong>Клиенты из сделок без карточки компании: '+
  nr(payload.dealOnlyClientCount)+'</strong> · <a href="/contractors/deal-only">Посмотреть заявки и контакты ↗</a></div>':'')+
  '<div class="stats">'+
- hero("Компании",nr(b.total),section==="Обзор"?"аналитических карточек из "+nr(payload.crmCardTotal||0)+" CRM": "в направлении "+section,"#174863")+
+ hero("Компании",nr(b.total),section==="Обзор"?"CRM-клиентов: "+nr(payload.virtualCustomerTotal||0)+" · из сделок: "+nr(payload.dealOnlyClientCount||0):"в направлении "+section,"#174863")+
  hero("Тип определён",displayTyped,coverageLabel+' компаний CRM · актуальное значение при восстановленных данных',"#168B8F")+
  hero("Не определён тип",displayUntyped,"Требуется проверка по источникам","#C7843E")+
  hero("Клиенты с e-mail",nr(b.withEmail),"с контактным адресом CRM","#4B78B9")+
