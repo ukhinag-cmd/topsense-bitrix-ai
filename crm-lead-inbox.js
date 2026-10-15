@@ -99,12 +99,18 @@ async function refresh(){
   // is a genuine customer request merely because it exists in Bitrix.
   const possibleServiceMail=state.items.filter(l=>
    /undeliverable|delivery status notification|mail delivery failed|ошибка доставки|сбой доставки|рассылка|спам|security alert|password reset/i.test(l.title)).length;
+  // Count records still lacking a company ID after a successful contact lookup.
+  // This is a candidate count, not a confirmed number of real customer leads.
+  const hasCompanyId=id=>/^[1-9]\d*$/.test(str(id));
+  const withoutCompanyAfterContactLookup=state.items.filter(l=>
+   !hasCompanyId(l.companyId)&&!hasCompanyId(linkedContacts.get(l.contactId))).length;
   console.log(JSON.stringify({component:"lead-inbox",event:"read-only-refreshed",
    since:state.history.since,inbound:state.total,
    crmLeads:state.history.leads,
    incomingDeals:state.history.incomingDeals,
    otherPipelineDeals:state.history.otherPipelineDeals,
    withoutCompanyDirect:state.history.withoutCompanyDirect,
+   withoutCompanyAfterContactLookup,
    contactLinksChecked:state.history.contactLinksChecked,
    contactLinkError:state.history.contactLinkError,
    possibleServiceMail,leadStatus:state.leadStatus,dealStatus:state.dealStatus,
