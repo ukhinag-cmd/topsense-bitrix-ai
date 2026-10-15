@@ -118,6 +118,14 @@ function view(companies){
    };
   }
   client.emailAnalysedDeals=inspected;
+  const naming=require("./client-canonical-name");
+  const ledger=require("./deal-only-name-ledger");
+  const evidence=naming.fromIntake(client.dealRefs,id=>intake.get(id));
+  const revised=naming.resolve(client,evidence);
+  const upgraded=ledger.apply(revised);
+  // Key never changes with the corrected name; no duplicate customer is born.
+  ledger.offer(upgraded);
+  Object.assign(client,upgraded);
  }
  return groups;
 }
