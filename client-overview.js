@@ -138,6 +138,13 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
    (c.corporateGroup?'<div class="companyMeta">Группа: '+esc(c.corporateGroup)+' · отдельное юридическое лицо</div>':"")+
    '<div class="companyMeta">'+(bought?"Подтверждена покупка по стадиям":"Покупка: не подтверждена / идёт проверка")+
    ' · '+(website.verified?"Сайт изучен":website.candidate?"Сайт-кандидат · требует подтверждения":"Сайт не найден")+'</div>'+   (site?'<div class="companyMeta websiteLine">Сайт: <a class="websiteAddress" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer">'+esc(website.domain)+' ↗</a></div>':"")+
+   (c.relationshipPotential?'<div class="companyMeta relationshipLine"><strong>Потенциал сотрудничества: '+
+    esc(c.relationshipPotential.level)+(c.relationshipPotential.status==="ready"?
+    ' · '+esc(c.relationshipPotential.score)+' / 100':' · оценка уточняется')+'</strong>'+
+    (c.relationshipPotential.userConfirmed?
+      ' · Постоянный клиент — подтверждено пользователем':'')+
+    (c.relationshipPotential.status==="ready"?' · связанных сделок: '+nr(c.relationshipPotential.dealCount):'')+
+    '</div>':'')+
    '<div class="companyMeta financialLine">Выручка за 2025 год: '+esc(revenue)+'</div>'+
    '<div class="companyMeta financialLine">Численность сотрудников: '+esc(staffValue)+staffSource+'</div>'+
    '<a href="'+esc(c.crmUrl||"")+'" target="_blank" rel="noopener noreferrer">Открыть в Bitrix24 ↗</a></article>';
