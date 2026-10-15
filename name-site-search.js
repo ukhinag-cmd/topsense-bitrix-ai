@@ -14,7 +14,12 @@ function cleanName(raw){
 }
 function eligible(c){
  const name=normalized(cleanName(c.name));
- if(name.length<9||/^(?:безназвания|неизвестно|безимени|неопределено|физлицо|частноелицо|тестоваякомпания|нетназвания)$/.test(name))return false;
+ const uninformative=/^(?:безназвания|неизвестно|безимени|неопределено|физлицо|частноелицо|тестоваякомпания|нетназвания)$/.test(name);
+ const inn=String(c.crmInn||"").replace(/\D/g,"");
+ const phone=(c.crmPhones||[]).some(p=>String(p||"").replace(/\D/g,"").length>=10);
+ // Short identifiers (e.g. "ИС-16") are admissible when CRM has independent
+ // identifiers for website verification. A short name alone is insufficient.
+ if(uninformative||name.length<4||(name.length<9&&!/^(?:\d{10}|\d{12})$/.test(inn)&&!phone))return false;
  if(c.siteCandidate||c.corporateDomain||c.verifiedOrgType)return false;
  const free=/^(?:gmail\.com|mail\.ru|list\.ru|bk\.ru|yandex\.ru|ya\.ru|outlook\.com|rambler\.ru|hotmail\.com|icloud\.com|topsense\.su|detector-gaza\.ru)$/i;
  return ![...(c.crmEmails||[]),...(c.contactEmails||[])].some(e=>{
@@ -33,7 +38,9 @@ function legalOrPhoneMatch(c,site){
  const location=(city.length>=5&&content.includes(city))||(region.length>=6&&content.includes(region));
  const legal=String(c.crmInn||"").replace(/\D/g,"");
  const legalMatch=legal.length>=10&&content.includes(legal);
- return {matched:phone||legalMatch,proof:phone?"Совпадает телефон":legalMatch?"Совпадает ИНН":"",locationCorroboration:location};
+ return {matched:phone||legalMatch,phoneMatch:phone,innMatch:legalMatch,
+  proof:legalMatch?"Совпадает ИНН":phone?"Совпадает телефон":"",
+  locationCorroboration:location};
 }
 function domainAllowed(raw){
  try{
@@ -77,17 +84,40 @@ async function inspect(c,hit){
  const name=normalized(cleanName(c.name));
  const siteText=pages.flatMap(p=>[p.meta.title,p.meta.description,...(p.meta.headings||[]),p.meta.body||"",p.meta.identityText||""]).join(" ");
  const siteNormalized=normalized(siteText);
- const nameMatch=name.length>=9&&siteNormalized.includes(name);
- if(!nameMatch)return {url:site.url,title:hit.title,status:"other_company",note:"Название организации на сайте не совпало"};
  const proof=legalOrPhoneMatch(c,pages);
+ // The legal INN is a unique identifier. For short abbreviations also allow
+ // a precise phone match together with the company name on the site.
+ const nameMatch=name.length>=4&&siteNormalized.includes(name);
+ if(!nameMatch&&!proof.innMatch)
+  return {url:site.url,title:hit.title,status:"other_company",
+   note:"Не совпали название и ИНН; телефон без названия недостаточен"};
  return {url:site.url,title:hit.title,status:proof.matched?"confirmed":"needs_review",
   note:proof.matched?proof.proof:"Совпадает название, но не телефон или ИНН — принадлежность сайта не подтверждена"};
 }
 async function scan(c,mode="name"){
+ // A URL supplied by a customer/user is only a candidate, not proof.
+ // Check site contacts/requisites against live read-only CRM first.
+ let supplied=null;
+ if(c.suppliedSiteCandidate){
+  try{
+   const candidate=domainAllowed(c.suppliedSiteCandidate);
+   if(candidate){
+    supplied=await inspect(c,{url:candidate,title:"Сайт-кандидат (пользователь)"});
+    if(supplied.status==="confirmed"){
+     confirmed++;
+     require("./website-profiler").enqueue([{...c,siteCandidate:supplied.url,
+      siteSource:"Поиск по названию — подтверждено независимыми реквизитами"}]);
+     return {status:"confirmed",site:supplied.url,candidates:[supplied],
+      source:"Сайт-кандидат, проверенный по реквизитам CRM",note:supplied.note};
+    }
+   }
+  }catch{ /* Keep the hint for review and continue independent search. */ }
+ }
  let hits;
  try{hits=await search(cleanName(c.name),mode==="inn"?String(c.crmInn||""):"")}
- catch(e){unavailable++;return {status:"search_unavailable",candidates:[],note:String(e.message||e).slice(0,95)}}
- const results=[];
+ catch(e){unavailable++;return {status:supplied?.status==="needs_review"?"needs_review":"search_unavailable",
+  candidates:supplied?[supplied]:[],note:String(e.message||e).slice(0,95)}}
+ const results=supplied?[supplied]:[];
  for(const hit of hits.slice(0,4)){
   try{
    const candidate=await inspect(c,hit);
@@ -146,4 +176,4 @@ function enqueueByInn(companies){
 }
 function get(id){return profiles.get(String(id))||{status:pending.has(String(id))?"queued":"not_started",candidates:[]}}
 function stats(){const count={};for(const p of profiles.values())count[p.status]=(count[p.status]||0)+1;return {attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length,count}}
-module.exports={enqueue,enqueueByInn,get,stats,cleanName,eligible,domainAllowed};
+module.exports={enqueue,enqueueByInn,get,stats,cleanName,eligible,domainAllowed,legalOrPhoneMatch};
