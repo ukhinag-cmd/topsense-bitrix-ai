@@ -4,7 +4,7 @@ const vm=require("node:vm"),fs=require("node:fs"),path=require("node:path");
 const source=fs.readFileSync(path.join(__dirname,"crm-dashboard.js"),"utf8");
 const email=require("./company-email-domains");
 function harness(){
- const submitted=[],known=new Map(),retry=[],legalMap=new Map(),innQueued=[];
+ const submitted=[],known=new Map(),retry=[],legalMap=new Map(),innQueued=[],dealCases=new Map();
  const profiler={
   get:id=>({status:known.get(String(id))||"site_absent"}),
   stats:()=>({restorationComplete:true,queued:0,active:0}),
@@ -18,6 +18,7 @@ function harness(){
   if(x==="./company-types")return require("./company-types");
   if(x==="./company-email-domains")return email;
   if(x==="./website-profiler")return profiler;
+  if(x==="./crm-deal-intake")return {forCompany:id=>dealCases.get(String(id))||[]};
   if(x==="./company-requisites")return {stats:()=>({status:"ready"}),get:id=>legalMap.get(String(id))||{status:"not_found"}};
   if(x==="./name-site-search")return {stats:()=>({remaining:0}),enqueueByInn:list=>{innQueued.push(...list);return list.length}};
   throw Error("Unexpected top-level or scheduler import "+x);
@@ -29,7 +30,7 @@ function harness(){
   {filename:"crm-dashboard.js"});
  const state=mod.exports.__state;
  state.companies=[];state.contactsAt="2026-10-15";
- return {state,profiler,known,submitted,retry,legalMap,innQueued,logs,resume:mod.exports.__resume};
+ return {state,profiler,known,submitted,retry,legalMap,innQueued,dealCases,logs,resume:mod.exports.__resume};
 }
 test("exhausted queue recovers a missing site from a linked contact domain",()=>{
  const h=harness();
@@ -70,4 +71,15 @@ test("exhausted site queue schedules distinct verified-INN lookup",()=>{
  assert.equal(h.innQueued.length,1);
  assert.equal(h.innQueued[0].crmInn,"7707083893");
  assert.ok(h.logs.some(x=>x.event==="inn-site-discovery-started"&&x.queued===1));
+});
+
+test("deal inbound email domain is tried before manual CRM cards for an unlinked website",()=>{
+ const h=harness();
+ h.state.companies=[{id:"33",name:"ООО Промышленный сервис",crmEmails:[],corporateDomain:"",siteCandidate:""}];
+ h.dealCases.set("33",[{id:"6000",incomingEmails:1,corporateDomains:["industrial-service.ru"]}]);
+ h.resume();
+ assert.equal(h.submitted.length,1);
+ assert.equal(h.submitted[0].siteSource,"Домен из входящей сделки");
+ assert.equal(h.submitted[0].corporateDomain,"industrial-service.ru");
+ assert.ok(h.logs.some(x=>x.event==="deal-email-website-candidates-queued"));
 });
