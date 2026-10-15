@@ -13,7 +13,7 @@ test("messy initial deal title upgrades to independently corroborated legal name
   inn:"8603223202",source:"official_website_and_inn",sourceRef:"https://is-16.su/requisites",
   verified:true}]);
  assert.equal(after.id,before.id);
- assert.equal(after.name,"ООО «ИНЖИНИРИНГОВЫЕ СИСТЕМЫ-16»");
+ assert.equal(after.name,"ООО «Инжиниринговые системы-16»");
  assert.equal(after.nameStatus,"legal_name_verified");
  assert.equal(after.identityVerified,true);
  assert.deepEqual(after.dealRefs,before.dealRefs);
@@ -39,7 +39,7 @@ test("first and follow-up emails can carry legal name and requisites later than 
  assert.equal(summary.legalNameCandidates[0].inn,"8603223202");
  const c=naming.resolve({id:"dealonly:discovered:ис16",name:"ИС-16",dealRefs:[{id:"42"}]},
   naming.fromIntake([{id:"42"}],()=>({legalNameCandidates:summary.legalNameCandidates})));
- assert.equal(c.name,"ООО «ИНЖИНИРИНГОВЫЕ СИСТЕМЫ-16»");
+ assert.equal(c.name,"ООО «Инжиниринговые системы-16»");
  assert.equal(c.nameStatus,"legal_name_from_incoming_requisites");
  assert.equal(c.identityVerified,false);
 });
@@ -111,7 +111,7 @@ test("generic deal title can discover a legally named company from a subsequent 
   const cards=registry.view([]);
   const card=cards.find(x=>x.id==="dealonly:discovered:региональный технический центр");
   assert.ok(card);
-  assert.equal(card.name,"ООО «РЕГИОНАЛЬНЫЙ ТЕХНИЧЕСКИЙ ЦЕНТР»");
+  assert.equal(card.name,"ООО «Региональный технический центр»");
   assert.equal(card.nameStatus,"legal_name_from_incoming_requisites");
   assert.deepEqual(card.dealRefs.map(x=>x.id).sort(),["80701","80702"]);
  }finally{intake.get=original}
