@@ -77,11 +77,12 @@ test("GSP Remont: same legal-name cards with and without ООО form one analyti
  const x=consolidate([...cases,branch]);
  const group=x.companies.find(c=>Array.isArray(c.crmIdList)&&c.crmIdList.includes("62"));
  assert.ok(group,"plain-name CRM card must not remain isolated");
- assert.deepEqual([...group.crmIdList].sort(),id.sort());
+ assert.deepEqual([...group.crmIdList].filter(x=>x!=="3692").sort(),id.sort());
  assert.equal(x.stats.rawCompanyCount,7);
- assert.equal(x.stats.customerCardCount,2); // branch is separate pending linkage
+ assert.equal(x.stats.customerCardCount,1); // explicitly named filial nested under the legal client
  assert.equal(x.stats.duplicateCoverageValidated,true);
- assert.ok(x.companies.some(c=>c.id==="3692"));
+ assert.ok(group.subdivisions?.some(x=>x.id==="3692"));
+ assert.ok(group.crmIdList.includes("3692"));
 });
 test("same-name unknown OPF must not merge contradictory known INNs",()=>{
  const a=company(900,'ООО "ГСП Ремонт"',{inn:"7737106202"});
