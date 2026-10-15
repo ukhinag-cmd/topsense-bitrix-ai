@@ -162,13 +162,13 @@ async function run(companies){
  startedAt:new Date().toISOString(),finishedAt:null});
  try{
   const allowed=new Set((companies||[]).map(x=>String(x.id)));
-  const stageMap=await stages();
-  if(!stageMap.size)throw Error("Отгрузка и оплата не найдены среди названий стадий доступных воронок CRM");
   const deals=await allDeals();
   require("./deal-only-client-registry").ingest(deals,{complete:true});
   // Compute relationship potential from full deal history BEFORE slow
   // procurement/attachment stage audits. Only direct CRM company links count.
   require("./client-relationship-potential").build(deals.values());
+  const stageMap=await stages();
+  if(!stageMap.size)throw Error("Отгрузка и оплата не найдены среди названий стадий доступных воронок CRM");
   // Historical enquiries matter for unresolved clients, not only new leads.
   // Queue a bounded sample of their real linked deals for chronological
   // read-only evidence review; never create, change or link CRM records.
