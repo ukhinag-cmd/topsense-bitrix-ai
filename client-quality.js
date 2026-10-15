@@ -44,6 +44,7 @@ function summary(payload){
   totalDeals:Number(audit.totalDeals||0),orphanDeals:Number((audit.orphanDeals||{}).orphanDeals||0),
   unlinkedDeals:Number((audit.orphanDeals||{}).unmatched||0),
   recoveryVerified:Number((audit.orphanDeals||{}).totalRecoveredLinks||0),
+  classificationProvisional:Boolean(census.provisional),restorationPending:!payload.siteCrawl?.restorationComplete,
   aiReconciliation:payload.aiReconciliation||{},groupStatuses,incomplete
  };
 }
