@@ -62,6 +62,7 @@ async function refresh(){
   if(leads.status!=="fulfilled"&&deals.status!=="fulfilled")throw Error("Lead and incoming-deal reads unavailable");
   const dealRows=deals.status==="fulfilled"?deals.value:[];
   if(dealRows.length)require("./deal-only-client-registry").ingest(dealRows);
+  if(dealRows.length)require("./crm-unlinked-discovery").ingest(dealRows);
   const leadRows=leads.status==="fulfilled"?leads.value:[];
   const missingContacts=[...new Set([...leadRows,...dealRows].filter(x=>!x.COMPANY_ID||String(x.COMPANY_ID)==="0")
     .map(x=>str(x.CONTACT_ID)).filter(x=>/^[1-9]\d*$/.test(x)))];
