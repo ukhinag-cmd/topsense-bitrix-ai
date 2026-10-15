@@ -18,7 +18,9 @@ test("Historical CRM leads and all deal funnels from 6 Sep; safe contact links; 
  const intake={queueDeals:rows=>{calls.push({method:"deal-intake-local",count:rows.length});return rows.length},
   get:()=>null,stats:()=>({status:"scanning",inspected:0,queued:2})};
  vm.runInNewContext(source,{module,exports:module.exports,URL,AbortSignal,fetch:fakeFetch,
-  require:name=>{if(name==="./crm-deal-intake")return intake;throw Error("unexpected "+name)},
+  require:name=>{if(name==="./crm-deal-intake")return intake;
+   if(name==="./deal-only-client-registry")return {ingest:()=>({})};
+   throw Error("unexpected "+name)},
   process:{env:{BITRIX_WEBHOOK_BASE:"https://bitrix.example/rest/"}},
   setTimeout:fn=>{fn();return 0},
   console:{log:()=>{},warn:()=>{}}},{filename:"crm-lead-inbox.js"});
