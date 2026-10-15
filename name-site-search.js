@@ -4,6 +4,7 @@
 // corroboration is allowed to promote a URL to an official website.
 const queue=[],pending=new Set(),profiles=new Map(),innTried=new Set();
 const completion=require("./client-finalization");
+const checkpoint=require("./name-site-search-checkpoint");
 let busy=false,attempted=0,confirmed=0,review=0,unavailable=0,innAttempted=0,innConfirmed=0;
 const skipDomains=new Set(["bing.com","google.com","yandex.ru","2gis.ru","rusprofile.ru","checko.ru","sbis.ru","saby.ru","companies.rbc.ru","list-org.com","orgpage.ru","avito.ru","hh.ru","vk.com","youtube.com","facebook.com","instagram.com","spravker.ru","spark-interfax.ru"]);
 const sleep=n=>new Promise(r=>setTimeout(r,n));
@@ -210,8 +211,11 @@ async function pump(){
   if(completion.isComplete(id)||(mode==="name"&&profiles.has(id)))continue;
   attempted++;
   if(mode==="inn")innAttempted++;
-  try{profiles.set(id,await scan(c,mode))}
-  catch{unavailable++;profiles.set(id,{status:"error",candidates:[]})}
+  try{
+   const result=await scan(c,mode);
+   profiles.set(id,result);
+   checkpoint.offer(c,result);
+  }catch{unavailable++;profiles.set(id,{status:"error",candidates:[]})}
   if(attempted%40===0||queue.length===0)console.log(JSON.stringify({component:"name-site-search",event:"progress",attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length}));
   await sleep(1350);
  }
@@ -220,7 +224,10 @@ async function pump(){
 function enqueue(companies){
  let added=0;
  for(const c of companies||[]){
-  const id=String(c.id||"");if(!id||completion.isComplete(id)||profiles.has(id)||pending.has(id)||!eligible(c))continue;
+  const id=String(c.id||"");
+  if(!id||completion.isComplete(id)||profiles.has(id)||pending.has(id)||!eligible(c))continue;
+  const cached=checkpoint.get(c);
+  if(cached){profiles.set(id,cached);continue}
   pending.add(id);queue.push(c);added++;
  }
  if(added)console.log(JSON.stringify({component:"name-site-search",event:"queued",count:added,remaining:queue.length}));
@@ -255,5 +262,5 @@ function enqueueByInn(companies){
  return added;
 }
 function get(id){return profiles.get(String(id))||{status:pending.has(String(id))?"queued":"not_started",candidates:[]}}
-function stats(){const count={};for(const p of profiles.values())count[p.status]=(count[p.status]||0)+1;return {attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length,count}}
+function stats(){const count={};for(const p of profiles.values())count[p.status]=(count[p.status]||0)+1;return {attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length,count,checkpoint:checkpoint.stats()}}
 module.exports={enqueue,enqueuePriority,enqueueByInn,get,stats,cleanName,eligible,domainAllowed,legalOrPhoneMatch,legalNameOnOwnSite};
