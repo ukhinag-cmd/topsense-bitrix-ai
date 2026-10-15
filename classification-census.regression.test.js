@@ -25,9 +25,10 @@ test("uses live result after full restoration even when verified count corrects 
 });
 test("does not misrepresent prior population if company total changes",()=>{
  const p=census.display(1570,500,false);
- assert.equal(p.typed,null);
- assert.equal(p.untyped,null);
- assert.equal(p.source,"awaiting_complete");
+ assert.equal(p.typed,500);
+ assert.equal(p.untyped,1070);
+ assert.equal(p.provisional,true);
+ assert.equal(p.source,"live_provisional");
 });
 test("does not save provisional or redundant readings",()=>{
  assert.equal(census.consider(1557,496,1667,false),false);
