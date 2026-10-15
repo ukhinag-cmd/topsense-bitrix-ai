@@ -1,6 +1,7 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
-const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,paidControl:{}};
+const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,paidControl:{},refreshFailures:0,nextRetryAt:null};
+let companyRetryTimer=null,contactRetryTimer=null,salesAuditStartTimer=null;
 function analyticSeeds(){
  try{
    const arr=JSON.parse(String(process.env.TOPSENSE_ANALYTIC_SEED_JSON||"[]"));
@@ -166,13 +167,13 @@ async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
  if(!base)throw Error("Bitrix API not configured");
  const endpoint=new URL("crm.company.list.json",base.endsWith("/")?base:base+"/");
- for(let attempt=0;attempt<2;attempt++){
+ for(let attempt=0;attempt<4;attempt++){
   try{
    const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","TITLE","WEB","EMAIL","PHONE","ADDRESS","ADDRESS_2","ADDRESS_CITY","ADDRESS_REGION","UF_CRM_AI_REVENUE","UF_CRM_AI_REVENUE_YEAR","UF_CRM_AI_INN","UF_CRM_AI_FIN_SOURCE","DATE_MODIFY","ASSIGNED_BY_ID"],start}),signal:AbortSignal.timeout(18000)});
    const j=await r.json();
    if(!r.ok||j.error||!Array.isArray(j.result))throw Error(j.error_description||j.error||"Bad CRM response "+r.status);
    return j;
-  }catch(e){if(attempt)throw e;await new Promise(resolve=>setTimeout(resolve,750))}
+  }catch(e){if(attempt===3)throw e;await new Promise(resolve=>setTimeout(resolve,1000*Math.pow(2,attempt)))}
  }
 }
 async function refresh(){
@@ -184,9 +185,10 @@ async function refresh(){
   if(total>6000)throw Error("CRM count exceeds safe limit");
   if(total>size){
     let starts=[];for(let offset=size;offset<total;offset+=size)starts.push(offset);
-    for(let i=0;i<starts.length;i+=4){
-     const pages=await Promise.all(starts.slice(i,i+4).map(page));
+    for(let i=0;i<starts.length;i+=2){
+     const pages=await Promise.all(starts.slice(i,i+2).map(page));
      pages.forEach(p=>parts.push(p.result));
+     if(i+2<starts.length)await new Promise(done=>setTimeout(done,260));
     }
   }else if(first.next!=null){
     let next=first.next,j=0;while(next!=null&&j++<110){let p=await page(next);parts.push(p.result);next=p.next}
@@ -213,16 +215,38 @@ async function refresh(){
    console.warn(JSON.stringify({component:"crm-duplicates",event:"duplicate-invariant-failed",failedPairs:pairCoverage.filter(p=>p.inCrm&&!p.grouped).map(p=>p.idPair)}));
   console.log(JSON.stringify({component:"crm-duplicates",event:"reporting-group-snapshot",...dupStats}));
   // CRM #2 = ООО «ПКФ ТОП-СЕНС» (our own entity), do not include it in client analytics.
-  if(require("./crm-sales-audit").stats().status==="not_started")require("./crm-sales-audit").run(state.companies).catch(()=>{});
+  // Running the full 17k+ deal and 130k+ email audit alongside the company
+  // snapshot overloads some Bitrix24 portals and causes INTERNAL_SERVER_ERROR.
+  // Start it after core company/contact reconciliation gets a head start.
+  if(!salesAuditStartTimer&&require("./crm-sales-audit").stats().status==="not_started"){
+   salesAuditStartTimer=setTimeout(()=>{
+    salesAuditStartTimer=null;
+    if(state.companies.length)
+     require("./crm-sales-audit").run(state.companies).catch(()=>{});
+   },120000);
+  }
   require("./crm-mail-evidence").enqueue(state.companies);
   require("./website-profiler").enqueue(state.companies);
   enqueueLinkedContactSites();
   enqueuePreviousPilotSites();
   if(state.contactsAt)enqueueMissingSiteNameSearch();
-  state.status="ready";state.updatedAt=new Date().toISOString();state.error=null;
+  state.status="ready";state.updatedAt=new Date().toISOString();
+  state.error=null;state.refreshFailures=0;state.nextRetryAt=null;
+  if(companyRetryTimer){clearTimeout(companyRetryTimer);companyRetryTimer=null;}
   console.log(JSON.stringify({component:"topsense-dashboard",event:"refresh-ok",count:state.companies.length,excludedOwnCompanies:1,excludedInvalidTitles:state.excludedCompanies.length}));
   setTimeout(coverageLog,2500);
- }catch(e){state.error=String(e.message||e).slice(0,160);state.status=state.companies.length?"stale":"error";console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",error:state.error}));}
+ }catch(e){
+  state.error=String(e.message||e).slice(0,160);
+  state.status=state.companies.length?"stale":"error";
+  state.refreshFailures++;
+  const delay=Math.min(12*60*1000,30000*Math.pow(2,Math.min(4,state.refreshFailures-1)));
+  state.nextRetryAt=new Date(Date.now()+delay).toISOString();
+  console.warn(JSON.stringify({component:"topsense-dashboard",event:"refresh-error",
+   error:state.error,retryAfterMs:delay,retainedCompanies:state.companies.length}));
+  if(!companyRetryTimer)companyRetryTimer=setTimeout(()=>{
+   companyRetryTimer=null;refresh().catch(()=>{});
+  },delay);
+ }
  finally{state.refreshing=false}
 }
 
