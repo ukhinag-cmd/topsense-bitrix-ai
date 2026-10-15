@@ -50,7 +50,7 @@ test("new companies do not make the last completed historical census vanish",()=
  assert.equal(p.total,1557);
  assert.equal(p.untyped,868);
  assert.equal(p.provisional,true);
- assert.equal(p.source,"last_complete_crm_population_changed"===p.source||p.source==="last_complete_virtual_groups_changed"?p.source:"last_complete_crm_population_changed");
+ assert.equal(p.source,"last_complete_virtual_groups_changed");
 });
 test("does not save provisional or redundant readings",()=>{
  assert.equal(census.consider(1557,496,1667,false),false);
