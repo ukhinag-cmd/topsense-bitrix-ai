@@ -579,6 +579,7 @@ async function loadPilot(){
   require("./classification-ledger").ingest(entries);
   require("./deal-only-name-ledger").ingest(entries);
   require("./deal-only-site-ledger").ingest(entries);
+  require("./deal-only-inventory").read(entries);
   require("./name-site-search-checkpoint").ingest(entries);
   require("./purchase-checkpoint").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
@@ -753,6 +754,7 @@ function data(known){
   dealOnlyNames:require("./deal-only-name-ledger").stats(),
   dealOnlySites:require("./deal-only-site-ledger").stats(),
   unlinkedDiscovery:require("./crm-unlinked-discovery").stats(),
+  recoveredInventory:require("./deal-only-inventory").stats(),
   crmCardTotal:virtual.stats.rawCompanyCount,
   excludedCompanyCount:state.excludedCompanies.length,
   excludedCompanies:state.excludedCompanies.map(c=>({...c,name:format(c.name).name})),
@@ -899,5 +901,14 @@ setInterval(() => {
 setTimeout(resumeUnresolvedCompanySites,10*60*1000);
 setInterval(resumeUnresolvedCompanySites,5*60*1000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
+// A transient Bitrix24 deal pagination timeout must not permanently strand the
+// lifetime deal inventory after one startup attempt. Already fetched pages
+// remain cached in crm-sales-audit until a complete scan is achieved.
+setInterval(() => {
+ const audit=require("./crm-sales-audit");
+ const status=audit.stats().status;
+ if(state.companies.length&&status==="incomplete")
+  audit.run(state.companies).catch(()=>{});
+}, 12*60*1000);
 setInterval(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 24*60*60*1000);
 module.exports={route,refresh,data};
