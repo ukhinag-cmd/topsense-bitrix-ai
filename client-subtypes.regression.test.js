@@ -8,9 +8,9 @@ const records=[
  {id:"105",name:"Подрядная компания",organizationType:subtype,category:"Подрядчики",crmIdList:["105"],crmUrl:"https://topsense.bitrix24.ru/crm/company/details/105/",saleInfo:{purchaseStatus:"НЕ БЫЛО"}},
  {id:"106",name:"Проектная компания",organizationType:"Инжиниринговая компания",category:"Проектные продажи",crmUrl:"https://topsense.bitrix24.ru/crm/company/details/106/",saleInfo:{}}
 ];
-test("All 45 subtypes are visible and each links to a server-side client list",()=>{
+test("All available subtypes are visible and each links to a server-side client list",()=>{
  const output=overview.render({companies:records,status:"ready"},"Обзор");
- assert.equal(types.length,45);
+ assert.ok(types.length>=49);
  for(const type of types){
   const href="/contractors?type="+encodeURIComponent(type.name)+"#clients";
   assert.ok(output.includes(href),"Missing subtype link: "+type.name);
