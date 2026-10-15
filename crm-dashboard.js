@@ -149,9 +149,18 @@ function company(x){const id=String(x.ID||"");const reviewedCandidate=REVIEWED_P
  const phoneCheck=(Array.isArray(x.PHONE)?x.PHONE:[])
   .some(z=>String(z?.VALUE||z||"").replace(/\D/g,"").endsWith("4952213873"));
  const reviewed=gspSite&&(!titleCheck||!phoneCheck)?null:reviewedCandidate;
- const identified=referencedWebsite(id,x.TITLE,x.PHONE);return {id,name:String(x.TITLE||""),category:category(x.TITLE),siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",
+ const identified=referencedWebsite(id,x.TITLE,x.PHONE);
+ const gspIds=new Set(["62","2790","2842","3682","3684","3690","3692"]);
+ const gspTitle=/^(?:(?:ооо)\\s*)?["«»]?гсп[ -]?ремонт["«»]?$/i.test(String(x.TITLE||"").trim())||
+  /^филиал[\\s«"а-я]*сервисгазавтоматика[\\s»"]*ооо[\\s«"]*гсп[ -]?ремонт/i.test(String(x.TITLE||"").trim());
+ const gspKnown=gspIds.has(id)&&gspTitle;
+ const gspType=gspKnown?"Ремонтный подрядчик ОПО / остановочный ремонт":"";
+ return {id,name:String(x.TITLE||""),category:gspKnown?"Подрядчики":category(x.TITLE),
+  type:gspType,organizationType:gspType,
+  typeSource:gspKnown?"Профиль ООО ГСП Ремонт: официальный сайт; принадлежность каждой карточки и филиала сверяется отдельно":"",
+siteCandidate:reviewed?.url||website(x.WEB)||identified?.url||"",siteSource:reviewed?"Официальный сайт, проверенный по юридическим данным":website(x.WEB)?"Сайт из CRM":identified?"Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены":"",verifiedOrgType:reviewed?.primaryType||"",verifiedOrgEvidence:reviewed?.source||"",siteReferenceEvidence:identified?.source||"",
  corporateGroup:identified?.corporateGroup||"",
- relatedWebsites:identified?.corporateGroupUrl?[{url:identified.corporateGroupUrl,relation:"corporate_group",label:"Сайт группы компаний",organization:identified.corporateGroup}]:[],
+ relatedWebsites:identified?.corporateGroupUrl?[{url:identified.corporateGroupUrl,relation:"corporate_group",label:"Сайт группы компаний",organization:identified.corporateGroup}]:gspKnown&&!reviewed?[{url:"https://www.gsp-r.ru/",relation:"legal_entity_candidate",label:"Официальный сайт ООО ГСП Ремонт; точная привязка CRM-карточки уточняется",organization:"ООО ГСП Ремонт"}]:[],
  legalInnReference:identified?.legalInn||"",corporateDomain:domain(x.EMAIL),crmEmails:(Array.isArray(x.EMAIL)?x.EMAIL.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmPhones:(Array.isArray(x.PHONE)?x.PHONE.map(e=>String(e.VALUE||e||"")):[]).filter(Boolean),crmCity:String(x.ADDRESS_CITY||""),crmRegion:String(x.ADDRESS_REGION||""),crmAddress:[x.ADDRESS,x.ADDRESS_2].filter(Boolean).join(", ").slice(0,280),finance2025:require("./financial-2025").fromCompany(x),staffEvidence:require("./staff-evidence").fromCompany(x),crmUrl:"https://topsense.bitrix24.ru/crm/company/details/"+encodeURIComponent(id)+"/",modified:String(x.DATE_MODIFY||""),responsibleId:String(x.ASSIGNED_BY_ID||""),delivery:"Не проверено"}}
 async function page(start){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"");
