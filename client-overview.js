@@ -178,19 +178,32 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
   '<div class="companyGrid">'+(cards||'<div class="empty">По выбранному типу компаний пока не обнаружено.</div>')+'</div>'+
   (totalPages>1?'<nav class="pages">'+pages+'</nav>':"")+'</section>';
  const census=section==="Обзор"?payload.classificationDisplay:null;
- const effectiveTyped=census?.provisional?census.typed:b.typed;
- const effectiveUntyped=census?.provisional?census.untyped:b.untyped;
+ const live=section==="Обзор"?payload.classificationLive:null;
+ // Publish the actual current count while the site research queue is active.
+ // Last COMPLETE census stays available as an explicitly historical baseline.
+ const usableLive=live?.ready===true&&Number.isSafeInteger(live.typed)&&
+  Number.isSafeInteger(live.total)&&live.typed<=live.total&&live.total>=0;
+ const effectiveTyped=usableLive?live.typed:census?.provisional?census.typed:b.typed;
+ const effectiveUntyped=usableLive?live.untyped:census?.provisional?census.untyped:b.untyped;
  const displayTyped=effectiveTyped===null?"—":nr(effectiveTyped);
  const displayUntyped=effectiveUntyped===null?"—":nr(effectiveUntyped);
- const metricBase=census?.provisional&&census.source==="last_complete_virtual_groups_changed"?census.total:b.total;
+ const metricBase=usableLive?live.total:census?.provisional?census.total:b.total;
  const coverage=effectiveTyped===null?null:pct(effectiveTyped,metricBase);
  const coverageLabel=coverage===null?"—":coverage+"%";
  const coverageArc=coverage===null?0:coverage;
- const censusNote=census?.provisional?
-  ((census.source.startsWith("last_complete")||census.source==="regression_under_review")?
-   "Последний завершённый снимок ("+census.typed+" / "+census.total+") от "+census.completedAt+". "+(census.source==="regression_under_review"?"Обнаружено снижение до "+census.observedTyped+"; требуется сверка перед обновлением результата.":"Текущий пересчёт ещё идёт; временное уменьшение не публикуется."):
-   "Восстановление сохранённых исследований. Итоговый счётчик появится после завершения прохода."):
-  "Текущие показатели рассчитаны по восстановленным данным.";
+ const historicalNote=census?.provisional&&Number.isInteger(census.typed)?
+  " Последний завершённый снимок: "+nr(census.typed)+" из "+nr(census.total)+
+  (census.completedAt?" от "+census.completedAt:"")+".":"";
+ const censusNote=usableLive?
+  "Текущая классификация компаний CRM: "+nr(live.typed)+" из "+nr(live.total)+
+  " ("+nr(live.untyped)+" без типа)."+
+  (live.provisional?" Проверка сайтов ещё продолжается; показатель предварительный.":"")+
+  historicalNote+
+  (live.recoveredCandidates?" Отдельно: "+nr(live.recoveredCandidates)+
+   " кандидатов из сделок без CRM-компании; их типы проверяются отдельно.":""):
+  census?.provisional?
+   "Идёт восстановление результатов классификации. Пока показан последний завершённый снимок: "+
+    nr(census.typed)+" из "+nr(census.total)+".":"Текущая классификация построена по данным CRM.";
  const quality=String(payload.status||"starting");
  const checking=Number(payload.siteCrawl?.checkedSites||0),sitePending=Number(payload.siteCrawl?.queued||0);
  const reviewed=Number(payload.duplicateStats?.reviewGroupCount||0),grouped=Number(payload.duplicateStats?.groupedCount||0);
@@ -231,7 +244,7 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  nr(payload.dealOnlyClientCount)+'</strong> · <a href="/contractors/deal-only">Посмотреть заявки и контакты ↗</a></div>':'')+
  '<div class="stats">'+
  hero("Компании",nr(b.total),section==="Обзор"?"аналитических карточек из "+nr(payload.crmCardTotal||0)+" CRM": "в направлении "+section,"#174863")+
- hero("Тип определён",displayTyped,coverageLabel+' выбранных компаний · включая предварительные',"#168B8F")+
+ hero("Тип определён",displayTyped,coverageLabel+' компаний CRM · актуальное значение при восстановленных данных',"#168B8F")+
  hero("Не определён тип",displayUntyped,"Требуется проверка по источникам","#C7843E")+
  hero("Клиенты с e-mail",nr(b.withEmail),"с контактным адресом CRM","#4B78B9")+
  hero("Подтверждения покупки",nr(b.buyers),"сделки по согласованным стадиям","#247A78")+
