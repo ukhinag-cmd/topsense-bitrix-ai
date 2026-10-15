@@ -143,7 +143,7 @@ function consolidate(companies){
    &&!memberDomains.some(a=>a.some(d=>memberDomains.every(b=>b.includes(d))))
   );
   if(sourceConflict&&!sharedInns)continue;
-  const combined=merge(set,sharedInns?"matching_inn_and_name":"same_name_missing_opf");
+  const combined=merge(set,sharedInns?"matching_inn_and_name":unrelatedDomains.length?"same_name_missing_opf":"exact_distinctive_name_provisional");
   combined.duplicateStatus=sharedInns?
    "Совпадают наименование и ИНН; CRM-карточки сведены в единую аналитику":
    "Совпадает полное название, ОПФ отсутствует у части CRM-карточек. Одна аналитическая компания; юридические реквизиты для физического слияния требуют сверки";
