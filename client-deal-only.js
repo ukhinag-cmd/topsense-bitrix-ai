@@ -1,25 +1,57 @@
 "use strict";
 const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-function page(payload){
- const items=(payload.dealOnlyClients||[]);
+function page(payload,options={}){
+ const kind=["all","repeat","reviewed"].includes(options.kind)?options.kind:"all";
+ const requested=Math.max(1,Number.parseInt(String(options.page||"1"),10)||1);
+ const stats=payload.unlinkedDiscovery||{};
+ const all=payload.dealOnlyClients||[];
+ const filtered=all.filter(x=>kind==="all"||kind==="repeat"?
+  (kind==="all"||x.candidateReview===true&&Number(x.crmDealCount||0)>=2):
+  !x.candidateReview);
+ const pageSize=36,pageCount=Math.max(1,Math.ceil(filtered.length/pageSize));
+ const shown=Math.min(pageCount,requested);
+ const records=filtered.slice((shown-1)*pageSize,shown*pageSize);
  const safe=raw=>{try{const u=new URL(raw);return u.protocol==="https:"?u.href:""}catch{return""}};
- const cards=items.map(c=>'<article class="card"><h2>'+esc(c.name)+'</h2>'+
- '<div class="status">Компания установлена из названий сделок, карточка CRM отсутствует</div>'+
+ const link=(label,uri)=>'<a href="'+esc(safe(uri))+'" target="_blank" rel="noopener noreferrer">'+esc(label)+' ↗</a>';
+ const tile=(value,label)=>'<div class="metric"><b>'+esc(value)+'</b><span>'+esc(label)+'</span></div>';
+ const cards=records.map(c=>'<article class="card"><h2>'+esc(c.name)+'</h2>'+
+ '<div class="status">'+(c.candidateReview?'Предварительный клиент — требуется сверка переписки и реквизитов':
+ 'Клиент выявлен из сделок, CRM-компания не заведена')+'</div>'+
  '<p><strong>Направление:</strong> '+esc(c.category)+' · '+esc(c.organizationType||"Тип требует проверки")+'</p>'+
- (c.relationStatus?'<p><b>'+esc(c.relationStatus)+'</b></p>':'')+
- '<p>'+esc(c.evidenceNote)+'</p>'+
- (c.siteCandidate?'<p>Сайт: <a href="'+esc(safe(c.siteCandidate))+
- '" target="_blank" rel="noopener noreferrer">'+esc(c.siteCandidate)+'</a> · '+esc(c.siteCandidateStatus)+'</p>':'')+
- '<p><strong>Найденные сделки:</strong> '+(c.dealRefs||[]).length+'</p>'+
- '<div class="deals">'+(c.dealRefs||[]).map(d=>'<p><a href="'+esc(safe(d.url))+
- '" target="_blank" rel="noopener noreferrer">Сделка №'+esc(d.id)+' ↗</a> · '+esc(d.title)+
- ' · '+esc(d.relationshipEvidence)+'</p>').join('')+'</div>'+
- '<p class="small">Покупки и юридическая связь подтверждаются отдельно. Сделки с пустым COMPANY_ID не менялись.</p></article>').join('');
+ (c.relationStatus?'<p>'+esc(c.relationStatus)+'</p>':'')+
+ (c.evidenceNote?'<p>'+esc(c.evidenceNote)+'</p>':'')+
+ (c.siteCandidate?'<p>Сайт: '+link(c.siteCandidate,c.siteCandidate)+' · '+esc(c.siteCandidateStatus)+'</p>':'')+
+ '<p><strong>Сделок-кандидатов:</strong> '+Number(c.crmDealCount??c.dealRefs?.length??0)+
+ ' · покупка и юридическая связь пока не подтверждены</p>'+
+ '<details><summary>Из каких сделок собрана карточка</summary><div class="deals">'+
+ (c.dealRefs||[]).map(d=>'<p>'+link('Сделка №'+d.id,d.url)+' · '+esc(d.title)+
+ ' · '+esc(d.relationshipEvidence||'Название требует независимой сверки')+'</p>').join('')+
+ '</div></details></article>').join('');
+ const menu='<nav><a href="/contractors">← Дашборд</a> · <a href="/contractors/holdings">Холдинги</a> · '+
+ '<a href="/contractors/deal-only?kind=all">Все кандидаты</a> · '+
+ '<a href="/contractors/deal-only?kind=repeat">С повторными сделками</a> · '+
+ '<a href="/contractors/deal-only?kind=reviewed">Известные примеры</a></nav>';
+ const pageLink=n=>'/contractors/deal-only?kind='+encodeURIComponent(kind)+'&page='+n;
+ const pager='<div class="paging">'+(shown>1?'<a href="'+pageLink(shown-1)+'">← Назад</a>':'')+
+ '<span>Страница '+shown+' из '+pageCount+'</span>'+
+ (shown<pageCount?'<a href="'+pageLink(shown+1)+'">Далее →</a>':'')+'</div>';
  return '<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ТОП-СЕНС — клиенты из сделок</title>'+
- '<style>body{font:14px system-ui;background:#f2f6fa;color:#17374a;margin:0}header{background:#123c53;padding:25px max(18px,calc((100% - 1060px)/2));color:#fff}main{max-width:1060px;margin:auto;padding:20px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}.card{background:white;padding:18px;border:1px solid #d9e5eb;border-radius:12px}.status{font-weight:700;color:#126b72}.small{color:#567785;font-size:12px}.deals p{border-top:1px solid #ecf2f5;padding-top:10px}a{color:#10738a}h1{margin:0 0 6px}h2{margin:0 0 12px}</style></head>'+
- '<body><header><h1>Клиенты, найденные по сделкам</h1><div>История заявок важнее ручного заполнения карточек компаний</div></header><main>'+
- '<p><a href="/contractors">← Центральный дашборд</a> · <a href="/contractors/holdings">Холдинги</a></p>'+
- '<p>Эти организации присутствуют в переписке и сделках, но не имеют соответствующей компании в текущей выгрузке CRM. Их аналитические карточки не создают и не меняют компании в Bitrix24.</p>'+
- '<div class="cards">'+(cards||'<p>Кандидаты ещё не прочитаны из сделок.</p>')+'</div></main></body></html>';
+ '<style>body{font:14px system-ui;background:#f2f6fa;color:#17374a;margin:0}header{background:#123c53;padding:25px max(18px,calc((100% - 1150px)/2));color:#fff}'+
+ 'main{max-width:1150px;margin:auto;padding:20px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}'+
+ '.card,.metric,.note{background:white;padding:18px;border:1px solid #d9e5eb;border-radius:12px}.status{font-weight:700;color:#126b72}'+
+ '.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:16px 0}.metric b{font-size:27px;display:block}.metric span{color:#587388;font-size:12px}'+
+ '.deals p{border-top:1px solid #ecf2f5;padding-top:10px}.paging{display:flex;gap:24px;justify-content:center;margin:20px}.paging a{font-weight:700}'+
+ 'summary{cursor:pointer;color:#087b8d;font-weight:650;margin:9px 0}a{color:#10738a}h1{margin:0 0 6px}h2{margin:0 0 12px;font-size:18px}p{line-height:1.55}</style></head>'+
+ '<body><header><h1>Компании, восстановленные из сделок</h1><div>Исследование всей истории Битрикс24, в том числе без компании и контактов</div></header><main>'+
+ menu+'<div class="metrics">'+
+ tile(stats.totalDeals||'—',"Сделок просмотрено")+
+ tile(stats.withoutCompanyId||'—',"Без привязки к компании")+
+ tile(stats.crmCardMissingCandidates||'—',"Групп-кандидатов без карточки")+
+ tile(stats.possibleExistingClients||'—',"Возможно принадлежат компаниям CRM")+'</div>'+
+ '<p class="note">Статус полного сканирования: '+esc(stats.scanCompleteness||"не начато")+
+ '. Название в теме сделки — только отправная точка: первое письмо, последующие ответы, реквизиты и документы проверяются отдельно.'+
+ ' Не путать число сделок без COMPANY_ID с количеством юридических лиц. Никакие CRM-карточки и сделки не создаются.</p>'+
+ pager+'<div class="cards">'+(cards||'<p>Кандидатов по текущему снимку нет или исследование ещё выполняется.</p>')+'</div>'+pager+
+ '</main></body></html>';
 }
 module.exports={page};
