@@ -17,21 +17,21 @@ function fixture(typed){
   classificationCensusStore:{},requisites:{},taxonomy:{total:49}};
 }
 test("main headline rises as CRM classification progresses even with unfinished site scan",()=>{
- const html=overview.render(fixture(715),"Обзор");
+ const html=overview.render(fixture(715),"Обзор").replace(/[\u00a0\u202f]/g," ");
  assert.match(html,/Тип определён<\/div><div class="metric-num"[^>]*>715<\/div>/);
  assert.match(html,/715 из 1 559/);
  assert.match(html,/Последний завершённый снимок: 712 из 1 560/);
- assert.match(html,/46(?:\.0)?%/); // denominator is CRM virtual company count, not deal-only candidates
- const later=overview.render(fixture(716),"Обзор");
+ assert.match(html,/45\.9%/); // denominator is CRM virtual company count, not deal-only candidates
+ const later=overview.render(fixture(716),"Обзор").replace(/[\u00a0\u202f]/g," ");
  assert.match(later,/Тип определён<\/div><div class="metric-num"[^>]*>716<\/div>/);
 });
 test("company list uses live total without silently folding potential deals into CRM company census",()=>{
- const html=list.html(fixture(715));
+ const html=list.html(fixture(715)).replace(/[\u00a0\u202f]/g," ");
  assert.match(html,/715 из 1 559/);
  assert.match(html,/2 129 компаний-кандидатов из сделок/);
 });
 test("when live reading is not ready, dashboard falls back to saved historical checkpoint",()=>{
  const payload=fixture(715);payload.classificationLive.ready=false;
- const html=overview.render(payload,"Обзор");
+ const html=overview.render(payload,"Обзор").replace(/[\u00a0\u202f]/g," ");
  assert.match(html,/Тип определён<\/div><div class="metric-num"[^>]*>712<\/div>/);
 });
