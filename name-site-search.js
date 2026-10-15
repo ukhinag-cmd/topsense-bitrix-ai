@@ -2,9 +2,9 @@
 // Read-only website discovery for company records with no website/domain.
 // A search result is NOT identity proof. Only name + independent phone/city
 // corroboration is allowed to promote a URL to an official website.
-const queue=[],pending=new Set(),profiles=new Map();
+const queue=[],pending=new Set(),profiles=new Map(),innTried=new Set();
 const completion=require("./client-finalization");
-let busy=false,attempted=0,confirmed=0,review=0,unavailable=0;
+let busy=false,attempted=0,confirmed=0,review=0,unavailable=0,innAttempted=0,innConfirmed=0;
 const skipDomains=new Set(["bing.com","google.com","yandex.ru","2gis.ru","rusprofile.ru","checko.ru","sbis.ru","saby.ru","companies.rbc.ru","list-org.com","orgpage.ru","avito.ru","hh.ru","vk.com","youtube.com","facebook.com","instagram.com","spravker.ru","spark-interfax.ru"]);
 const sleep=n=>new Promise(r=>setTimeout(r,n));
 const normalized=s=>String(s||"").toLowerCase().replace(/ё/g,"е").replace(/[^а-яa-z0-9]/g,"");
@@ -45,9 +45,13 @@ function domainAllowed(raw){
  }catch{return null}
 }
 function xml(x){return String(x||"").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(Number(n)||32))}
-async function search(name){
+async function search(name,inn=""){
  const u=new URL("https://www.bing.com/search");
- u.searchParams.set("format","rss");u.searchParams.set("q",'"'+name+'" официальный сайт');u.searchParams.set("setlang","ru");
+ u.searchParams.set("format","rss");
+ // Secondary search uses a public legal identifier rather than another
+ // name-only query. URL ownership is independently checked before acceptance.
+ u.searchParams.set("q",inn?('"'+name+'" "'+inn+'" официальный сайт'):('"'+name+'" официальный сайт'));
+ u.searchParams.set("setlang","ru");
  const r=await fetch(u,{method:"GET",redirect:"manual",headers:{"accept":"application/rss+xml,application/xml","user-agent":"Mozilla/5.0"},signal:AbortSignal.timeout(14000)});
  if(!r.ok)throw Error("Search HTTP "+r.status);
  const text=(await r.text()).slice(0,175000);
@@ -79,9 +83,9 @@ async function inspect(c,hit){
  return {url:site.url,title:hit.title,status:proof.matched?"confirmed":"needs_review",
   note:proof.matched?proof.proof:"Совпадает название, но не телефон или ИНН — принадлежность сайта не подтверждена"};
 }
-async function scan(c){
+async function scan(c,mode="name"){
  let hits;
- try{hits=await search(cleanName(c.name))}
+ try{hits=await search(cleanName(c.name),mode==="inn"?String(c.crmInn||""):"")}
  catch(e){unavailable++;return {status:"search_unavailable",candidates:[],note:String(e.message||e).slice(0,95)}}
  const results=[];
  for(const hit of hits.slice(0,4)){
@@ -90,6 +94,7 @@ async function scan(c){
    results.push(candidate);
    if(candidate.status==="confirmed"){
     confirmed++;
+    if(mode==="inn")innConfirmed++;
     require("./website-profiler").enqueue([{...c,siteCandidate:candidate.url,siteSource:"Поиск по названию — подтверждено независимыми реквизитами"}]);
     return {status:"confirmed",site:candidate.url,candidates:results,source:"Поиск по названию",note:candidate.note};
    }
@@ -102,11 +107,14 @@ async function scan(c){
 async function pump(){
  if(busy)return;busy=true;
  while(queue.length){
-  const c=queue.shift(),id=String(c.id);pending.delete(id);if(profiles.has(id)||completion.isComplete(id))continue;
+  const c=queue.shift(),id=String(c.id),mode=c.__siteLookupMode==="inn"?"inn":"name";
+  pending.delete(id);
+  if(completion.isComplete(id)||(mode==="name"&&profiles.has(id)))continue;
   attempted++;
-  try{profiles.set(id,await scan(c))}
+  if(mode==="inn")innAttempted++;
+  try{profiles.set(id,await scan(c,mode))}
   catch{unavailable++;profiles.set(id,{status:"error",candidates:[]})}
-  if(attempted%40===0||queue.length===0)console.log(JSON.stringify({component:"name-site-search",event:"progress",attempted,confirmed,review,unavailable,remaining:queue.length}));
+  if(attempted%40===0||queue.length===0)console.log(JSON.stringify({component:"name-site-search",event:"progress",attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length}));
   await sleep(1350);
  }
  busy=false;
@@ -120,6 +128,22 @@ function enqueue(companies){
  if(added)console.log(JSON.stringify({component:"name-site-search",event:"queued",count:added,remaining:queue.length}));
  pump().catch(()=>{busy=false});
 }
+function enqueueByInn(companies){
+ let added=0;
+ for(const c of companies||[]){
+  if(added>=30)break;
+  const id=String(c?.id||""),inn=String(c?.crmInn||"").replace(/\D/g,"");
+  if(!/^\d+$/.test(id)||!/(?:^\d{10}$|^\d{12}$)/.test(inn)||
+     innTried.has(id)||pending.has(id)||completion.isComplete(id)||!eligible(c))continue;
+  const previous=profiles.get(id);
+  if(!previous||!["not_found","no_confirmed_site"].includes(previous.status))continue;
+  innTried.add(id);pending.add(id);queue.push({...c,__siteLookupMode:"inn"});added++;
+ }
+ if(added)console.log(JSON.stringify({component:"name-site-search",
+  event:"inn-search-queued",count:added,remaining:queue.length}));
+ if(added)pump().catch(()=>{busy=false});
+ return added;
+}
 function get(id){return profiles.get(String(id))||{status:pending.has(String(id))?"queued":"not_started",candidates:[]}}
-function stats(){const count={};for(const p of profiles.values())count[p.status]=(count[p.status]||0)+1;return {attempted,confirmed,review,unavailable,remaining:queue.length,count}}
-module.exports={enqueue,get,stats,cleanName,eligible,domainAllowed};
+function stats(){const count={};for(const p of profiles.values())count[p.status]=(count[p.status]||0)+1;return {attempted,confirmed,review,unavailable,innAttempted,innConfirmed,remaining:queue.length,count}}
+module.exports={enqueue,enqueueByInn,get,stats,cleanName,eligible,domainAllowed};
