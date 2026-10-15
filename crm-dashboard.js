@@ -227,11 +227,36 @@ function enqueueLinkedContactSites(){
  if(actualQueued)console.log(JSON.stringify({component:"topsense-dashboard",event:"linked-corporate-domain-discovery",
   queuedCandidates:actualQueued,candidatesConsidered:suggested.length,companiesWithMultipleContactDomains:multipleDomains}));
 }
+function enqueueDealMailSites(){
+ const profiler=require("./website-profiler");
+ const intake=require("./crm-deal-intake");
+ let considered=0,queued=0;
+ for(const c of state.companies){
+  if(queued>=60)break;
+  // Previously verified specific legal-entity sites remain authoritative.
+  if(c.verifiedOrgType||c.siteCandidate||c.corporateDomain)continue;
+  const profile=profiler.get(c.id);
+  if(!["site_absent","site_pending","site_unavailable"].includes(profile.status))continue;
+  const first=intake.forCompany(c.id).find(d=>d.incomingEmails>0&&d.corporateDomains.length);
+  if(!first)continue;
+  considered++;
+  for(const candidate of first.corporateDomains.slice(0,3)){
+   const accepted=profiler.enqueue([{...c,siteCandidate:"",
+    corporateDomain:candidate,siteSource:"Домен из входящей сделки"}])||0;
+   if(accepted){queued+=accepted;break}
+  }
+ }
+ if(queued)console.log(JSON.stringify({component:"topsense-dashboard",
+  event:"deal-email-website-candidates-queued",count:queued,considered}));
+ return queued;
+}
 function resumeUnresolvedCompanySites(){
  if(!state.companies.length||!state.contactsAt)return;
  const profiler=require("./website-profiler");
  const stats=profiler.stats();
  if(!stats.restorationComplete||stats.queued||stats.active)return;
+ // Deal e-mails are the first lead source; CRM company data is fallback.
+ if(enqueueDealMailSites())return;
  const unresolved=new Set(["site_absent","site_unavailable",
   "site_identity_unclear","site_read_no_clear_type","site_read_ambiguous_type"]);
  const verifiedSources=new Set([
@@ -731,7 +756,7 @@ setInterval(coverageLog,240000);
 setTimeout(() => refresh().catch(() => {}), 1100);
 setTimeout(() => loadPilot().catch(() => {}), 1500);
 setTimeout(() => loadLinkedContacts().catch(() => {}), 2500);
-setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 12000);
+setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 800);
 setTimeout(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 28000);
 // Keep the CRM company/contact snapshot fresh without repeating paid AI research.
 // Site profiler fingerprints prevent unchanged completed site evidence being crawled again.
