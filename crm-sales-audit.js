@@ -198,6 +198,11 @@ async function run(companies){
   unlinked.ingest(deals,{complete:true});
   const unlinkedGroups=unlinked.group(companies||[]);
   const unlinkedCensus=unlinked.stats();
+  // Keep a durable snapshot of recovered customers separate from the sales
+  // stage audit; API timeouts in payments/stages must not remove customers.
+  require("./deal-only-inventory").queue(
+   unlinkedGroups.filter(x=>!x.linkedExisting),
+   {complete:true,totalDeals:deals.size,crmCards:(companies||[]).length});
   console.log(JSON.stringify({component:"unlinked-client-discovery",
    event:"historical-census",deals:unlinkedCensus.totalDeals,
    withoutCompanyId:unlinkedCensus.withoutCompanyId,
