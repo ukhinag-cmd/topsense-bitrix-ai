@@ -663,6 +663,7 @@ function data(known){
   dealOnlyClientCount:dealOnlyClients.length,
   dealOnlyClients,holdings:holdingGroups,
   dealOnlyRegistry:require("./deal-only-client-registry").stats(),
+  unlinkedDiscovery:require("./crm-unlinked-discovery").stats(),
   crmCardTotal:virtual.stats.rawCompanyCount,
   excludedCompanyCount:state.excludedCompanies.length,
   excludedCompanies:state.excludedCompanies.map(c=>({...c,name:format(c.name).name})),
