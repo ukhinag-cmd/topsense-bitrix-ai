@@ -232,29 +232,57 @@ function resumeUnresolvedCompanySites(){
  const profiler=require("./website-profiler");
  const stats=profiler.stats();
  if(!stats.restorationComplete||stats.queued||stats.active)return;
- let candidates=0;
+ const unresolved=new Set(["site_absent","site_unavailable",
+  "site_identity_unclear","site_read_no_clear_type","site_read_ambiguous_type"]);
+ const verifiedSources=new Set([
+  "Официальный сайт, проверенный по юридическим данным",
+  "Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены",
+  "Поиск по названию — подтверждено независимыми реквизитами"]);
+ let considered=0,withCorporateMail=0,alternateAvailable=0,actuallyQueued=0;
+ const priority=["site_absent","site_unavailable","site_identity_unclear",
+  "site_read_no_clear_type","site_read_ambiguous_type"];
+ const cases=[];
  for(const c of state.companies){
-  if(candidates>=120)break;
-  // Previously verified legal-entity sites must never be replaced by a
-  // different contact domain. Only unresolved corporate sites are eligible.
-  if(c.verifiedOrgType||!c.corporateDomain)continue;
-  if(["Официальный сайт, проверенный по юридическим данным",
-      "Сайт организации, установленный по независимым источникам; содержимое и доступность ещё не проверены"].includes(c.siteSource))continue;
-  const current=profiler.get(c.id);
-  if(!["site_unavailable","site_identity_unclear","site_read_no_clear_type"].includes(current.status))continue;
+  if(c.verifiedOrgType||verifiedSources.has(c.siteSource))continue;
+  const status=profiler.get(c.id).status;
+  if(!unresolved.has(status))continue;
+  considered++;
   const linked=state.linkedContacts.get(c.id);
-  if(!linked||!linked.emails.size)continue;
-  const alternate=mailDomains.ranked(linked.emails)
-   .map(x=>x[0]).find(d=>d!==c.corporateDomain);
-  if(!alternate)continue;
-  candidates+=profiler.enqueue([{...c,siteCandidate:"",corporateDomain:alternate,
-   siteSource:"Альтернативный домен привязанного контакта"}])||0;
+  const emailDomains=mailDomains.ranked([
+   ...(c.crmEmails||[]),...(linked?.emails||[]) ]).map(x=>x[0]);
+  if(!emailDomains.length)continue;
+  withCorporateMail++;
+  const activeDomain=String(c.corporateDomain||"").toLowerCase().replace(/^www\./,"");
+  // A corporate domain might resolve to a shared holding. The alternative
+  // is a candidate only, never proof of the CRM legal entity.
+  const currentUrl=String(profiler.get(c.id).url||c.siteCandidate||"");
+  let currentHost="";
+  try{currentHost=new URL(currentUrl).hostname.toLowerCase().replace(/^www\./,"")}catch{}
+  const candidates=emailDomains.filter(d=>d!==activeDomain&&d!==currentHost);
+  if(!candidates.length)continue;
+  alternateAvailable++;
+  cases.push({c,status,candidates});
  }
- if(candidates){
-  console.log(JSON.stringify({component:"topsense-dashboard",event:"alternate-contact-sites-queued",count:candidates}));
+ cases.sort((a,b)=>priority.indexOf(a.status)-priority.indexOf(b.status));
+ for(const {c,candidates} of cases){
+  if(actuallyQueued>=80)break;
+  for(const domain of candidates.slice(0,3)){
+   const count=profiler.enqueue([{...c,siteCandidate:"",corporateDomain:domain,
+    siteSource:"Альтернативный домен привязанного контакта"}])||0;
+   if(count){actuallyQueued+=count;break}
+  }
+ }
+ if(actuallyQueued){
+  console.log(JSON.stringify({component:"topsense-dashboard",event:"alternate-contact-sites-queued",
+   count:actuallyQueued,considered,withCorporateMail,alternateAvailable}));
  }else{
   const retried=profiler.retryTransient(state.companies);
-  if(retried)console.log(JSON.stringify({component:"topsense-dashboard",event:"transient-site-retry-batch",count:retried}));
+  if(retried)console.log(JSON.stringify({component:"topsense-dashboard",
+   event:"transient-site-retry-batch",count:retried}));
+  else console.log(JSON.stringify({component:"topsense-dashboard",
+   event:"research-queue-exhausted",considered,withCorporateMail,
+   alternateAvailable,queued:0,remainingUntyped:"see-classification-coverage",
+   next:"new independent source or CRM evidence required"}));
  }
 }
 function enqueueMissingSiteNameSearch(){
