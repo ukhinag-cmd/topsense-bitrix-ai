@@ -259,14 +259,22 @@ function apply(records){
   }
   if(previous)return {...c,...websiteEvidence,organizationType:previous,segmentConfidence:c.verification||"Ранее назначен",segmentSource:"Ранее сохранённая аналитика / классификация"};
   let selected=null,confidence="",basis="";
-  if(bySite&&byName&&bySite.type===byName.type){
+  const notes=valid.has(c.crmActivityHint?.type)?c.crmActivityHint:null;
+  // Existing evidence from company note fields is provisional, distinct
+  // from what the customer is asking TOP-SENSE to supply in a deal.
+  const noteAgreesWithName=!byName||byName.type===notes?.type;
+  if(notes&&!bySite&&noteAgreesWithName){
+   selected=notes.type;confidence=notes.confidence;
+   basis=notes.source;
+  }
+  if(!selected&&bySite&&byName&&bySite.type===byName.type){
    selected=bySite.type;confidence=provisionalOwnLegalSite?"Предварительная — принадлежность сайта не подтверждена":"Выше средней";basis=(site.siteActivityReason||"Основная деятельность на сайте")+"; совпадает с названием организации";
-  }else if(bySite){
+  }else if(!selected&&bySite){
    selected=bySite.type;confidence="Предварительная — принадлежность сайта не подтверждена";basis=(site.siteActivityReason||"Публичные сведения о собственной деятельности компании")+" · "+(site.source||"сайт-кандидат");
-  }else if(byName){
+  }else if(!selected&&byName&&(!notes||noteAgreesWithName)){
    selected=byName.type;confidence=byName.confidence;basis="Название CRM, без подтверждения сайтом";
   }
-  if(!selected)return {...c,...websiteEvidence,organizationType:"",segmentConfidence:"Недостаточно данных",segmentSource:site?.status==="site_absent"?"Сайт и домен в CRM отсутствуют; внешняя идентификация ещё требуется":site?.status==="site_unavailable"?"Сайт не открылся; деятельность не подтверждена":site?.status==="site_pending"?"Сайт ещё не проверен":"На доступных страницах нет достаточных данных для выбора типа"};
+  if(!selected)return {...c,...websiteEvidence,organizationType:"",segmentConfidence:notes&&byName&&!noteAgreesWithName?"Конфликт источников — нужна проверка":"Недостаточно данных",segmentSource:site?.status==="site_absent"?"Сайт и домен в CRM отсутствуют; внешняя идентификация ещё требуется":site?.status==="site_unavailable"?"Сайт не открылся; деятельность не подтверждена":site?.status==="site_pending"?"Сайт ещё не проверен":"На доступных страницах нет достаточных данных для выбора типа"};
   return {...c,...websiteEvidence,organizationType:selected,proposedType:selected,segmentConfidence:confidence,segmentSource:basis,verification:"Предварительная классификация"};
  });
 }
