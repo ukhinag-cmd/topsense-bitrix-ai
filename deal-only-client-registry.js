@@ -101,6 +101,24 @@ function view(companies){
    relationshipPotential:{status:"pending_reconciliation",level:"Требует оценки",
     dealCount:found.dealCount,score:null,userConfirmed:false}});
  }
+ const intake=require("./crm-deal-intake");
+ for(const client of groups){
+  let inspected=0;
+  for(const ref of client.dealRefs||[]){
+   const evidence=intake.get(ref.id);
+   if(!evidence)continue;
+   inspected++;
+   ref.emailAnalysis={
+    firstIncomingAt:evidence.firstIncomingAt||"",
+    incomingEmails:Number(evidence.incomingEmails||0),
+    subsequentIncomingEmails:Number(evidence.subsequentIncomingEmails||0),
+    attachmentCount:Number(evidence.attachmentCount||0),
+    documentClues:Number(evidence.companyCardAttachmentCount||0),
+    incomplete:Boolean(evidence.correspondencePartial)
+   };
+  }
+  client.emailAnalysedDeals=inspected;
+ }
  return groups;
 }
 function stats(){return {status:coverage,updatedAt,matchedDeals:snapshot.size,
