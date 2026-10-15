@@ -189,13 +189,16 @@ async function one(c){
   const redirectedToOtherDomain=new URL(candidates[0].url).hostname.replace(/^www\./i,"")!==new URL(result.url).hostname.replace(/^www\./i,"");
   const emailDomainOnly=["Корпоративный домен e-mail CRM","Домен привязанного контакта"].includes(candidates[0].origin);
   const identifiedReference=String(c.siteSource||"").startsWith("Сайт организации, установленный по независимым источникам");
+  const provisionalLegalNameSearch=c.siteSource==="Поиск по юридическому наименованию — предварительно";
   // HTTP-only fallback must corroborate company identity on the page.
   const insecureTransport=new URL(result.url).protocol==="http:";
-  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Альтернативный домен привязанного контакта"||c.siteSource==="Домен из входящей сделки"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport;
-  const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Альтернативный домен привязанного контакта"||c.siteSource==="Домен из входящей сделки"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport||provisionalLegalNameSearch;
+  const trusted=provisionalLegalNameSearch?
+   require("./name-site-search").legalNameOnOwnSite(c,pages):
+   orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
   const profile={status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,
-   staffEvidence:trusted?require("./staff-evidence").fromPages(pages):null,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?"Предварительная по нескольким страницам":"Не определена",checkedAt:new Date().toISOString()};
+   staffEvidence:trusted?require("./staff-evidence").fromPages(pages):null,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?(provisionalLegalNameSearch?"Предварительная — совпали полное наименование и ОПФ, реквизиты пока не сверены":"Предварительная по нескольким страницам"):"Не определена",checkedAt:new Date().toISOString()};
   profiles.set(c.id,profile);
   evidenceStore.queue(c,profile);
  }catch(error){if(evidenceRank(candidates[0].origin)<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
