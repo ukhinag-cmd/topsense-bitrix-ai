@@ -50,3 +50,18 @@ test("a current unverified source never reclassifies a previously verified organ
   assert.equal(r.siteVerified,"https://chemical.example.ru");
  }finally{site.get=existingGet}
 });
+test("legal-name site candidate is restored after restart even if CRM still has no website",()=>{
+ const original={id:"811113",name:"ООО НЕВСКАЯ СЕРВИСНАЯ КОМПАНИЯ",siteCandidate:"",corporateDomain:""};
+ const signed={...original,siteCandidate:"https://nevskoservice.example.ru",
+  siteSource:"Поиск по юридическому наименованию — предварительно"};
+ const p={status:"site_preliminary_profiled",source:signed.siteSource,
+  url:signed.siteCandidate,siteType:"Промышленный генподрядчик",
+  checkedAt:new Date().toISOString()};
+ const row={recordType:"topsense-site-profile",companyId:original.id,
+  fingerprint:store.fingerprint(signed),checkedAt:p.checkedAt,profile:p};
+ const restored=site.restorePreliminaryNameProfile(original,row);
+ assert.ok(restored);
+ assert.equal(restored.status,"site_preliminary_profiled");
+ assert.equal(site.restorePreliminaryNameProfile({...original,name:"ООО ДРУГОЕ ПРЕДПРИЯТИЕ"},row),null);
+ assert.equal(site.restorePreliminaryNameProfile(original,{...row,profile:{...p,status:"site_profiled"}}),null);
+});
