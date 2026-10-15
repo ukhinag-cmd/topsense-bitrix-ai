@@ -362,6 +362,7 @@ async function loadPilot(){
   if(addedTypes)console.log(JSON.stringify({component:"client-taxonomy",
    event:"new-subtypes-restored",count:addedTypes,total:taxonomy.stats().total}));
   require("./client-finalization").ingest(entries);
+  require("./classification-census").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
   state.paidControl={
@@ -491,7 +492,15 @@ function data(known){
  const counts=Object.fromEntries(sections.map(v=>[v,0]));
  virtual.companies.forEach(c=>counts[c.category]=(counts[c.category]||0)+1);
  const format=require("./company-name-format").display;
+ const siteStatus=require("./website-profiler").stats();
+ const completedCount=finalization.stats().completed;
+ const classificationCensusReady=state.status==="ready"&&Boolean(state.pilotUpdatedAt)&&Boolean(state.contactsAt)&&
+  siteStatus.restorationComplete===true&&siteStatus.queued===0&&siteStatus.active===0&&
+  siteStatus.processed+completedCount>=state.companies.length-5;
+ const currentTyped=virtual.companies.filter(c=>require("./client-taxonomy").known(c.organizationType)).length;
+ const classificationDisplay=require("./classification-census").display(virtual.stats.customerCardCount,currentTyped,classificationCensusReady);
  return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,
+  classificationDisplay,classificationCensusReady,classificationCensusStore:require("./classification-census").stats(),
   total:virtual.stats.customerCardCount,
   crmCardTotal:virtual.stats.rawCompanyCount,
   excludedCompanyCount:state.excludedCompanies.length,
@@ -511,7 +520,7 @@ function data(known){
   aiNoSite:[...state.pilot.values()].filter(x=>x.status==="site_unverified").length,
   aiLastChecked:state.pilotUpdatedAt,paidClassification:state.paidControl,contactsAt:state.contactsAt,counts,organizationTypes:ORG_TYPES,
   organizationTypeCount:ORG_TYPES.length,taxonomy:require("./client-taxonomy").stats(),
-  siteCrawl:require("./website-profiler").stats(),
+  siteCrawl:siteStatus,
   researchCompletion:finalization.stats(),
   incomingLeads:require("./crm-lead-inbox").view(virtual.companies),
   mailAudit:require("./crm-mail-evidence").stats(),
@@ -573,6 +582,7 @@ function coverageLog(){
   const snap=data(()=>[]);
   const companyList=snap.companies||[];
   const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
+  require("./classification-census").consider(companyList.length,typed.length,state.companies.length,snap.classificationCensusReady);
   const distinctTypes=new Set(typed.map(x=>x.organizationType));
   // Aggregate diagnostics: a missing type is not the same as a missing site.
   const untypedCompanies=companyList.filter(x=>!require("./client-taxonomy").known(x.organizationType));
@@ -604,6 +614,7 @@ function coverageLog(){
   console.log(JSON.stringify({component:"topsense-dashboard",event:"classification-coverage",
    customers:companyList.length,crmCards:state.companies.length,
    typed:typed.length,untyped:companyList.length-typed.length,coveredTypes:distinctTypes.size,
+   censusReady:snap.classificationCensusReady,censusDisplay:snap.classificationDisplay,
    siteCrawl:require("./website-profiler").stats(),
    nameSearch:require("./name-site-search").stats(),
    domainCoverage,classificationSources:sourceCounts}));
