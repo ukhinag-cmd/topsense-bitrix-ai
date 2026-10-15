@@ -277,12 +277,37 @@ function resumeUnresolvedCompanySites(){
    count:actuallyQueued,considered,withCorporateMail,alternateAvailable}));
  }else{
   const retried=profiler.retryTransient(state.companies);
-  if(retried)console.log(JSON.stringify({component:"topsense-dashboard",
-   event:"transient-site-retry-batch",count:retried}));
-  else console.log(JSON.stringify({component:"topsense-dashboard",
-   event:"research-queue-exhausted",considered,withCorporateMail,
-   alternateAvailable,queued:0,remainingUntyped:"see-classification-coverage",
-   next:"new independent source or CRM evidence required"}));
+  if(retried){
+   console.log(JSON.stringify({component:"topsense-dashboard",
+    event:"transient-site-retry-batch",count:retried}));
+  }else{
+   const requisites=require("./company-requisites");
+   const nameSearch=require("./name-site-search");
+   let innQueued=0,innEligible=0;
+   if(requisites.stats().status==="ready"&&nameSearch.stats().remaining===0){
+    const candidates=[];
+    for(const c of state.companies){
+     if(c.siteCandidate||c.corporateDomain||c.verifiedOrgType)continue;
+     const legal=requisites.get(c.id);
+     if(legal.status!=="inn_recorded")continue;
+     const linked=state.linkedContacts.get(c.id);
+     candidates.push({...c,crmInn:legal.inn,
+      contactEmails:linked?[...linked.emails]:[]});
+    }
+    innEligible=candidates.length;
+    innQueued=nameSearch.enqueueByInn(candidates);
+   }
+   if(innQueued)console.log(JSON.stringify({component:"topsense-dashboard",
+    event:"inn-site-discovery-started",queued:innQueued,eligible:innEligible}));
+   else if(!state.lastResearchExhaustionLoggedAt||
+    Date.now()-state.lastResearchExhaustionLoggedAt>30*60*1000){
+    state.lastResearchExhaustionLoggedAt=Date.now();
+    console.log(JSON.stringify({component:"topsense-dashboard",
+     event:"research-queue-exhausted",considered,withCorporateMail,
+     alternateAvailable,innEligible,
+     next:"new independent source or CRM evidence required"}));
+   }
+  }
  }
 }
 function enqueueMissingSiteNameSearch(){
@@ -716,7 +741,7 @@ setInterval(() => {
 // Explore an alternate linked-contact domain only after a primary site failed.
 // Bounded retries are conditional on temporary transport failures and cooldown.
 setTimeout(resumeUnresolvedCompanySites,10*60*1000);
-setInterval(resumeUnresolvedCompanySites,30*60*1000);
+setInterval(resumeUnresolvedCompanySites,5*60*1000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
 setInterval(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 24*60*60*1000);
 module.exports={route,refresh,data};
