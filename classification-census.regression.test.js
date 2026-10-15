@@ -39,6 +39,13 @@ test("a new CRM card does not erase the prior completed census during startup",(
  assert.equal(p.provisional,true);
  assert.equal(p.source,"last_complete_crm_population_changed");
 });
+test("a new CRM company must not silently lower the finished typed count",()=>{
+ const p=census.display(1567,500,true,1668);
+ assert.equal(p.source,"regression_under_review");
+ assert.equal(p.typed,689);
+ assert.equal(p.observedTyped,500);
+ assert.equal(census.consider(1567,500,1668,true),false);
+});
 test("real changes in source CRM inventory may update the finished census",()=>{
  const p=census.display(1567,675,true,1680);
  assert.equal(p.typed,675);
