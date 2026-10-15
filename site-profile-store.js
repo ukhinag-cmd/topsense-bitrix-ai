@@ -6,7 +6,7 @@ const PREFIX="site-profile:v1:";
 const TTL_MS=21*24*60*60*1000;
 const statuses=new Set(["site_profiled","site_read_no_clear_type","site_read_ambiguous_type","site_identity_unclear"]);
 const pending=new Map();
-let timer=null,writing=false,loadedRows=0,storedRows=0,writeErrors=0,lastError="";
+let timer=null,writing=false,loadedRows=0,storedRows=0,writeErrors=0,lastError="",batchLimit=4,consecutiveSuccesses=0;
 
 function configured(){
  return Boolean(String(process.env.GOOGLE_SHEET_STORE_URL||"").trim()&&String(process.env.GOOGLE_SHEET_STORE_SECRET||"").trim());
@@ -52,7 +52,7 @@ async function request(action,rows){
  const body={action,secret};
  if(rows)body.rows=rows;
  const response=await fetch(url,{method:"POST",headers:{"content-type":"application/json","accept":"application/json"},
-  body:JSON.stringify(body),redirect:"follow",signal:AbortSignal.timeout(20000)});
+  body:JSON.stringify(body),redirect:"follow",signal:AbortSignal.timeout(28000)});
  const result=await response.json();
  if(!response.ok||result?.ok===false)throw Error("Existing private store request failed");
  return result;
@@ -117,13 +117,22 @@ function queue(c,profile){
 async function flush(){
  if(!configured()||writing||!pending.size)return;
  writing=true;
- const rows=[...pending.values()].slice(0,20);
+ const rows=[...pending.values()].slice(0,batchLimit);
  for(const row of rows)pending.delete(row.key);
  try{
   await request("upsert",rows);
   storedRows+=rows.length;lastError="";
+  consecutiveSuccesses++;
+  // Gradually restore throughput when the existing Apps Script bridge
+  // accepts small writes; avoid overwhelming it with concurrent bulk updates.
+  if(consecutiveSuccesses>=5&&batchLimit<6){
+   batchLimit++;consecutiveSuccesses=0;
+  }
  }catch(e){
   writeErrors+=rows.length;lastError="save_error";
+  consecutiveSuccesses=0;
+  // Retry the SAME evidence in smaller upserts; do not discard anything.
+  batchLimit=Math.max(1,Math.floor(batchLimit/2));
   // Failed batch is not discarded; keep newest evidence on conflicting keys.
   for(const row of rows)if(!pending.has(row.key))pending.set(row.key,row);
   console.warn(JSON.stringify({component:"site-profile-store",event:"checkpoint-unavailable",rows:rows.length}));
@@ -133,5 +142,5 @@ async function flush(){
  }
 }
 function stats(){return {configured:configured(),cacheRowsLoaded:loadedRows,siteProfilesStored:storedRows,
- writeErrors,pendingWrites:pending.size,lastError};}
+ writeErrors,pendingWrites:pending.size,lastError,batchLimit};}
 module.exports={configured,inputUrl,fingerprint,fresh,restored,load,queue,flush,stats};
