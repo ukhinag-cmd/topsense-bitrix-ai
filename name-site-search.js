@@ -75,7 +75,7 @@ async function search(name,inn=""){
 }
 async function inspect(c,hit){
  const fetchSite=require("./website-profiler").fetchPage;
- const site=await fetchSite(hit.url);
+ const site=await require("./website-profiler").fetchCorporateHome(hit.url);
  const pages=[site];
  const relevant=(site.links||[]).filter(u=>["contact","kontakty","реквизит","rekvizit","requisit","about","o-kompanii","контакт"].some(k=>u.toLowerCase().includes(k))).slice(0,3);
  for(const url of relevant){
@@ -115,7 +115,7 @@ async function scan(c,mode="name"){
  }
  let hits;
  try{hits=await search(cleanName(c.name),mode==="inn"?String(c.crmInn||""):"")}
- catch(e){unavailable++;return {status:supplied?.status==="needs_review"?"needs_review":"search_unavailable",
+ catch(e){unavailable++;return {status:supplied?"needs_review":"search_unavailable",
   candidates:supplied?[supplied]:[],note:String(e.message||e).slice(0,95)}}
  const results=supplied?[supplied]:[];
  for(const hit of hits.slice(0,4)){
