@@ -165,6 +165,7 @@ async function run(companies){
   const stageMap=await stages();
   if(!stageMap.size)throw Error("Отгрузка и оплата не найдены среди названий стадий доступных воронок CRM");
   const deals=await allDeals();
+  require("./deal-only-client-registry").ingest(deals,{complete:true});
   // Compute relationship potential from full deal history BEFORE slow
   // procurement/attachment stage audits. Only direct CRM company links count.
   require("./client-relationship-potential").build(deals.values());
