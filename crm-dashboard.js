@@ -375,9 +375,13 @@ async function loadPilot(){
   const d=await r.json();
   if(!r.ok||d.ok===false)throw Error("private AI store read error");
   const entries=Array.isArray(d.rows)?d.rows:[];
+  const censusRow=entries.find(x=>x?.key==="meta:topsense-classification-census:v1");
   console.log(JSON.stringify({component:"topsense-dashboard",event:"private-store-load-coverage",
    returnedRows:entries.length,
-   hasClassificationCensus:entries.some(x=>x?.key==="meta:topsense-classification-census:v1"),
+   hasClassificationCensus:Boolean(censusRow),
+   censusPayloadType:typeof censusRow?.payload,
+   censusValid:require("./classification-census").valid(censusRow?.payload),
+   censusPayloadFields:censusRow?.payload&&typeof censusRow.payload==="object"?Object.keys(censusRow.payload).sort():[],
    oldTypeLedgerRows:entries.filter(x=>String(x?.key||"").startsWith("classification:type:v1:")).length,
    readableTypeLedgerRows:entries.filter(x=>String(x?.key||"").startsWith("site-profile:v1:900000000000")).length,
    siteProfileRows:entries.filter(x=>/^site-profile:v1:[0-9]+$/.test(String(x?.key||""))).length}));
