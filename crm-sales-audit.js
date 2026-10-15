@@ -180,6 +180,9 @@ async function run(companies){
   // Focus the first bounded deep-read batch on repeat customer candidates
   // that have no company card. Study each deal's earliest inbound email and
   // subsequent correspondence, not just its title. CRM is read-only.
+  // Feed independent company-site research from the SAME source deal inventory.
+  // A visit to the dashboard is not required to start this bounded batch.
+  require("./deal-only-client-registry").view(companies||[]);
   const unexplored=unlinkedGroups;
   const prioritized=unexplored.filter(c=>!c.linkedExisting&&c.dealCount>=2)
    .slice(0,45).flatMap(c=>[
