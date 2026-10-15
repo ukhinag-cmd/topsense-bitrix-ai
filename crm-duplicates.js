@@ -280,6 +280,37 @@ function consolidate(companies){
    reason:"Один корпоративный домен у компаний с разными названиями. Это могут быть отдельные юрлица или карточки с ошибочным названием; контакты и сделки не объединены",
    members:unreviewed.map(links),count:unreviewed.length,sharedDomain:d});
  }
+ // A named filial is a subdivision of an expressly named parent legal
+ // entity, not another top-level company. Keep its CRM ID and contacts
+ // separately inside the one reversible analytical customer record.
+ const rowById=new Map(rows.map(c=>[String(c.id),c]));
+ function statedParent(c){
+  const raw=String(c.name||"").trim();
+  if(!/^филиал\\s/i.test(raw))return null;
+  const m=raw.match(/^филиал\\s+.+?\\s+(ООО|АО|ПАО|ОАО|ЗАО)\\s*["«“]?([^"»”]+)["»”]?\\s*$/iu);
+  if(!m)return null;
+  return {opf:m[1].toUpperCase(),base:normalize(m[2])};
+ }
+ for(const branch of rows){
+  if(claimed.has(String(branch.id)))continue;
+  const parent=statedParent(branch);
+  if(!parent||parent.base.length<8)continue;
+  const groups=accepted.filter(g=>identity(g).base===parent.base&&
+   (!identity(g).opf||identity(g).opf===parent.opf));
+  if(groups.length!==1)continue;
+  const group=groups[0];
+  const existing=group.crmIdList.map(id=>rowById.get(String(id))).filter(Boolean);
+  const inns=distinct([...existing,branch].map(c=>String(c.finance2025?.inn||c.crmInn||c.legalInnReference||"")
+   .replace(/\\D/g,"")).filter(x=>x.length===10||x.length===12));
+  if(inns.length>1)continue;
+  const attached=merge([...existing,branch],"explicit_branch_parent");
+  attached.duplicateStatus="Сводная карточка юридического лица и явно названного филиала; оригинальные CRM-записи и история филиала сохранены";
+  attached.subdivisions=[...(group.subdivisions||[]),{id:String(branch.id),
+   name:display(branch.name).name,parentOrganization:display(group.name).name,
+   relation:"Филиал; не отдельное юридическое лицо по указанному названию"}];
+  accepted.splice(accepted.indexOf(group),1,attached);
+  claimed.add(String(branch.id));
+ }
  // A pair can initially enter manual review and later be consolidated using
  // better evidence (shared domain, phone, full name). Never show it twice.
  const finalReview=review.map(group=>{
