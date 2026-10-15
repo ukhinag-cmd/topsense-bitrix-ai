@@ -164,11 +164,23 @@ async function run(companies){
   const allowed=new Set((companies||[]).map(x=>String(x.id)));
   const deals=await allDeals();
   require("./deal-only-client-registry").ingest(deals,{complete:true});
-  require("./crm-unlinked-discovery").ingest(deals,{complete:true});
+  const unlinked=require("./crm-unlinked-discovery");
+  unlinked.ingest(deals,{complete:true});
+  const unlinkedGroups=unlinked.group(companies||[]);
+  const unlinkedCensus=unlinked.stats();
+  console.log(JSON.stringify({component:"unlinked-client-discovery",
+   event:"historical-census",deals:unlinkedCensus.totalDeals,
+   withoutCompanyId:unlinkedCensus.withoutCompanyId,
+   identifiedByTitle:unlinkedCensus.identifiedDeals,
+   unresolvedTitles:unlinkedCensus.unidentifiedDeals,
+   ambiguous:unlinkedCensus.ambiguousDeals,
+   crmCardMissingCandidates:unlinkedCensus.crmCardMissingCandidates,
+   possibleExistingClients:unlinkedCensus.possibleExistingClients,
+   scanCompleteness:unlinkedCensus.scanCompleteness}));
   // Focus the first bounded deep-read batch on repeat customer candidates
   // that have no company card. Study each deal's earliest inbound email and
   // subsequent correspondence, not just its title. CRM is read-only.
-  const unexplored=require("./crm-unlinked-discovery").group(companies||[]);
+  const unexplored=unlinkedGroups;
   const prioritized=unexplored.filter(c=>!c.linkedExisting&&c.dealCount>=2)
    .slice(0,45).flatMap(c=>[
      c.dealRefs[c.dealRefs.length-1],c.dealRefs[0]
