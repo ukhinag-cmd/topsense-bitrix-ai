@@ -60,3 +60,45 @@ test("Counts preserve every CRM card without double counting virtual clients",()
  assert.equal(x.stats.groupedCrmCardCount,2);
  assert.equal(x.stats.groupedCount,1);
 });
+
+test("GSP Remont: same legal-name cards with and without ООО form one analytic customer",()=>{
+ const id=["62","2790","2842","3682","3684","3690"];
+ const cases=[
+  company(62,"ГСП РЕМОНТ"),
+  company(2790,'ООО "ГСП РЕМОНТ"',{phone:"+74952213873"}),
+  company(2842,"ООО ГСП Ремонт"),
+  company(3682,'ООО «ГСП Ремонт»',{phone:"+74952213873"}),
+  company(3684,"ООО «ГСП Ремонт»"),
+  company(3690,"ООО «ГСП Ремонт»")
+ ];
+ cases[1].siteCandidate="https://www.gsp-r.ru/";
+ cases[3].siteCandidate="https://gsp-r.ru/";
+ const branch=company(3692,'Филиал «Сервисгазавтоматика» ООО «ГСП Ремонт»');
+ const x=consolidate([...cases,branch]);
+ const group=x.companies.find(c=>Array.isArray(c.crmIdList)&&c.crmIdList.includes("62"));
+ assert.ok(group,"plain-name CRM card must not remain isolated");
+ assert.deepEqual([...group.crmIdList].sort(),id.sort());
+ assert.equal(x.stats.rawCompanyCount,7);
+ assert.equal(x.stats.customerCardCount,2); // branch is separate pending linkage
+ assert.equal(x.stats.duplicateCoverageValidated,true);
+ assert.ok(x.companies.some(c=>c.id==="3692"));
+});
+test("same-name unknown OPF must not merge contradictory known INNs",()=>{
+ const a=company(900,'ООО "ГСП Ремонт"',{inn:"7737106202"});
+ const b=company(901,"ГСП РЕМОНТ",{inn:"7737106203"});
+ const x=consolidate([a,b]);
+ assert.equal(x.companies.length,2);
+ assert.equal(x.duplicates.length,0);
+});
+test("GSP Remont customer history adds only direct linked member sales",()=>{
+ const a=company(62,"ГСП РЕМОНТ");
+ const b=company(2790,'ООО "ГСП РЕМОНТ"',{sale:true});
+ const c=company(2842,'ООО ГСП Ремонт');
+ const other=company(288,"ООО ГСП-7",{sale:true});
+ const x=consolidate([a,b,c,other]);
+ const g=x.companies.find(c=>c.crmIdList?.includes("62"));
+ assert.equal(g.saleInfo.purchaseStatus,"БЫЛА");
+ assert.equal(g.saleInfo.purchaseAmount,100000);
+ assert.deepEqual(g.saleInfo.mergedCrmIds,["62","2790","2842"]);
+ assert.equal(x.companies.find(c=>c.id==="288").saleInfo.purchaseStatus,"БЫЛА");
+});
