@@ -22,7 +22,7 @@ function display(total,typed,ready){
  if(ready)return {total,typed,untyped:total-typed,provisional:false,completedAt:null,source:"current"};
  if(saved&&saved.total===total)return {total:saved.total,typed:saved.typed,
   untyped:saved.total-saved.typed,provisional:true,completedAt:saved.completedAt,source:"last_complete"};
- return {total,typed:null,untyped:null,provisional:true,completedAt:null,source:"awaiting_complete"};
+ return {total,typed,untyped:total-typed,provisional:true,completedAt:null,source:"live_provisional"};
 }
 function consider(total,typed,crmCards,ready){
  if(!ready||![total,typed,crmCards].every(finiteInt)||typed>total||total>crmCards)return false;
