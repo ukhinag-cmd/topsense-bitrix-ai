@@ -322,4 +322,4 @@ function stats(){
   queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
   restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
 }
-module.exports={enqueue,get,stats,retryTransient,fetchPage,homepageVariants};
+module.exports={enqueue,get,stats,retryTransient,fetchPage,fetchCorporateHome,homepageVariants};
