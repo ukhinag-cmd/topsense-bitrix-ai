@@ -5,6 +5,7 @@
 const emailDomains=require("./company-email-domains");
 const nameSites=require("./name-site-search");
 const profiler=require("./website-profiler");
+const siteLedger=require("./deal-only-site-ledger");
 const state={lastQueuedAt:null,lastAttemptMs:0,submitted:0,attempted:0};
 const str=x=>String(x??"").trim();
 function evidenceFor(client,read){
@@ -73,6 +74,7 @@ function enqueue(clients,{read,limit=22}={}){
  for(const c of scored){
   if(candidates.length>=Math.min(40,Math.max(1,limit)))break;
   if(c.evidence.innConflict)continue;
+  if(siteLedger.get(c.client.id))continue; // use last independently verified website
   // Don't trust a stale form or a domain alone; use them only as search hints.
   const record=prepare(c.client,c.evidence);
   if(nameSites.eligible(record))candidates.push(record);
@@ -115,7 +117,8 @@ function enrich(client,read){
    annotated.segmentSource="Официальный сайт, реквизиты и история клиентских обращений";
   }
  }
- return annotated;
+ if(siteStatus==="confirmed"&&checked.site)siteLedger.offer(annotated,checked,web);
+ return siteLedger.apply(annotated);
 }
-function stats(){return {...state,siteSearch:nameSites.stats(),siteProfiler:profiler.stats()}}
+function stats(){return {...state,siteSearch:nameSites.stats(),siteProfiler:profiler.stats(),siteLedger:siteLedger.stats()}}
 module.exports={evidenceFor,prepare,enqueue,enrich,stats};
