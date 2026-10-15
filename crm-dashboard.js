@@ -437,20 +437,41 @@ function enqueuePreviousPilotSites(){
 // Fetch linked CRM contacts read-only. No contacts are sent to public source control.
 async function loadLinkedContacts(){
  if(state.contactsLoading||!process.env.BITRIX_WEBHOOK_BASE)return;
+ if(!state.companies.length){
+  if(!contactRetryTimer)contactRetryTimer=setTimeout(()=>{
+   contactRetryTimer=null;loadLinkedContacts().catch(()=>{});
+  },45000);
+  return;
+ }
  state.contactsLoading=true;
  try{
   const endpoint=new URL("crm.contact.list.json",String(process.env.BITRIX_WEBHOOK_BASE).replace(/\/?$/,"/"));
   async function chunk(start){
-   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({order:{ID:"ASC"},filter:{},select:["ID","NAME","LAST_NAME","COMPANY_ID","EMAIL"],start}),signal:AbortSignal.timeout(18000)});
-   const p=await r.json();if(!r.ok||p.error||!Array.isArray(p.result))throw Error(p.error||"CRM contacts read error");return p;
+   for(let attempt=0;attempt<4;attempt++){
+    try{
+     const r=await fetch(endpoint,{method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({order:{ID:"ASC"},filter:{},
+       select:["ID","NAME","LAST_NAME","COMPANY_ID","EMAIL"],start}),
+      signal:AbortSignal.timeout(24000)});
+     const p=await r.json();
+     if(!r.ok||p.error||!Array.isArray(p.result))
+      throw Error(String(p.error||r.status||"CRM contacts unavailable").slice(0,80));
+     return p;
+    }catch(e){
+     if(attempt===3)throw e;
+     await new Promise(done=>setTimeout(done,1000*Math.pow(2,attempt)));
+    }
+   }
   }
   const first=await chunk(0),all=[...first.result],total=Number(first.total||0),size=Math.max(1,first.result.length);
   if(total>80000)throw Error("Contacts safety limit");
   if(total>size){
    const starts=[];for(let i=size;i<total;i+=size)starts.push(i);
-   for(let j=0;j<starts.length;j+=5){
-    const group=await Promise.all(starts.slice(j,j+5).map(chunk));
+   for(let j=0;j<starts.length;j+=2){
+    const group=await Promise.all(starts.slice(j,j+2).map(chunk));
     group.forEach(g=>all.push(...g.result));
+    if(j+2<starts.length)await new Promise(done=>setTimeout(done,220));
    }
   }
   const by=new Map();
