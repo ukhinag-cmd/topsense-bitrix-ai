@@ -15,7 +15,10 @@ test("Historical CRM leads and all deal funnels from 6 Sep; safe contact links; 
   return {ok:true,json:async()=>({result:answers[method]||[],total:(answers[method]||[]).length})};
  };
  const module={exports:{}};
+ const intake={queueDeals:rows=>{calls.push({method:"deal-intake-local",count:rows.length});return rows.length},
+  get:()=>null,stats:()=>({status:"scanning",inspected:0,queued:2})};
  vm.runInNewContext(source,{module,exports:module.exports,URL,AbortSignal,fetch:fakeFetch,
+  require:name=>{if(name==="./crm-deal-intake")return intake;throw Error("unexpected "+name)},
   process:{env:{BITRIX_WEBHOOK_BASE:"https://bitrix.example/rest/"}},
   setTimeout:fn=>{fn();return 0},
   console:{log:()=>{},warn:()=>{}}},{filename:"crm-lead-inbox.js"});
@@ -27,6 +30,7 @@ test("Historical CRM leads and all deal funnels from 6 Sep; safe contact links; 
  assert.equal(p.linked,3);assert.equal(p.pending,1);
  assert.equal(p.items.find(x=>x.id==="11").linkSource,"contact_company_id");
  assert.equal(p.items.find(x=>x.id==="1").ownerId,"114");
- assert.ok(calls.every(x=>x.method.endsWith(".list.json")));
- assert.ok(calls.filter(x=>x.method!=="crm.contact.list.json").every(x=>x.body.filter[">=DATE_CREATE"]==="2026-09-06T00:00:00+03:00"));
+ assert.ok(calls.filter(x=>x.method!=="deal-intake-local").every(x=>x.method.endsWith(".list.json")));
+ assert.ok(calls.some(x=>x.method==="deal-intake-local"&&x.count===2));
+ assert.ok(calls.filter(x=>x.method!=="crm.contact.list.json"&&x.method!=="deal-intake-local").every(x=>x.body.filter[">=DATE_CREATE"]==="2026-09-06T00:00:00+03:00"));
 });
