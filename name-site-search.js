@@ -132,11 +132,22 @@ async function scan(c,mode="name"){
   }catch{ /* Continue other leads; failures must not mask other sites. */ }
  }
  let hits;
- try{hits=await search(cleanName(c.name),mode==="inn"?String(c.crmInn||""):"")}
+ try{
+  const name=cleanName(c.name),inn=String(c.crmInn||"");
+  hits=await search(name,mode==="inn"?inn:c.dealOnlyResearch&&inn?inn:"");
+  // For hard-to-identify clients, don't stop at one search phrase:
+  // the legal INN may be missing from search snippets even when the actual
+  // site is relevant. The second search varies the evidence, not the entity.
+  if(c.dealOnlyResearch&&inn){
+   const byName=await search(name,"").catch(()=>[]);
+   const known=new Set(hits.map(x=>x.url));
+   for(const h of byName)if(!known.has(h.url)){hits.push(h);known.add(h.url)}
+  }
+ }
  catch(e){unavailable++;return {status:supplied?"needs_review":"search_unavailable",
   candidates:supplied?[supplied]:[],note:String(e.message||e).slice(0,95)}}
  const results=supplied?[supplied]:[];
- for(const hit of hits.slice(0,4)){
+ for(const hit of hits.slice(0,c.dealOnlyResearch?6:4)){
   try{
    const candidate=await inspect(c,hit);
    results.push(candidate);
@@ -178,7 +189,7 @@ function enqueue(companies){
 }
 function enqueuePriority(companies,limit=25){
  let added=0;
- for(const c of (companies||[]).slice(0,Math.min(45,Math.max(1,limit)))){
+ for(const c of (companies||[]).slice(0,Math.min(45,Math.max(1,limit))).reverse()){
   const id=String(c?.id||"");
   if(!id||pending.has(id)||profiles.has(id)||completion.isComplete(id)||!eligible(c))continue;
   pending.add(id);queue.unshift(c);added++;
