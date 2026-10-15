@@ -17,10 +17,24 @@ test("keeps last completed value while website evidence restores",()=>{
   completedAt:sample.completedAt,source:"last_complete"
  });
 });
-test("uses live result after full restoration even when verified count corrects down",()=>{
- const p=census.display(1557,675,true);
+test("rejects silent shrinkage on an unchanged CRM and retains last completed evidence",()=>{
+ const p=census.display(1557,675,true,1667);
+ assert.equal(p.typed,689);
+ assert.equal(p.untyped,868);
+ assert.equal(p.provisional,true);
+ assert.equal(p.source,"regression_under_review");
+ assert.equal(p.observedTyped,675);
+ assert.equal(census.consider(1557,675,1667,true),false);
+});
+test("last complete census survives temporary changes in virtual duplicate grouping",()=>{
+ const p=census.display(1567,496,false,1667);
+ assert.equal(p.total,1557);
+ assert.equal(p.typed,689);
+ assert.equal(p.source,"last_complete_virtual_groups_changed");
+});
+test("real changes in source CRM inventory may update the finished census",()=>{
+ const p=census.display(1567,675,true,1680);
  assert.equal(p.typed,675);
- assert.equal(p.untyped,882);
  assert.equal(p.provisional,false);
 });
 test("does not misrepresent prior population if company total changes",()=>{
