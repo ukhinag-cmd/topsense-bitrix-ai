@@ -1,0 +1,89 @@
+"use strict";
+// Analytical organizations recovered from CRM DEALS, not from the unreliable
+// manager-created CRM company cards. Read-only: no crm.company.add or merges.
+// These evidence-backed identity candidates are never legal-identity proof.
+const {display}=require("./company-name-format");
+const entities=[
+ {key:"automation-security-samara",name:"ООО «Автоматизация и Безопасность»",
+  type:"Дилер промышленного оборудования",category:"Партнёрские продажи",
+  match:/автоматизац(?:ия|ии)\s+и\s+безопасност(?:ь|и)/iu,
+  websiteCandidate:"https://avbez.ru/",websiteStatus:"Домен найден в переписке; сайт/реквизиты ещё сверяются",
+  userRelationship:"Постоянный клиент — подтверждено пользователем",
+  note:"Тендерные и прямые запросы; статус поставки и юрлицо каждого обращения сверяются"},
+ {key:"acron-fertilizers",name:"ПАО «Акрон»",type:"Производство удобрений",
+  category:"Конечные потребители",
+  match:/пао\s*["«»]?\s*акрон\b/iu,
+  websiteCandidate:"https://www.acron.ru/",
+  websiteStatus:"Официальный сайт ПАО «Акрон»; связь сделки с юрлицом требует проверки",
+  note:"Минеральные удобрения. Не путать с «Акрон Холдинг»"},
+ {key:"akron-industrial-holding",name:"ГК «Акрон Холдинг»",type:"",
+  category:"Смежные организации",
+  match:/\b(?:гк\s*)?акрон\s+холдинг\b/iu,
+  websiteCandidate:"https://www.akron-holding.ru/",
+  websiteStatus:"Официальный сайт другой группы, не ПАО «Акрон»",
+  note:"Отдельная промышленная группа; запросы не приписывать ПАО «Акрон»"}
+];
+let snapshot=new Map(),updatedAt=null,coverage="not_started";
+function norm(s){const d=display(s||"");return String(d.name||"").toLocaleLowerCase("ru-RU")
+ .replace(/ё/g,"е").replace(/\b(?:ооо|оао|зао|ао|пао|гк)\b/gu,"")
+ .replace(/[^а-яa-z0-9]/g,"")}
+function identify(title){
+ const value=String(title||"");
+ const found=entities.filter(e=>e.match.test(value));
+ return found.length===1?found[0]:null;
+}
+function ingest(deals,{complete=false}={}){
+ const incoming=deals instanceof Map?[...deals.values()]:Array.from(deals||[]);
+ if(complete)snapshot=new Map();
+ for(const deal of incoming){
+  const id=String(deal?.ID||""),title=String(deal?.TITLE||"");
+  if(!/^[1-9]\d*$/.test(id)||!title)continue;
+  const entity=identify(title);
+  if(!entity)continue;
+  // If the CRM has a direct company ID, it should appear through the normal
+  // company registry; no synthetic entity is created from that single deal.
+  const otherParty=/сверк[аи]\s+по\s+взаиморасчет/i.test(title);
+  snapshot.set(id,{id,entityKey:entity.key,title:title.slice(0,280),
+   crmCompanyId:String(deal.COMPANY_ID||""),
+   contactId:String(deal.CONTACT_ID||""),
+   createdAt:String(deal.DATE_CREATE||""),
+   stageId:String(deal.STAGE_ID||""),otherParty,
+   url:"https://topsense.bitrix24.ru/crm/deal/details/"+encodeURIComponent(id)+"/"});
+ }
+ coverage=complete?"full_deal_snapshot":"partial_deal_snapshot";
+ updatedAt=new Date().toISOString();
+ return stats();
+}
+function view(companies){
+ const legalIds=new Set((companies||[]).flatMap(c=>(c.crmIdList||[c.id]).map(String)));
+ const names=new Set((companies||[]).map(c=>norm(c.name)));
+ const groups=[];
+ for(const entity of entities){
+  const items=[...snapshot.values()].filter(d=>d.entityKey===entity.key)
+    .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
+  if(!items.length)continue;
+  // Do not duplicate a real corresponding CRM company card.
+  if(names.has(norm(entity.name)))continue;
+  const relevant=items.filter(d=>!d.crmCompanyId||d.crmCompanyId==="0"||!legalIds.has(d.crmCompanyId));
+  if(!relevant.length)continue;
+  const dealRefs=relevant.map(d=>({id:d.id,title:d.title,url:d.url,createdAt:d.createdAt,
+   directCompanyLink:Boolean(d.crmCompanyId&&d.crmCompanyId!=="0"),
+   relationshipEvidence:d.otherParty?"упоминание в переписке":"название в сделке"}));
+  groups.push({id:"dealonly:"+entity.key,name:entity.name,organizationType:entity.type,
+   category:entity.category,companyCardMissing:true,sourceType:"crm_deals_only",
+   crmIdList:[],crmUrl:"",dealRefs,crmDealCount:dealRefs.length,
+   siteCandidate:entity.websiteCandidate,siteCandidateStatus:entity.websiteStatus,
+   crmEmails:[],contactEmails:[],contactNames:[],
+   relationStatus:entity.userRelationship||"",
+   salesEvidenceStatus:"Покупки/отгрузки не подтверждены этим реестром",
+   saleInfo:{purchaseStatus:"ПРОВЕРЯЕТСЯ",purchaseItems:[],purchaseDealCount:0},
+   relationshipPotential:{status:"pending_reconciliation",level:entity.userRelationship?
+    "Высокий — постоянный клиент (со слов пользователя)":"Требует оценки",
+    dealCount:dealRefs.length,score:null,userConfirmed:Boolean(entity.userRelationship)},
+   evidenceNote:entity.note});
+ }
+ return groups;
+}
+function stats(){return {status:coverage,updatedAt,matchedDeals:snapshot.size,
+  uniqueCandidates:new Set([...snapshot.values()].map(d=>d.entityKey)).size}}
+module.exports={ingest,view,stats,identify,norm};
