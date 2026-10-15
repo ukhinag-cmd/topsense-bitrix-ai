@@ -4,6 +4,8 @@ const {inferWebsiteActivity}=require("./client-type-inference");
 const evidenceStore=require("./site-profile-store");
 const completion=require("./client-finalization");
 const profiles=new Map(),visited=new Set(),queue=[],sourcePriority=new Map(),sourceFingerprints=new Map();
+const attemptedFingerprints=new Map(),transientRetries=new Map();
+const RETRY_AFTER_MS=3*60*60*1000,MAX_TRANSIENT_RETRIES=1;
 const persistedProfiles=new Map(),deferredCompanies=[];
 let restoring=false,restored=false,restoredProfiles=0;
 let pagesScanned=0,checkedSites=0,lastProgressLogged=0;
@@ -39,7 +41,7 @@ function urls(c){
    "Сайт из карточки компании, присланной письмом"].includes(c.siteSource);
  const fromEmail=!pinned&&Boolean(c.corporateDomain)&&selected==="https://"+c.corporateDomain;
  const origin=fromEmail?(
-   ["Домен привязанного контакта",
+   ["Домен привязанного контакта","Альтернативный домен привязанного контакта",
     "Непривязанные CRM-контакты: совпали название и корпоративный домен"].includes(c.siteSource)
      ?c.siteSource:"Корпоративный домен e-mail CRM"
    ):(c.siteSource||"Сайт из CRM");
@@ -170,7 +172,7 @@ async function one(c){
   const identifiedReference=String(c.siteSource||"").startsWith("Сайт организации, установленный по независимым источникам");
   // HTTP-only fallback must corroborate company identity on the page.
   const insecureTransport=new URL(result.url).protocol==="http:";
-  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport;
+  const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Альтернативный домен привязанного контакта"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport;
   const trusted=orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
   const profile={status:!trusted?"site_identity_unclear":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,
@@ -199,7 +201,7 @@ function evidenceRank(source){
  if(source==="Сайт из подписи входящего письма")return 7;
  if(source==="Сайт из карточки компании, присланной письмом")return 6;
  if(source==="Корпоративный домен e-mail CRM")return 4;
- if(source==="Домен привязанного контакта")return 3;
+ if(source==="Домен привязанного контакта"||source==="Альтернативный домен привязанного контакта")return 3;
  if(source==="Непривязанные CRM-контакты: совпали название и корпоративный домен")return 3;
  if(source==="Поиск по названию — подтверждено независимыми реквизитами")return 0.5;
  if(source==="Сайт из CRM")return 2;
@@ -224,22 +226,33 @@ function enqueue(companies){
   }
   return;
  }
+ let added=0;
  for(const c of companies||[]){
   const id=String(c?.id||"");if(!id||completion.isComplete(id))continue;
   const candidates=urls(c);
   const hasSite=candidates.length>0;
   const newRank=hasSite?evidenceRank(candidates[0].origin):0;
   const signature=hasSite?evidenceStore.fingerprint(c):"";
+  if(!attemptedFingerprints.has(id))attemptedFingerprints.set(id,new Set());
+  const fingerprints=attemptedFingerprints.get(id);
+  // Do not oscillate between the same CRM domain and a fallback contact domain
+  // whenever the CRM refreshes. A separate cooldown controls true retries.
+  if(hasSite&&fingerprints.has(signature))continue;
   if(visited.has(id)){
    const oldRank=sourcePriority.get(id)||0;
-   if(newRank<oldRank||(newRank===oldRank&&sourceFingerprints.get(id)===signature))continue;
+   const status=profiles.get(id)?.status;
+   const unresolved=["site_unavailable","site_identity_unclear","site_read_no_clear_type"].includes(status);
+   if(newRank<oldRank&&!unresolved)continue;
+   if(newRank===oldRank&&sourceFingerprints.get(id)===signature)continue;
+   if(hasSite)fingerprints.add(signature);
    sourcePriority.set(id,newRank);sourceFingerprints.set(id,signature);
    // Changing a same-priority website must invalidate a previous site's type.
    profiles.set(id,{status:hasSite?"site_pending":"site_absent",source:"Источник сайта изменился; нужна перепроверка"});
-   if(hasSite)queue.push(c);
+   if(hasSite){queue.push(c);added++}
    continue;
   }
   visited.add(id);sourcePriority.set(id,newRank);sourceFingerprints.set(id,signature);
+  if(hasSite)fingerprints.add(signature);
   if(!hasSite){
    profiles.set(id,{status:"site_absent",source:"Нет подтверждённого сайта или корпоративного домена"});
    continue;
@@ -248,10 +261,39 @@ function enqueue(companies){
   if(cached){
    profiles.set(id,cached);restoredProfiles++;continue;
   }
-  queue.push(c);
+  queue.push(c);added++;
  }
  pump();
- if((companies||[]).length>25)console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",queued:queue.length,known:profiles.size,restoredProfiles}));
+ if((companies||[]).length>25)console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",added,queued:queue.length,known:profiles.size,restoredProfiles}));
+ return added;
+}
+function retryTransient(companies,now=Date.now()){
+ if(!restored||queue.length||active)return 0;
+ let accepted=0;
+ for(const c of companies||[]){
+  if(accepted>=20)break;
+  const id=String(c?.id||"");
+  if(!id||completion.isComplete(id))continue;
+  const profile=profiles.get(id);
+  if(profile?.status!=="site_unavailable")continue;
+  // Retry only probable temporary connection/rate-limit/server failures.
+  // Never repeatedly query permanently unavailable or blocked endpoints.
+  if(!/timed? ?out|abort|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|HTTP 429|HTTP 50[0234]/i.test(String(profile.error||"")))continue;
+  const previous=transientRetries.get(id)||0;
+  if(previous>=MAX_TRANSIENT_RETRIES)continue;
+  const last=Date.parse(profile.checkedAt||"");
+  if(!Number.isFinite(last)||now-last<RETRY_AFTER_MS)continue;
+  const candidates=urls(c);
+  if(!candidates.length)continue;
+  transientRetries.set(id,previous+1);
+  profiles.set(id,{...profile,status:"site_pending",source:"Повторная проверка временно недоступного сайта"});
+  queue.push(c);accepted++;
+ }
+ if(accepted){
+  console.log(JSON.stringify({component:"site-profiler",event:"transient-retries-queued",count:accepted,remaining:queue.length}));
+  pump();
+ }
+ return accepted;
 }
 function get(id){return profiles.get(String(id))||{status:"site_pending"}}
 function stats(){
@@ -261,4 +303,4 @@ function stats(){
   queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
   restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
 }
-module.exports={enqueue,get,stats,fetchPage,homepageVariants};
+module.exports={enqueue,get,stats,retryTransient,fetchPage,homepageVariants};
