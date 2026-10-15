@@ -31,7 +31,9 @@ function candidateNames(title){
  const matcher=new RegExp("(?:^|[\\s(,;])("+legal+")\\s*(?:[«\"“]([^»\"”]{3,110})[»\"”]|([^,;:\\/()\\n]{3,105}))","giu");
  for(const m of s.matchAll(matcher)){
   const opf=String(m[1]||"").toUpperCase();
-  let company=clean(m[2]||m[3]||"");
+  // Quoted text is the legal name, not the product description. In particular,
+  // "ГСП Ремонт" must retain "Ремонт" as part of the company name.
+  let company=m[2]?String(m[2]).trim():clean(m[3]||"");
   if(!acceptable(company))continue;
   out.push({name:opf+" "+company,base:normalize(company),opf,reason:"legal_name_in_deal_title"});
  }
