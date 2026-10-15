@@ -2,6 +2,7 @@
 // TOP-SENSE. Read-only stage-based fulfilment/payment signals.
 // Deal success ("won") alone is NEVER proof of shipment or payment.
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const purchaseCheckpoint=require("./purchase-checkpoint");
 const state={status:"not_started",totalDeals:0,scannedDeals:0,wonDeals:0,productRowsChecked:0,
  shipmentStages:[],paymentStages:[],commercialStages:[],stageHistoryRecords:0,stageHistoryStatus:"not_started",
  shippedDeals:0,paidDeals:0,qualifiedDeals:0,companiesWithPurchaseEvidence:0,
@@ -154,7 +155,7 @@ function fallback(id){
 }
 async function run(companies){
  if(busy)return;
- busy=true;summary=new Map();
+ busy=true; // Keep previously verified buyers visible during new scans.
  Object.assign(state,{status:"scanning",totalDeals:0,scannedDeals:0,wonDeals:0,productRowsChecked:0,
  shipmentStages:[],paymentStages:[],commercialStages:[],stageHistoryRecords:0,stageHistoryStatus:"not_started",
  shippedDeals:0,paidDeals:0,qualifiedDeals:0,companiesWithPurchaseEvidence:0,error:null,
@@ -218,16 +219,13 @@ async function run(companies){
    }
    eligible.push({id:dealId,companyId});
   }
-  for(const [companyId,rec] of accum){
-   rec.purchaseStatus="БЫЛА";
-   summary.set(companyId,rec);
-  }
+  for(const rec of accum.values())rec.purchaseStatus="БЫЛА";
   state.companiesWithPurchaseEvidence=accum.size;
   // Product rows only for deals reaching shipment or payment stages.
   let n=0;
   const docAudit=require("./deal-document-amount");
   for(const deal of eligible){
-   const rows=await productRows(deal.id),rec=summary.get(deal.companyId);
+   const rows=await productRows(deal.id),rec=accum.get(deal.companyId);
    const doc=await docAudit.forDeal(deal.id);
    const purchaseDeal=(rec.purchaseDeals||[]).find(x=>x.id===deal.id);
    if(purchaseDeal){purchaseDeal.documentStatus=doc.status;purchaseDeal.documentSource=doc.source||"";purchaseDeal.productsStatus=rows===null?"unavailable":rows.length?"available":"empty";}
@@ -255,6 +253,9 @@ async function run(companies){
    }
    delete rec.documentTotal;
   }
+  // Keep previous verified positive evidence when a new audit is partial.
+  summary=new Map([...summary,...accum]);
+  purchaseCheckpoint.queue(summary);
   state.documentAudit=docAudit.stats();
   state.status=state.stageHistoryStatus==="complete"?"complete":"partial";
   state.finishedAt=new Date().toISOString();
@@ -270,7 +271,7 @@ async function run(companies){
 }
 function get(id){
  const linked=(orphanDealIndex.get(String(id))||[]).map(d=>({id:d.dealId,crmCompanyId:d.companyId,title:d.title,linkSource:d.linkSource,linkVerified:d.linkVerified,url:"https://topsense.bitrix24.ru/crm/deal/details/"+encodeURIComponent(d.dealId)+"/"}));
- const record=summary.get(String(id));
+ const record=summary.get(String(id))||purchaseCheckpoint.get(id);
  if(record){
   if(state.status==="complete")return {...record,linkedDeals:linked};
   if(record.shipped||record.paid||record.qualified)return {...record,linkedDeals:linked};
@@ -278,5 +279,5 @@ function get(id){
  }
  return {...fallback(id),linkedDeals:linked};
 }
-function stats(){return {...state,orphanDeals:orphanMatchSummary,companiesWithSuccessfulDeal:state.wonDeals};}
+function stats(){return {...state,orphanDeals:orphanMatchSummary,companiesWithSuccessfulDeal:state.wonDeals,checkpoint:purchaseCheckpoint.stats()};}
 module.exports={run,get,stats};
