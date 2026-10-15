@@ -93,3 +93,26 @@ test("name ledger rejects tampered mapping and refuses to replace verified names
  const row=ledger.apply({id,name:"Неправильная группа"});
  assert.equal(row.name,"Неправильная группа");
 });
+
+test("generic deal title can discover a legally named company from a subsequent inbound email",()=>{
+ const original=intake.get;
+ try{
+  group.ingest([
+   {ID:"80701",TITLE:"Запрос стоимости газоанализатора",COMPANY_ID:"0",DATE_CREATE:"2025-11-12T12:00:00+03:00"},
+   {ID:"80702",TITLE:"Переносной газоанализатор — уточнение срока",COMPANY_ID:"0",DATE_CREATE:"2025-11-13T12:00:00+03:00"}
+  ],{complete:true});
+  intake.get=id=>id==="80701"?{legalNameCandidates:[
+   {name:"ООО «Региональный технический центр»",activityId:"18",inn:""}]}:
+   {legalNameCandidates:[{name:"ООО «Региональный технический центр»",activityId:"36",inn:""}]};
+  const found=group.group([]);
+  const c=found.find(x=>x.key==="региональный технический центр");
+  assert.ok(c);
+  assert.equal(c.dealCount,2);
+  const cards=registry.view([]);
+  const card=cards.find(x=>x.id==="dealonly:discovered:региональный технический центр");
+  assert.ok(card);
+  assert.equal(card.name,"ООО «РЕГИОНАЛЬНЫЙ ТЕХНИЧЕСКИЙ ЦЕНТР»");
+  assert.equal(card.nameStatus,"legal_name_from_incoming_requisites");
+  assert.deepEqual(card.dealRefs.map(x=>x.id).sort(),["80701","80702"]);
+ }finally{intake.get=original}
+});
