@@ -95,17 +95,36 @@ function discoverLinks(html,base){
  return picked.slice(0,5).map(x=>x.url);
 }
 function homepageVariants(raw){
- const list=[String(raw||"")];
+ // A protocol-less address is only input notation, not a fifth network
+ // protocol: an actual request must use HTTP or HTTPS.
+ const value=String(raw||"").trim();
+ if(!value)return [];
+ let url;
  try{
-  const u=new URL(raw);
-  // Corporate domains frequently serve HTTP without HTTPS. Retrying the
-  // same hostname through HTTP is safe only after fetchPage rechecks its IP.
-  if(u.protocol==="https:"&&!u.port){
-   u.protocol="http:";
-   list.push(u.toString());
-  }
- }catch{}
- return list;
+  const normalized=/^\/\//.test(value)?"https:"+value:
+   /^[a-z][a-z0-9+.-]*:\/\//i.test(value)?value:"https://"+value;
+  url=new URL(normalized);
+ }catch{return [value]}
+ if(!["https:","http:"].includes(url.protocol)||url.username||url.password||
+  !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(url.hostname)||url.hostname.includes(".."))return [value];
+ // Preserve explicit ports (including non-default) instead of rewriting them.
+ // The fetchPage safety gate still disallows unsafe ports or hostnames.
+ if(url.port)return [url.toString()];
+ const baseHost=url.hostname.toLowerCase().replace(/^www\./,"");
+ const variants=[],seen=new Set();
+ for(const [protocol,host] of [
+  ["https:",baseHost],
+  ["https:","www."+baseHost],
+  ["http:","www."+baseHost],
+  ["http:",baseHost]
+ ]){
+  const candidate=new URL(url);
+  candidate.protocol=protocol;candidate.hostname=host;
+  candidate.hash="";
+  const text=candidate.toString();
+  if(!seen.has(text)){seen.add(text);variants.push(text)}
+ }
+ return variants;
 }
 async function fetchCorporateHome(raw){
  let lastError;
