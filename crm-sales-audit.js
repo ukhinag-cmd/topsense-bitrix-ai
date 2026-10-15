@@ -164,6 +164,7 @@ async function run(companies){
   const allowed=new Set((companies||[]).map(x=>String(x.id)));
   const deals=await allDeals();
   require("./deal-only-client-registry").ingest(deals,{complete:true});
+  require("./crm-unlinked-discovery").ingest(deals,{complete:true});
   // Compute relationship potential from full deal history BEFORE slow
   // procurement/attachment stage audits. Only direct CRM company links count.
   require("./client-relationship-potential").build(deals.values());
