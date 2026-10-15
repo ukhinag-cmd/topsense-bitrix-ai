@@ -2,6 +2,7 @@
 // Read-only CRM lead inbox. Leads without a verified COMPANY_ID stay separate
 // from companies; identical names and contact emails do not prove identity.
 const state={status:"not_started",updatedAt:null,error:null,total:0,items:[],loading:false,contactCompanyMap:new Map(),history:null,leadStatus:"not_started",dealStatus:"not_started"};
+const POSSIBLE_SERVICE_MAIL=/undeliverable|delivery status notification|mail delivery failed|ошибка доставки|сбой доставки|рассылка|спам|security alert|password reset/i;
 function str(s){return String(s??"").trim()}
 function value(v){
  if(Array.isArray(v))return v.map(value).filter(Boolean).join("; ");
@@ -95,8 +96,14 @@ async function refresh(){
    .map(x=>"CRM read unavailable: "+str(x.reason.message||x.reason).slice(0,80)).join("; ")||contactLinkError||null;
   state.updatedAt=new Date().toISOString();
   console.log(JSON.stringify({component:"lead-inbox",event:"read-only-refreshed",inbound:state.total,
-   crmLeads:leads.status==="fulfilled"?leads.value.length:0,
-   incomingDeals:deals.status==="fulfilled"?deals.value.length:0,status:state.status}));
+   since:cutoff,crmLeads:state.history.leads,incomingDeals:state.history.incomingDeals,
+   otherPipelineDeals:state.history.otherPipelineDeals,
+   withoutCompanyDirect:state.history.withoutCompanyDirect,
+   contactLinksChecked:state.history.contactLinksChecked,
+   possibleServiceMail:state.items.filter(x=>POSSIBLE_SERVICE_MAIL.test(x.title)).length,
+   leadStatus:state.leadStatus,dealStatus:state.dealStatus,
+   contactLinkError:state.history.contactLinkError,crmError:state.error,
+   readOnly:true,status:state.status}));
  }catch(e){
   state.status=state.updatedAt?"stale":"unavailable";state.error=str(e.message||e).slice(0,150);
   console.warn(JSON.stringify({component:"lead-inbox",event:"read-only-unavailable",reason:state.error}));
@@ -111,7 +118,7 @@ function view(companies){
   const companyId=direct?l.companyId:throughContact?fromContact:"";
   return {...l,companyId,linkStatus:companyId?"known_company":"pending_identification",
    linkSource:direct?"company_id":throughContact?"contact_company_id":"unlinked",
-   possibleServiceMail:/undeliverable|delivery status notification|mail delivery failed|ошибка доставки|сбой доставки|рассылка|спам|security alert|password reset/i.test(l.title)};
+   possibleServiceMail:POSSIBLE_SERVICE_MAIL.test(l.title)};
  });
  return {status:state.status,error:state.error,updatedAt:state.updatedAt,total:classified.length,
   linked:classified.filter(l=>l.linkStatus==="known_company").length,
