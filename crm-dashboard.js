@@ -394,6 +394,7 @@ async function loadPilot(){
    event:"new-subtypes-restored",count:addedTypes,total:taxonomy.stats().total}));
   require("./client-finalization").ingest(entries);
   require("./classification-census").ingest(entries);
+  require("./classification-ledger").ingest(entries);
   require("./purchase-checkpoint").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
@@ -477,11 +478,17 @@ function data(known){
  });
  const finalization=require("./client-finalization");
  const requisites=require("./company-requisites"),finances=require("./financial-2025");
+ const ledger=require("./classification-ledger");
  const typedRecords=require("./client-type-inference").apply(records)
+  .map(c=>ledger.apply(c))
   .map(c=>finalization.apply({...c,
    finance2025:finances.withRequisite(c.finance2025,requisites.get(c.id)),
    staffEvidence:require("./staff-evidence").resolve(c,require("./website-profiler").get(c.id))
   }));
+ // Persist per source CRM company ID; never use a volatile virtual duplicate
+ // group as a durable identity. Ignore transient pre-restoration observations.
+ if(state.pilotUpdatedAt&&require("./website-profiler").stats().restorationComplete)
+  ledger.offerMany(typedRecords);
  const virtual=require("./crm-duplicates").consolidate(typedRecords);
  // A virtual duplicate is never treated as independently proven identity.
  const duplicateIds=new Set([...virtual.duplicates,...virtual.review]
@@ -533,6 +540,7 @@ function data(known){
  const classificationDisplay=require("./classification-census").display(virtual.stats.customerCardCount,currentTyped,classificationCensusReady);
  return {ok:true,status:state.status,error:state.error,updatedAt:state.updatedAt,
   classificationDisplay,classificationCensusReady,classificationCensusStore:require("./classification-census").stats(),
+  classificationLedger:ledger.stats(),
   total:virtual.stats.customerCardCount,
   crmCardTotal:virtual.stats.rawCompanyCount,
   excludedCompanyCount:state.excludedCompanies.length,
@@ -647,6 +655,7 @@ function coverageLog(){
    customers:companyList.length,crmCards:state.companies.length,
    typed:typed.length,untyped:companyList.length-typed.length,coveredTypes:distinctTypes.size,
    censusReady:snap.classificationCensusReady,censusDisplay:snap.classificationDisplay,
+   ledger:snap.classificationLedger,
    siteCrawl:require("./website-profiler").stats(),
    nameSearch:require("./name-site-search").stats(),
    domainCoverage,classificationSources:sourceCounts}));
