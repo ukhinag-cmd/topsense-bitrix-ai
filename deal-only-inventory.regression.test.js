@@ -2,7 +2,7 @@
 const test=require("node:test"),assert=require("node:assert/strict");
 const cache=require("./deal-only-inventory");
 function prospect(n){
- return {key:"ооо тестовый завод "+n,name:"ООО «Тестовый завод "+n+"»",
+ return {key:"тестовый завод "+n,name:"ООО «Тестовый завод "+n+"»",
   rawName:"ООО Тестовый завод "+n,confidence:"one_explicit_legal_name",
   linkedExisting:false,existingCrmIds:[],dealCount:2,
   dealRefs:[{id:String(800000+n*2),title:"Завод "+n+" ТОП-СЕНС",
