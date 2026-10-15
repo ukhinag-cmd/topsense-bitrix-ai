@@ -114,7 +114,45 @@ function consolidate(companies){
   byExact.get(k).push(c);
  }
  const accepted=[],review=[],claimed=new Set();
+ // Full normalized names must be considered BEFORE same-OPF subsets are
+ // claimed. Otherwise "ГСП РЕМОНТ" and five "ООО ГСП РЕМОНТ" cards
+ // become two separate analytical clients despite the same organization.
+ // This is a reversible reporting merge only; source CRM IDs are retained.
+ for(const set of byBase.values()){
+  if(set.length<2)continue;
+  const base=identity(set[0]).base;
+  const forms=distinct(set.map(c=>identity(c).opf).filter(Boolean));
+  const hasOmittedForm=set.some(c=>!identity(c).opf);
+  if(!hasOmittedForm||forms.length!==1||base.length<9)continue;
+  const inns=distinct(set.map(c=>String(c.finance2025?.inn||c.crmInn||c.legalInnReference||"")
+   .replace(/\\D/g,"")).filter(n=>n.length===10||n.length===12));
+  if(inns.length>1)continue; // Different legal entities, regardless of name.
+  const companySites=distinct(set.flatMap(c=>
+   [domain(c.siteCandidate),domain(c.siteProfileUrl),domain(c.siteVerified)]).filter(Boolean));
+  const sharedInns=inns.length===1&&set.every(c=>{
+   const raw=String(c.finance2025?.inn||c.crmInn||c.legalInnReference||"").replace(/\\D/g,"");
+   return !raw||raw===inns[0];
+  });
+  // One group domain is not sufficient to link different entities, but an
+  // identical name + compatible legal form with no contradictory evidence is
+  // appropriate for an explicitly provisional analytical merge.
+  const memberDomains=set.map(identifiers);
+  const unrelatedDomains=distinct(memberDomains.flat());
+  const sourceConflict=companySites.length>1||(
+   unrelatedDomains.length>1&&memberDomains.every(a=>a.length>0)
+   &&!memberDomains.some(a=>a.some(d=>memberDomains.every(b=>b.includes(d))))
+  );
+  if(sourceConflict&&!sharedInns)continue;
+  const combined=merge(set,sharedInns?"matching_inn_and_name":"same_name_missing_opf");
+  combined.duplicateStatus=sharedInns?
+   "Совпадают наименование и ИНН; CRM-карточки сведены в единую аналитику":
+   "Совпадает полное название, ОПФ отсутствует у части CRM-карточек. Одна аналитическая компания; юридические реквизиты для физического слияния требуют сверки";
+  combined.segmentConfidence=sharedInns?combined.segmentConfidence:"Предварительная виртуальная группа";
+  accepted.push(combined);
+  for(const c of set)claimed.add(String(c.id));
+ }
  for(const set of byExact.values()){
+  if(set.some(c=>claimed.has(String(c.id))))continue;
   if(set.length<2)continue;
   // Exact name+legal form: reversible grouping in reporting only.
   // Conflicting known corporate domains prevent consolidation.
