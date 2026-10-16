@@ -757,6 +757,7 @@ function data(known){
   dealOnlySites:require("./deal-only-site-ledger").stats(),
   unlinkedDiscovery:require("./crm-unlinked-discovery").stats(),
   recoveredInventory:require("./deal-only-inventory").stats(),
+  dealOnlyDossierQueue:require("./deal-only-dossier-queue").stats(),
   crmCardTotal:virtual.stats.rawCompanyCount,
   excludedCompanyCount:state.excludedCompanies.length,
   excludedCompanies:state.excludedCompanies.map(c=>({...c,name:format(c.name).name})),
@@ -839,6 +840,10 @@ function coverageLog(){
  if(!state.companies.length)return;
  try{
   const snap=data(()=>[]);
+  // Progressive read-only first-letter and follow-up research for all
+  // recovered CRM-less companies, even after the paid site-search queue ends.
+  if(snap.dealOnlyClients?.length)require("./deal-only-dossier-queue")
+   .tick(snap.dealOnlyClients,{perRun:48});
   const companyList=snap.companies||[];
   const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   require("./classification-census").consider(companyList.length,typed.length,state.companies.length,snap.classificationCensusReady);
