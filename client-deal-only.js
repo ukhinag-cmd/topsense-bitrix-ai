@@ -69,7 +69,9 @@ function page(payload,options={}){
  const menu='<nav><a href="/contractors">← Дашборд</a> · <a href="/contractors/holdings">Холдинги</a> · '+
  '<a href="/contractors/deal-only?kind=all">Все кандидаты</a> · '+
  '<a href="/contractors/deal-only?kind=repeat">С повторными сделками</a> · '+
- '<a href="/contractors/deal-only?kind=reviewed">Известные примеры</a></nav>';
+ '<a href="/contractors/deal-only?kind=reviewed">Известные примеры</a> · '+
+ '<a href="/contractors/deal-handoff.csv">Скачать сделки без установленной компании (CSV) ↓</a> · '+
+ '<a href="/contractors/deal-handoff.csv?scope=all">Все непривязанные сделки (CSV) ↓</a></nav>';
  const pageLink=n=>'/contractors/deal-only?kind='+encodeURIComponent(kind)+'&page='+n;
  const pager='<div class="paging">'+(shown>1?'<a href="'+pageLink(shown-1)+'">← Назад</a>':'')+
  '<span>Страница '+shown+' из '+pageCount+'</span>'+
@@ -91,6 +93,7 @@ function page(payload,options={}){
  tile(withType,"Клиентов с определённым типом")+
  '</div>'+
  '<p class="note">Последовательно изучаются первые и последние письма клиентов без карточек CRM. Поставлено сделок на изучение после запуска очереди: '+Number(dossierQueue.dealsSubmitted||0)+'. Это не означает, что все уже изучены. Подтверждённый тип не присваивается по одной заявке.</p>'+
+ '<p class="note"><strong>Передача в отдельный чат:</strong> скачайте CSV со сделками, для которых юридическая компания ещё не установлена; затем загрузите CSV во второй чат. Основное направление ТОП-СЕНС больше не запускает углублённый анализ этих сделок автоматически. Файл доступен только после полного исторического сканирования. Отсутствие подтверждённого клиента не означает, что обращение никогда ранее не читали.</p>'+
  '<p class="note">Статус полного сканирования: '+esc(stats.scanCompleteness||"не начато")+
  '. Название в теме сделки — только отправная точка: первое письмо, последующие ответы, реквизиты и документы проверяются отдельно.'+
  ' Не путать число сделок без COMPANY_ID с количеством юридических лиц. Никакие CRM-карточки и сделки не создаются.</p>'+
