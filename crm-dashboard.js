@@ -820,6 +820,25 @@ function route(req,res,pathname,known){
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
  if(pathname==="/contractors/holdings"){write(res,200,require("./client-holdings").page(data(known)),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/deal-handoff-summary"){
+  const exportApi=require("./deal-only-handoff-export");
+  const query=new URL(req.url,"http://localhost").searchParams;
+  const snap=exportApi.snapshot(query.get("scope")||"unresolved");
+  write(res,snap.ready?200:503,exportApi.summary(snap));return true;
+ }
+ if(pathname==="/contractors/deal-handoff.csv"){
+  const exportApi=require("./deal-only-handoff-export");
+  const query=new URL(req.url,"http://localhost").searchParams;
+  const snap=exportApi.snapshot(query.get("scope")||"unresolved");
+  if(!snap.ready){write(res,503,{error:snap.reason});return true}
+  write(res,200,exportApi.csv(snap),"text/csv; charset=utf-8",{
+   "content-disposition":"attachment; filename=TOPSENSE_unresolved_deals_"+snap.scope+".csv"
+  });
+  console.log(JSON.stringify({component:"deal-handoff-export",event:"download",
+   scope:snap.scope,rows:snap.exported,withoutCompanyId:snap.total,
+   scannedAt:snap.latestFullHistoryAt}));
+  return true;
+ }
  if(pathname==="/contractors/deal-only"){const qs=new URL(req.url,"http://localhost").searchParams;write(res,200,require("./client-deal-only").page(data(known),{page:qs.get("page"),kind:qs.get("kind")}),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/leads"){const qs=new URL(req.url,"http://localhost").searchParams;write(res,200,require("./client-leads").html(data(known),{page:qs.get("page"),kind:qs.get("kind"),link:qs.get("link")}),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
@@ -842,8 +861,9 @@ function coverageLog(){
   const snap=data(()=>[]);
   // Progressive read-only first-letter and follow-up research for all
   // recovered CRM-less companies, even after the paid site-search queue ends.
-  if(snap.dealOnlyClients?.length)require("./deal-only-dossier-queue")
-   .tick(snap.dealOnlyClients,{perRun:48});
+  if(String(process.env.TOPSENSE_DEAL_ONLY_RESEARCH_ENABLED||"0")==="1"&&
+     snap.dealOnlyClients?.length)
+   require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:48});
   const companyList=snap.companies||[];
   const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   require("./classification-census").consider(companyList.length,typed.length,state.companies.length,snap.classificationCensusReady);
