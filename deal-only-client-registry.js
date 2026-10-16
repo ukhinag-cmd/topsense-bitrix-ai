@@ -127,14 +127,22 @@ function view(companies){
   const revised=naming.resolve(client,evidence);
   const upgraded=ledger.apply(revised);
   // Keep the same stable synthetic ID even after the legal name changes.
-  ledger.offer(upgraded);
+  if(String(process.env.TOPSENSE_DEAL_ONLY_RESEARCH_ENABLED||"0")==="1")
+   ledger.offer(upgraded);
   Object.assign(client,upgraded);
  }
  const siteResearch=require("./deal-only-site-research");
  // Gradual bounded research. Each pass can discover new public sites,
  // without interfering with the main Bitrix24 company site queue.
- siteResearch.enqueue(groups,{read:id=>intake.get(id),limit:16});
- for(const c of groups)Object.assign(c,siteResearch.enrich(c,id=>intake.get(id)));
+ if(String(process.env.TOPSENSE_DEAL_ONLY_RESEARCH_ENABLED||"0")==="1"){
+  siteResearch.enqueue(groups,{read:id=>intake.get(id),limit:16});
+  for(const c of groups)Object.assign(c,siteResearch.enrich(c,id=>intake.get(id)));
+ }else{
+  // Previously saved site evidence is still displayed, but no research or
+  // writes for handed-off deals are scheduled by the main classification lane.
+  const savedSites=require("./deal-only-site-ledger");
+  for(const c of groups)Object.assign(c,savedSites.apply(c));
+ }
  return groups;
 }
 function stats(){return {status:coverage,updatedAt,matchedDeals:snapshot.size,
