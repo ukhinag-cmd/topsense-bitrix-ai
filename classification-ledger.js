@@ -55,8 +55,14 @@ function apply(c){
  // A new deal without correspondence, a changed website or a manual CRM
  // field edit must never silently rewrite the company's type or site.
  const identityChanged=Boolean(identity(c)&&saved.identityHash!==identity(c));
- const currentName=identityChanged&&saved.companyName?saved.companyName:c.name;
- return {...c,name:currentName,organizationType:saved.type,type:saved.type,
+ // Reused CRM ID/renamed legal entity is NOT proof of the original
+ // organization. Keep its previous qualification in the durable ledger
+ // without misassigning it to a potentially different company.
+ if(identityChanged)return {...c,organizationType:"",type:"",
+  companyIdentityReviewRequired:true,previousQualifiedType:saved.type,
+  previousQualifiedName:saved.companyName||"",
+  researchStatus:"identity_changed_requires_review"};
+ return {...c,organizationType:saved.type,type:saved.type,
   category:saved.category||c.category,
   segmentSource:"Квалификация закреплена · "+(saved.source||"сохранённый источник"),
   segmentConfidence:saved.confidence||"Сохранённая квалификация",
@@ -64,9 +70,8 @@ function apply(c){
   siteProfileUrl:saved.siteUrl||c.siteProfileUrl||"",
   siteVerified:saved.siteUrl||c.siteVerified||"",
   classificationFrozen:true,classificationFrozenAt:saved.savedAt,
-  companyIdentityReviewRequired:identityChanged,
-  researchStatus:identityChanged?"identity_changed_requires_review":
-   (c.researchStatus||"qualified_immutable")};
+  ledgerRestored:true,companyIdentityReviewRequired:false,
+  researchStatus:c.researchStatus||"qualified_immutable"};
 }
 function offer(c){
  const id=str(c?.id),type=str(c?.organizationType);
