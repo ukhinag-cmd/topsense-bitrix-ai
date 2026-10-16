@@ -25,11 +25,11 @@ test("a type based only on the company name cannot override stronger stored site
   organizationType:engineer,segmentSource:"Название CRM, без подтверждения сайтом",siteStatus:"site_pending"});
  assert.equal(x.organizationType,contractor);
 });
-test("a new verified first-party site may supersede old preliminary type",()=>{
+test("new site research cannot silently supersede previously qualified type",()=>{
  const name="ООО Заводская Интеграция";
  const c={id:"40001",name,organizationType:engineer,siteStatus:"official_site_verified",
   segmentSource:"Подтверждено официальным сайтом"};
- assert.equal(ledger.apply(c).organizationType,engineer);
+ assert.equal(ledger.apply(c).organizationType,contractor);
 });
 test("company identity changes do not silently carry classification to another legal entity",()=>{
  const value=ledger.apply({id:"40001",name:"ДРУГАЯ ОРГАНИЗАЦИЯ",
