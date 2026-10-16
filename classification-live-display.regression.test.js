@@ -35,3 +35,20 @@ test("when live reading is not ready, dashboard falls back to saved historical c
  const html=overview.render(payload,"Обзор").replace(/[\u00a0\u202f]/g," ");
  assert.match(html,/Тип определён<\/div><div class="metric-num"[^>]*>712<\/div>/);
 });
+
+test("Total base type counter uses CRM plus deal-only cards, not CRM-only numerator",()=>{
+ const payload=fixture(715);
+ payload.companies=[
+  {id:"105",name:"ООО «Промышленный монтаж»",organizationType:"Монтажно-строительная организация",category:"Подрядчики"},
+  {id:"dealonly:discovered:региональныйзавод",name:"ООО «Региональный завод»",
+   companyCardMissing:true,organizationType:"",category:"Не определены"}
+ ];
+ payload.total=2;
+ const html=overview.render(payload,"Обзор").replace(/[\u00a0\u202f]/g," ");
+ assert.match(html,/Тип определён<\/div><div class="metric-num"[^>]*>1<\/div>/);
+ assert.match(html,/Не определён тип<\/div><div class="metric-num"[^>]*>1<\/div>/);
+ assert.match(html,/50(?:\.0)?% всех аналитических записей/);
+ const listHtml=list.html(payload).replace(/[\u00a0\u202f]/g," ");
+ assert.match(listHtml,/По всей аналитической базе: 1 из 2 записей имеют тип/);
+ assert.match(listHtml,/Из них CRM-карточки: 715 из 1 559/);
+});
