@@ -582,6 +582,7 @@ async function loadPilot(){
   require("./deal-only-name-ledger").ingest(entries);
   require("./deal-only-site-ledger").ingest(entries);
   require("./deal-only-inventory").read(entries);
+  require("./crm-morning-monitor").ingest(entries);
   require("./name-site-search-checkpoint").ingest(entries);
   require("./purchase-checkpoint").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
@@ -667,6 +668,7 @@ function data(known){
  const finalization=require("./client-finalization");
  const requisites=require("./company-requisites"),finances=require("./financial-2025");
  const ledger=require("./classification-ledger");
+ const monitor=require("./crm-morning-monitor");
  const typedRecords=require("./client-type-inference").apply(records)
   .map(c=>ledger.apply(c))
   .map(c=>finalization.apply({...c,
@@ -677,7 +679,14 @@ function data(known){
  // group as a durable identity. Ignore transient pre-restoration observations.
  if(state.pilotUpdatedAt&&require("./website-profiler").stats().restorationComplete)
   ledger.offerMany(typedRecords);
- const virtual=require("./crm-duplicates").consolidate(typedRecords);
+ const qualifiedWithDelta=typedRecords.map(c=>{
+  const delta=monitor.forCompany(c.id);
+  return delta?{...c,hasNewCorrespondence:true,
+   latestCorrespondenceAt:delta.changedAt,
+   latestCorrespondenceActivityId:delta.lastActivityId,
+   relationshipChangeReviewRequired:true}:c;
+ });
+ const virtual=require("./crm-duplicates").consolidate(qualifiedWithDelta);
  const baseAnalyticCompanies=virtual.companies.map(c=>({...c,
   name:require("./company-name-format").display(c.name).name,
   relationshipPotential:require("./client-relationship-potential").score(c)}));
@@ -784,6 +793,7 @@ function data(known){
   relationshipPotential:require("./client-relationship-potential").stats(),
   nameSiteSearch:require("./name-site-search").stats(),
   dealIntake:require("./crm-deal-intake").stats(),
+  crmMorningMonitor:require("./crm-morning-monitor").stats(),
   companies:allAnalyticCompanies
  };
 }
