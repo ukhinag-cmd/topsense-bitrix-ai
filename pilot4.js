@@ -34,15 +34,35 @@ async function store(action, rows) {
   const endpoint = readEnv("GOOGLE_SHEET_STORE_URL");
   const secret = readEnv("GOOGLE_SHEET_STORE_SECRET");
   if (!endpoint || !secret) throw new Error("private checkpoint store not configured");
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ action, secret, ...(rows ? { rows } : {}) }),
-    signal: AbortSignal.timeout(20000)
-  });
-  const data = await response.json();
-  if (!response.ok || data.ok === false) throw new Error("checkpoint error: " + (data.error || response.status));
-  return data;
+  // The store uses fixed-key upserts. Retrying the same payload is idempotent;
+  // never proceed to a paid API call unless the reservation was acknowledged.
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ action, secret, ...(rows ? { rows } : {}) }),
+        signal: AbortSignal.timeout(25000)
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) {
+        const error = new Error("checkpoint error: " + (data.error || response.status));
+        error.retryable = response.status === 429 || response.status >= 500;
+        throw error;
+      }
+      return data;
+    } catch (error) {
+      lastError = error;
+      const transient = error.retryable === true ||
+        /aborted due to timeout|timed? ?out|fetch failed|ECONNRESET|ETIMEDOUT/i.test(String(error.message || error));
+      if (!transient || attempt === 3) break;
+      console.warn(JSON.stringify({component:"topsense-paid-v4",event:"store-retry",
+        action,attempt,reason:String(error.message || error).slice(0,100),at:iso()}));
+      await pause(attempt * 1500);
+    }
+  }
+  throw lastError;
 }
 
 async function upsert(key, payload) {
