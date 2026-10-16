@@ -212,6 +212,10 @@ async function run(companies){
    crmCardMissingCandidates:unlinkedCensus.crmCardMissingCandidates,
    possibleExistingClients:unlinkedCensus.possibleExistingClients,
    scanCompleteness:unlinkedCensus.scanCompleteness}));
+  // Main chat owns CRM-company classification. Historical deal-only
+  // research is handed off by CSV to a separate lane and must not
+  // auto-start again on a server restart.
+  if(String(process.env.TOPSENSE_DEAL_ONLY_RESEARCH_ENABLED||"0")==="1"){
   // Focus the first bounded deep-read batch on repeat customer candidates
   // that have no company card. Study each deal's earliest inbound email and
   // subsequent correspondence, not just its title. CRM is read-only.
@@ -231,6 +235,10 @@ async function run(companies){
     event:"chronological-mail-research-queued",
     priorityCompanies:unexplored.filter(c=>!c.linkedExisting&&c.dealCount>=2).length,
     proposedDeals:candidateDeals.length,queued:accepted}));
+  }
+  }else{
+   console.log(JSON.stringify({component:"unlinked-client-discovery",
+    event:"deep-research-handoff-paused",candidateGroups:unlinkedCensus.crmCardMissingCandidates}));
   }
   // Compute relationship potential from full deal history BEFORE slow
   // procurement/attachment stage audits. Only direct CRM company links count.
