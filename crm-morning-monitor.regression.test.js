@@ -102,3 +102,10 @@ test("Main server schedules daily change scanner with no paid AI and keeps Bitri
  const dashboard=fs.readFileSync("crm-dashboard.js","utf8");
  assert.match(dashboard,/crmMorningMonitor:/);
 });
+
+test("Deal intake honors forced re-inspection only when new correspondence was seen",()=>{
+ const source=fs.readFileSync("crm-deal-intake.js","utf8");
+ assert.match(source,/function queueDeals\(deals,\{force=false\}=\{\}\)/);
+ assert.match(source,/if\(\(visited\.has\(id\)&&!force\)\|\|pending\.has\(id\)\)continue/);
+ assert.match(source,/if\(force\)visited\.delete\(id\)/);
+});
