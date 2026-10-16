@@ -49,13 +49,40 @@ function fresh(row,now=Date.now()){
 async function request(action,rows){
  const url=String(process.env.GOOGLE_SHEET_STORE_URL||"").trim();
  const secret=String(process.env.GOOGLE_SHEET_STORE_SECRET||"").trim();
- const body={action,secret};
- if(rows)body.rows=rows;
- const response=await fetch(url,{method:"POST",headers:{"content-type":"application/json","accept":"application/json"},
-  body:JSON.stringify(body),redirect:"follow",signal:AbortSignal.timeout(28000)});
- const result=await response.json();
- if(!response.ok||result?.ok===false)throw Error("Existing private store request failed");
- return result;
+ if(!url||!secret)throw Error("private_store_unconfigured");
+ const body=JSON.stringify({action,secret,...(rows?{rows}:{})});
+ let lastError=null;
+ // All writes are upserts with stable keys. An ambiguous timeout can safely
+ // retry the identical payload, never creating another paid reservation.
+ for(let attempt=1;attempt<=3;attempt++){
+  try{
+   const response=await fetch(url,{method:"POST",
+    headers:{"content-type":"application/json","accept":"application/json"},
+    body,redirect:"follow",signal:AbortSignal.timeout(28000)});
+   const raw=await response.text();
+   let result;
+   try{result=JSON.parse(raw)}catch{
+    const e=Error("private_store_invalid_json");
+    e.retryable=response.ok||response.status>=500||response.status===429;
+    throw e;
+   }
+   if(!response.ok||result?.ok===false){
+    const e=Error("private_store_rejected");
+    e.retryable=response.status===429||response.status>=500;
+    throw e;
+   }
+   return result;
+  }catch(e){
+   lastError=e;
+   const transient=e.retryable===true||
+    /aborted due to timeout|timed? ?out|fetch failed|ECONNRESET|ETIMEDOUT/i.test(String(e?.message||e));
+   if(!transient||attempt===3)break;
+   console.warn(JSON.stringify({component:"site-profile-store",event:"bridge-retry",
+    action,attempt,reason:String(e.message||e).slice(0,90)}));
+   await new Promise(resolve=>setTimeout(resolve,attempt*1800));
+  }
+ }
+ throw lastError||Error("private_store_unavailable");
 }
 async function load(){
  const map=new Map();
