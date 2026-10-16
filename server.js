@@ -7417,6 +7417,21 @@ server.listen(PORT, "0.0.0.0", () => {
   setTimeout(paidClientCoverageTick,90000);
   setInterval(paidClientCoverageTick,12*60*1000);
 
+  // At 08:00 Moscow (or after next startup if Render slept through that
+  // time), scan only new Bitrix24 deals and correspondence. This read-only
+  // daily maintenance never launches a paid model call or edits CRM.
+  // Only one completed check per Moscow calendar day is committed to the
+  // existing private analytics store. Missing scans are caught up via the
+  // durable prior watermark.
+  function dailyReadOnlyCrmChanges(){
+    require("./crm-morning-monitor").tick().catch(error=>{
+      console.warn(JSON.stringify({component:"crm-morning-monitor",
+        event:"cycle-error",error:String(error?.message||error).slice(0,140)}));
+    });
+  }
+  setTimeout(dailyReadOnlyCrmChanges,3*60*1000);
+  setInterval(dailyReadOnlyCrmChanges,20*60*1000);
+
   // Load the permanent company registry. Continuous historical scanning stays opt-in.
   setTimeout(async () => {
     await loadPersistedContractors();
