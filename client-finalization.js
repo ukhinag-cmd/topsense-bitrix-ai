@@ -42,6 +42,13 @@ function apply(c){
  // The company name and CRM/relationship fields remain LIVE.
  // Historical verified site and type are now immutable for research passes.
  const changed=Boolean(identity(c)&&row.identityHash!==identity(c));
+ // A CRM ID reused for a different legal name is a conflict, NOT proof that
+ // the old qualified legal entity now has the changed name.
+ if(changed)return {...c,organizationType:"",type:"",
+  previousQualifiedType:row.organizationType,
+  companyIdentityReviewRequired:true,
+  researchStatus:"completed_identity_changed_review",
+  researchCompletedAt:row.completedAt};
  return {...c,organizationType:row.organizationType,type:row.organizationType,
   category:row.category||c.category,siteStatus:"research_completed",
   siteProfileUrl:row.siteUrl,siteVerified:row.siteUrl,
