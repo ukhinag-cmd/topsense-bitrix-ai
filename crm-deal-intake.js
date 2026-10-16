@@ -236,14 +236,16 @@ async function inspect(deal){
  // names are logged or shared with external public AI services.
  return out;
 }
-function queueDeals(deals){
+function queueDeals(deals,{force=false}={}){
  const sorted=(deals||[]).filter(x=>x&&/^\d+$/.test(text(x.ID)))
   .sort((a,b)=>Date.parse(b.DATE_CREATE||0)-Date.parse(a.DATE_CREATE||0));
  let added=0;
  for(const d of sorted){
   const id=text(d.ID);
-  if(visited.has(id)||pending.has(id))continue;
+  if(pending.has(id))continue;
+  if(visited.has(id)&&!force)continue;
   if(queue.length>=200)break;
+  if(force)visited.delete(id); // changed email requires rereading correspondence
   pending.add(id);queue.push(d);added++;
  }
  state.queued=queue.length;
