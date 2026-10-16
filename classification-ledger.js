@@ -50,21 +50,23 @@ function ingest(rows){
 function get(id){return records.get(str(id))||null}
 function apply(c){
  const saved=get(c?.id);
- if(!saved||!identity(c)||saved.identityHash!==identity(c))return c;
- const currentType=taxonomy.known(c?.organizationType)?c.organizationType:"";
- const currentRank=currentType?rank(c):0;
- if(currentType&&(currentRank>=saved.rank||currentType===saved.type))return c;
- // Use saved evidence only as an analytical fallback. Never claim the
- // current website was inspected or legally verified during this run.
- const category=saved.category||c.category;
- return {...c,organizationType:saved.type,type:saved.type,category,
-  segmentSource:"Сохранённый реестр типов · "+(saved.source||"источник указан в архиве"),
-  segmentConfidence:saved.confidence||"Предварительная классификация",
-  verification:saved.verification||"Восстановлено из сохранённой аналитики",
-  ledgerRestored:true,ledgerSourceRank:saved.rank,
-  siteProfileUrl:c.siteProfileUrl||saved.siteUrl||"",
-  siteVerified:c.siteVerified||"",
-  researchStatus:c.researchStatus||"type_restored_from_ledger"};
+ if(!saved||!taxonomy.known(saved.type))return c;
+ // A qualified customer is locked to the LAST persisted decision.
+ // A new deal without correspondence, a changed website or a manual CRM
+ // field edit must never silently rewrite the company's type or site.
+ const identityChanged=Boolean(identity(c)&&saved.identityHash!==identity(c));
+ const currentName=identityChanged&&saved.companyName?saved.companyName:c.name;
+ return {...c,name:currentName,organizationType:saved.type,type:saved.type,
+  category:saved.category||c.category,
+  segmentSource:"Квалификация закреплена · "+(saved.source||"сохранённый источник"),
+  segmentConfidence:saved.confidence||"Сохранённая квалификация",
+  verification:saved.verification||"Сохранено в аналитической базе",
+  siteProfileUrl:saved.siteUrl||c.siteProfileUrl||"",
+  siteVerified:saved.siteUrl||c.siteVerified||"",
+  classificationFrozen:true,classificationFrozenAt:saved.savedAt,
+  companyIdentityReviewRequired:identityChanged,
+  researchStatus:identityChanged?"identity_changed_requires_review":
+   (c.researchStatus||"qualified_immutable")};
 }
 function offer(c){
  const id=str(c?.id),type=str(c?.organizationType);
@@ -72,13 +74,13 @@ function offer(c){
  const hash=identity(c);
  if(!hash)return false;
  const existing=records.get(id)||pending.get(id)?.payload;
+ // No fresh correspondence => never rewrite an already qualified record.
+ // Even with fresh correspondence, the existing type is kept until a
+ // separate evidence-based requalification is explicitly approved.
+ if(existing)return false;
  const nextRank=rank(c);
- if(existing&&existing.identityHash===hash){
-  // An unresolved/weak scan must not replace existing stronger evidence.
-  if(existing.type===type&&existing.rank>=nextRank)return false;
-  if(existing.type!==type&&existing.rank>nextRank)return false;
- }
  const row={recordType:"topsense-type-ledger-v1",companyId:id,identityHash:hash,
+  companyName:str(c.name).slice(0,180),
   type,category:str(c.category).slice(0,80),rank:nextRank,
   source:str(c.segmentSource).slice(0,280),
   confidence:str(c.segmentConfidence).slice(0,120),
