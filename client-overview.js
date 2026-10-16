@@ -263,8 +263,11 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  nr(payload.dealOnlyClientCount)+'</strong> · <a href="/contractors/deal-only">Посмотреть заявки и контакты ↗</a></div>':'')+
  '<div class="stats">'+
  hero("Компании",nr(b.total),section==="Обзор"?"CRM-клиентов: "+nr(payload.virtualCustomerTotal||0)+" · из сделок: "+nr(payload.dealOnlyClientCount||0):"в направлении "+section,"#174863")+
- hero("Тип определён",displayTyped,coverageLabel+' компаний CRM · актуальное значение при восстановленных данных',"#168B8F")+
- hero("Не определён тип",displayUntyped,"Требуется проверка по источникам","#C7843E")+
+ hero("Тип определён",nr(b.total?b.typed:effectiveTyped),
+  (b.total?pct(b.typed,b.total):coverageLabel)+"% всех аналитических записей · "+
+  "включая предварительные типы","#168B8F")+
+ hero("Не определён тип",nr(b.total?b.untyped:effectiveUntyped),
+  "Ожидают проверки компании CRM и кандидаты из сделок","#C7843E")+
  hero("Клиенты с e-mail",nr(b.withEmail),"с контактным адресом CRM","#4B78B9")+
  hero("Подтверждения покупки",nr(b.buyers),"сделки по согласованным стадиям","#247A78")+
  hero("Сайты исследованы",nr(studiedCompanySites),
