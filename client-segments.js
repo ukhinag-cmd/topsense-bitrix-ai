@@ -12,10 +12,17 @@ function html(payload){
  const live=payload.classificationLive||{};
  const liveUsable=live.ready===true&&Number.isSafeInteger(live.typed)&&
   Number.isSafeInteger(live.total)&&live.typed<=live.total;
- const countedTyped=liveUsable?live.typed:census.provisional?census.typed:nTyped;
- const countedUntyped=liveUsable?live.untyped:census.provisional?census.untyped:records.length-nTyped;
+ // The full searchable base contains CRM customers PLUS historical
+ // deal-only candidates. The top metrics must use the same population.
+ const countedTyped=records.length?nTyped:liveUsable?live.typed:census.provisional?census.typed:nTyped;
+ const countedUntyped=records.length?records.length-nTyped:
+  liveUsable?live.untyped:census.provisional?census.untyped:records.length-nTyped;
  const countLabel=v=>v===null?"—":Number(v).toLocaleString("ru-RU");
- const censusNote=liveUsable?
+ const censusNote=records.length?
+  "По всей аналитической базе: "+countLabel(nTyped)+" из "+countLabel(records.length)+
+  " записей имеют тип, включая предварительные классификации. Из них CRM-карточки: "+
+  (liveUsable?countLabel(live.typed)+" из "+countLabel(live.total):"ещё загружаются")+
+  ". Компании из сделок могут требовать подтверждения юридической идентичности.":liveUsable?
   "Текущие данные CRM: "+countLabel(live.typed)+" из "+countLabel(live.total)+
   " компаний с типом."+(live.provisional?" Исследование сайтов продолжается.":"")+
   (census.provisional?" Последний завершённый контрольный снимок: "+
