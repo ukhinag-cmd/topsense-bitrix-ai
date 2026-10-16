@@ -19,12 +19,17 @@ test("Qualified company type/site/name cannot be changed by fresh website scan o
   organizationType:"Дилер промышленного оборудования",
   category:"Партнёрские продажи",siteVerified:"https://wrong.example/",
   segmentSource:"Новое совпадение по сайту"});
- assert.equal(altered.organizationType,"Монтажно-строительная организация");
- assert.equal(altered.name,"ООО Тестовое предприятие");
- assert.equal(altered.siteVerified,"https://factory.example/");
- assert.equal(altered.classificationFrozen,true);
+ assert.equal(altered.organizationType,"");
+ assert.equal(altered.name,"ООО Исправленный менеджером");
+ assert.equal(altered.previousQualifiedType,"Монтажно-строительная организация");
  assert.equal(altered.companyIdentityReviewRequired,true);
- assert.equal(ledger.offer({...altered,organizationType:"Производитель КИПиА / датчиков"}),false);
+ const original=ledger.apply({id,name:"ООО Тестовое предприятие",
+  organizationType:"Дилер промышленного оборудования",
+  siteVerified:"https://wrong.example/"});
+ assert.equal(original.organizationType,"Монтажно-строительная организация");
+ assert.equal(original.siteVerified,"https://factory.example/");
+ assert.equal(original.classificationFrozen,true);
+ assert.equal(ledger.offer({...original,organizationType:"Производитель КИПиА / датчиков"}),false);
 });
 test("Daily change policy is Moscow-local 08:00 and distinguishes email from calls",()=>{
  assert.equal(monitor.hour(new Date("2026-10-16T04:59:00Z")),7);
