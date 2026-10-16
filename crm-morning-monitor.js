@@ -24,7 +24,16 @@ function ingest(rows){
  const saved=(rows||[]).find(r=>r?.key===KEY)?.payload;
  if(!valid(saved))return false;
  if(checkpoint&&Date.parse(checkpoint.checkedAt)>Date.parse(saved.checkedAt))return false;
- checkpoint=saved;rowsLoaded++;return true;
+ checkpoint=saved;rowsLoaded++;
+ // Restore reviewed-company markers across service restarts. Store IDs and
+ // dates only; no personal correspondence or customer email body.
+ for(const rec of saved.latestCorrespondence||[]){
+  const id=str(rec.companyId),activity=str(rec.lastActivityId);
+  if(/^\d+$/.test(id)&&/^\d+$/.test(activity))changed.set(id,{
+   companyId:id,lastActivityId:activity,changedAt:str(rec.changedAt),
+   observedAt:str(saved.checkedAt),status:"new_correspondence_requires_evidence_review"});
+ }
+ return true;
 }
 async function bridge(action,rows){
  const endpoint=str(process.env.GOOGLE_SHEET_STORE_URL);
@@ -129,8 +138,9 @@ async function tick(now=new Date()){
   if(hour(now)<8||checkpoint.moscowDay===day(now)){
    lastStatus="not_due";return {status:lastStatus};
   }
-  const since=new Date(Math.max(Date.now()-DELAY_MS,
-   Date.parse(checkpoint.checkedAt)-15*60000)).toISOString();
+  // Never discard an outage gap: even after days offline, restart from the
+  // last successful scan (with 15 minutes overlap), not "48 hours ago".
+  const since=new Date(Date.parse(checkpoint.checkedAt)-15*60000).toISOString();
   const [deals,activities]=await Promise.all([
    newDeals(since),
    list("crm.activity.list",since,["ID","OWNER_ID","OWNER_TYPE_ID","BINDINGS",
@@ -175,7 +185,9 @@ async function tick(now=new Date()){
    highestDealId:Math.max(checkpoint.highestDealId,...deals.map(x=>Number(x.ID))),
    highestActivityId:Math.max(checkpoint.highestActivityId,...activities.map(x=>Number(x.ID))),
    newDeals:freshDeals.length,newMessages:freshActivities.length,
-   companiesWithMessages:companyChanges.size,linkedDealsQueued:accepted};
+   companiesWithMessages:companyChanges.size,linkedDealsQueued:accepted,
+   latestCorrespondence:[...companyChanges].slice(0,2000).map(([companyId,a])=>
+    ({companyId,lastActivityId:str(a.ID),changedAt:str(a.CREATED||now.toISOString())}))};
   await bridge("upsert",[{key:KEY,payload:cp}]);
   checkpoint=cp;
   for(const [id,a] of companyChanges)markCompany(id,a,now.toISOString());
