@@ -5,6 +5,9 @@ function page(payload,options={}){
  const requested=Math.max(1,Number.parseInt(String(options.page||"1"),10)||1);
  const stats=payload.unlinkedDiscovery||{};
  const all=payload.dealOnlyClients||[];
+ const researched=all.filter(c=>Number(c.emailAnalysedDeals||0)>0).length;
+ const withType=all.filter(c=>require("./client-taxonomy").known(c.organizationType)).length;
+ const dossierQueue=payload.dealOnlyDossierQueue||{};
  const filtered=all.filter(x=>kind==="all"||kind==="repeat"?
   (kind==="all"||x.candidateReview===true&&Number(x.crmDealCount||0)>=2):
   !x.candidateReview);
@@ -83,7 +86,11 @@ function page(payload,options={}){
  tile(stats.totalDeals||'—',"Сделок просмотрено")+
  tile(stats.withoutCompanyId||'—',"Без привязки к компании")+
  tile(stats.crmCardMissingCandidates||'—',"Групп-кандидатов без карточки")+
- tile(stats.possibleExistingClients||'—',"Возможно принадлежат компаниям CRM")+'</div>'+
+ tile(stats.possibleExistingClients||'—',"Возможно принадлежат компаниям CRM")+
+ tile(researched,"Клиентов с прочитанной перепиской")+
+ tile(withType,"Клиентов с определённым типом")+
+ '</div>'+
+ '<p class="note">Последовательно изучаются первые и последние письма клиентов без карточек CRM. Поставлено сделок на изучение после запуска очереди: '+Number(dossierQueue.dealsSubmitted||0)+'. Это не означает, что все уже изучены. Подтверждённый тип не присваивается по одной заявке.</p>'+
  '<p class="note">Статус полного сканирования: '+esc(stats.scanCompleteness||"не начато")+
  '. Название в теме сделки — только отправная точка: первое письмо, последующие ответы, реквизиты и документы проверяются отдельно.'+
  ' Не путать число сделок без COMPANY_ID с количеством юридических лиц. Никакие CRM-карточки и сделки не создаются.</p>'+
