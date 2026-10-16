@@ -229,6 +229,18 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
   "Исторические клиенты восстановлены из сохранённого снимка ("+
    nr(payload.recoveredInventory.groups)+" групп). Новые сделки продолжают обрабатываться.":
   "";
+ const morning=payload.crmMorningMonitor||{};
+ const morningNote=morning.status==="complete"?
+  "Утренняя проверка Битрикс24 ("+String(morning.moscowDay||"")+
+  "): новых сделок — "+nr(morning.lastNewDeals||0)+
+  ", сообщений — "+nr(morning.lastNewMessages||0)+
+  ", клиентов с перепиской для сверки — "+nr(morning.lastCompaniesWithMessages||0)+
+  ". Уже квалифицированные типы закреплены.":
+  morning.status==="error"?
+  "Утренняя проверка Битрикс24 требует повторного запуска; последний успешно обработанный день — "+
+   String(morning.moscowDay||"не установлен")+". Квалификация компаний защищена от повторного изменения.":
+  "Автоматическая проверка новых сделок и переписки — ежедневно после 08:00 МСК. "+
+  "Повторная классификация ранее квалифицированных компаний без новых писем запрещена.";
  const sectionsMarkup=section==="Обзор"?
   '<div class="panel"><div class="panelheading"><h2>Коммерческие направления</h2><span>6 дашбордов</span></div>'+
   '<div class="segments">'+b.groups.map((g,i)=>'<a class="segment" href="/contractors?section='+encodeURIComponent(g.name)+'"><span class="dot" style="background:'+colors[(i+1)%colors.length]+'"></span><span class="segment-main"><b>'+esc(g.name)+'</b><small>Назначен тип: '+nr(g.typed)+' / '+nr(g.value)+'</small></span><strong>'+nr(g.value)+'</strong><span class="arrow">↗</span></a>').join("")+'</div>'+
@@ -257,6 +269,7 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  '<div class="quick"><a href="/contractors?purchase=buyers#clients">Покупали у нас ↗</a><a href="/contractors#subtypes">Все подтипы ↗</a><a href="/contractors/quality">Контроль качества ↗</a><a href="/contractors/leads">Новые лиды ↗</a><a href="/contractors/deal-only">Клиенты из сделок ↗</a><a href="/contractors/holdings">Холдинги ↗</a><a href="/contractors/duplicates">Проверка дублей ↗</a><a href="/contractors/list">Поиск конкретной компании ↗</a></div></header>'+
  '<main><nav class="tabs">'+tabs+'</nav><div class="status"><strong>'+esc(dataNote)+'</strong> · обновление CRM: '+esc(payload.updatedAt||"ещё нет")+' · последний показатель охвата на текущем снимке, а не подтверждение проверки всей базы. Автообновление страницы каждые 2 минуты.</div>'+
  '<div class="status">'+esc(censusNote)+'</div>'+
+ '<div class="status">'+esc(morningNote)+'</div>'+
  (historicText?'<div class="status">'+esc(historicText)+'</div>':'')+
  (Number(payload.dealOnlyClientCount||0)?
  '<div class="status"><strong>Клиенты из сделок без карточки компании: '+
