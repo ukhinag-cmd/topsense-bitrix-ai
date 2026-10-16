@@ -176,9 +176,11 @@ async function tick(now=new Date()){
   // adds a deal, changes a stage, or modifies a CRM company card.
   // Deliver the new deal list to the analytical intake separately.
   const intake=require("./crm-deal-intake");
-  const linkedNew=freshDeals.filter(d=>str(d.COMPANY_ID)&&str(d.COMPANY_ID)!=="0");
+  // New deals without new correspondence are counted, but cannot silently
+  // change an old customer profile. Only refreshed deal email threads enter
+  // the existing-client analytical evidence queue.
   const refreshed=[...refreshedDeals.values()].filter(d=>d&&/^\d+$/.test(str(d.ID)));
-  const accepted=intake.queueDeals([...linkedNew,...refreshed],{force:true});
+  const accepted=refreshed.length?intake.queueDeals(refreshed,{force:true}):0;
   // Commit watermark only after both complete snapshots and all direct
   // company associations are resolved. A failure retains the old checkpoint.
   const cp={recordType:TYPE,moscowDay:day(now),checkedAt:now.toISOString(),
