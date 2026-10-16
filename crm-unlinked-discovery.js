@@ -160,5 +160,21 @@ function group(companies=[],exclusions=[]){
  state.crmCardMissingCandidates=result.filter(x=>!x.linkedExisting).length;
  return result;
 }
+// Read-only export snapshot. A restarted process must finish a complete
+// historical scan before claiming that this is the full deal backlog.
+function unlinkedRecords(){
+ if(state.scanCompleteness!=="complete"||map.size!==state.totalDeals)
+  return null;
+ const intake=require("./crm-deal-intake");
+ return [...map.values()].filter(d=>!d.companyId||d.companyId==="0")
+  .map(d=>{
+   const identities=effectiveNames(d);
+   return {id:d.id,title:d.title,createdAt:d.createdAt,
+    contactId:d.contactId,stageId:d.stageId,
+    identityCandidates:identities.map(x=>({name:String(x.name||"").slice(0,180),
+     reason:String(x.reason||"").slice(0,90)})),
+    inspectedThisProcess:Boolean(intake.get(d.id))};
+  });
+}
 function stats(){return {...state}}
-module.exports={ingest,group,stats,candidateNames,normalize,namesFromInbound,effectiveNames};
+module.exports={ingest,group,stats,unlinkedRecords,candidateNames,normalize,namesFromInbound,effectiveNames};
