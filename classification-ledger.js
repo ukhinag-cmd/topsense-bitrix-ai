@@ -25,12 +25,22 @@ function inboundProof(c){
 function rank(c){
  if(inboundProof(c))return 5;
  const source=str(c?.segmentSource).toLowerCase(),conf=str(c?.segmentConfidence).toLowerCase();
+ // Verified and explicitly reviewed independent legal website evidence, not
+ // just a matching company title / CRM website / a model's confidence claim.
+ const reviewedSite=taxonomy.known(c?.verifiedOrgType)&&
+  c?.siteStatus==="official_site_verified"&&
+  /официальный сайт, проверенный по юридическим данным/i.test(str(c?.siteSource));
+ if(reviewedSite)return 5;
  if(source.includes("название crm")||conf.includes("по названию"))return 1;
- if(c?.siteStatus==="research_completed")return 6;
- if(c?.siteStatus==="official_site_verified"||c?.verifiedOrgType)return 5;
- if(c?.siteStatus==="site_profiled"||conf.includes("профильным раздел")||source.includes("проверенного сайта"))return 4;
- if(/подтверждено|официальный сайт|подтверждена/.test(conf)||source.includes("официальный сайт"))return 4;
- if(c?.aiStatus==="classified"||source.includes("ai")||source.includes("сохранённая аналитика"))return 2;
+ if(c?.aiStatus==="classified"||/^ai\s*[—-]/i.test(str(c?.verification)))return 2;
+ // Even a correctly parsed first-party site does not prove that it belongs
+ // to this CRM legal entity until independent requisites are corroborated.
+ if(c?.siteStatus==="site_profiled"||c?.siteStatus==="site_preliminary_profiled"||
+    c?.siteStatus==="official_site_verified"||
+    conf.includes("профильным раздел")||source.includes("проверенного сайта")||
+    /подтверждено|официальный сайт|подтверждена/.test(conf)||
+    source.includes("официальный сайт"))return 3;
+ if(source.includes("сохранённая аналитика"))return 2;
  return 2;
 }
 function valid(row,id){
@@ -71,7 +81,7 @@ function apply(c){
   researchStatus:"identity_changed_requires_review"};
  // A name-only or preliminary AI result is NOT a permanently qualified type.
  // Permit ONLY verified new first-party activity evidence to supersede it.
- if(saved.rank<=2&&inboundProof(c))return {...c,
+ if(saved.rank<=3&&inboundProof(c))return {...c,
   previousProvisionalType:saved.type,pendingEvidenceUpgrade:true,
   classificationFrozen:false,ledgerRestored:true};
  return {...c,organizationType:saved.type,type:saved.type,
@@ -99,7 +109,7 @@ function offer(c){
  // separate evidence-based requalification is explicitly approved.
  // Only preliminaries may be upgraded; actual verified qualifications stay
  // immutable. Identity hash MUST still refer to the same original legal card.
- if(existing&&!(existing.rank<=2&&inboundProof(c)&&existing.identityHash===hash))return false;
+ if(existing&&!(existing.rank<=3&&inboundProof(c)&&existing.identityHash===hash))return false;
  const nextRank=rank(c);
  const row={recordType:"topsense-type-ledger-v1",companyId:id,identityHash:hash,
   companyName:str(c.name).slice(0,180),
@@ -153,6 +163,8 @@ function stats(){
  }
  return {loaded:records.size,restored,stored,pending:pending.size,errors,lastError,
   provisional:[...records.values()].filter(x=>x.rank<4).length,
+  siteTypedAwaitingLegalProof:[...records.values()].filter(x=>x.rank===3).length,
+  priorSiteRank4AuditRecommended:[...records.values()].filter(x=>x.rank===4).length,
   frozenVerified:[...records.values()].filter(x=>x.rank>=4).length,byRank};
 }
 module.exports={PREFIX,LEGACY_PREFIX,identity,rank,valid,ingest,apply,offer,offerMany,flush,stats,get};
