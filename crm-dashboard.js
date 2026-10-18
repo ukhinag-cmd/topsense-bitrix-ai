@@ -585,6 +585,7 @@ async function loadPilot(){
   require("./crm-morning-monitor").ingest(entries);
   require("./name-site-search-checkpoint").ingest(entries);
   require("./purchase-checkpoint").ingest(entries);
+  require("./qualification-review-worklist").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
   state.paidControl={
@@ -852,6 +853,7 @@ function route(req,res,pathname,known){
  if(pathname==="/contractors/deal-only"){const qs=new URL(req.url,"http://localhost").searchParams;write(res,200,require("./client-deal-only").page(data(known),{page:qs.get("page"),kind:qs.get("kind")}),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/leads"){const qs=new URL(req.url,"http://localhost").searchParams;write(res,200,require("./client-leads").html(data(known),{page:qs.get("page"),kind:qs.get("kind"),link:qs.get("link")}),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/quality"){write(res,200,require("./client-quality").html(data(known)),"text/html; charset=utf-8");return true}
+ if(pathname==="/contractors/review-queue"){write(res,200,require("./qualification-review-worklist").render(data(known).companies),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/excluded"){write(res,200,require("./client-excluded").html(data(known)),"text/html; charset=utf-8");return true}
  if(pathname==="/contractors/duplicates.csv"){write(res,200,require("./client-duplicates").csv(data(known)),"text/csv; charset=utf-8",{"content-disposition":"attachment; filename=TOPSENSE_CRM_duplicates.csv"});return true}
  if(pathname==="/contractors/duplicates"){write(res,200,require("./client-duplicates").html(data(known)),"text/html; charset=utf-8");return true}
@@ -875,6 +877,8 @@ function coverageLog(){
      snap.dealOnlyClients?.length)
    require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:48});
   const companyList=snap.companies||[];
+  const reviewQueue=require("./qualification-review-worklist").inspect(companyList);
+  console.log(JSON.stringify({component:"qualification-review-worklist",event:"review-cycle",pending:reviewQueue.total,...reviewQueue.totals}));
   const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   require("./classification-census").consider(companyList.length,typed.length,state.companies.length,snap.classificationCensusReady);
   if(snap.classificationLive?.ready)console.log(JSON.stringify({component:"topsense-dashboard",event:"live-classification-counter",typed:snap.classificationLive.typed,total:snap.classificationLive.total,oldSnapshot:snap.classificationDisplay?.typed,censusReady:snap.classificationCensusReady}));
