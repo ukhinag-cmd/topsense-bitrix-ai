@@ -875,9 +875,13 @@ function coverageLog(){
   const snap=data(()=>[]);
   // Progressive read-only first-letter and follow-up research for all
   // recovered CRM-less companies, even after the paid site-search queue ends.
-  if(String(process.env.TOPSENSE_DEAL_ONLY_RESEARCH_ENABLED||"0")==="1"&&
-     snap.dealOnlyClients?.length)
-   require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:48});
+  // Historical original DEALS matter even without a manager-created CRM
+  // company card. Run a SMALL, read-only batch on every dashboard cycle.
+  // Bound the workload so it cannot starve current inbound-deal processing.
+  const dealIntake=require("./crm-deal-intake");
+  if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"") === "1"&&
+     snap.dealOnlyClients?.length&&dealIntake.stats().queued<80)
+   require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:12});
   const companyList=snap.companies||[];
   const reviewQueue=require("./qualification-review-worklist").inspect(companyList);
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
