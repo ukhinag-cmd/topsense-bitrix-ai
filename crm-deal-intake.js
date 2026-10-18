@@ -124,7 +124,7 @@ function summarizeActivities(input){
  const firstSignals=signals(firstText);
  let laterSignals=signals(""),allSignals=signals("");
  let laterAttachments=0,companyCardAttachments=0,firstIncomingSeen=false;
- const inboundStrings=[],legalNameCandidates=[];
+ const inboundStrings=[],legalNameCandidates=[],firstPartyActivities=[];
  const businessEmails=new Set(),websiteHints=new Set(),phoneHints=new Set();
  const ownMail=/^(?:topsense\.su|detector-gaza\.ru|rutector\.email)$/i;
  const blockedDomains=/^(?:bitrix24\.ru|google\.com|yandex\.ru|mail\.ru|t\.me|vk\.com|youtube\.com|telegram\.org)$/i;
@@ -139,6 +139,7 @@ function summarizeActivities(input){
   if(isInbound(a)){
    inboundStrings.push(txt);
    legalNameCandidates.push(...extractLegalNameCandidates(a.DESCRIPTION||"",a.ID));
+   firstPartyActivities.push(...require("./crm-first-party-activity").discover(a.DESCRIPTION||"",a.ID));
    for(const c of Array.isArray(a.COMMUNICATIONS)?a.COMMUNICATIONS:[]){
     for(const found of String(c.VALUE||"").matchAll(/[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})/giu)){
      const addr=found[0].toLowerCase(),host=found[1].toLowerCase();
@@ -171,7 +172,7 @@ function summarizeActivities(input){
   laterAttachmentCount:laterAttachments,companyCardAttachmentCount:companyCardAttachments,
   corporateDomains:mail.extract(inboundText).slice(0,8),
   requisitesInnCandidates:[...new Set(requisites)].slice(0,8),
-  legalNameCandidates:legalNameCandidates.slice(0,12),
+  legalNameCandidates:legalNameCandidates.slice(0,12),firstPartyActivities:firstPartyActivities.slice(0,6),
   senderEmails:[...businessEmails],websiteHints:[...websiteHints],phoneHints:[...phoneHints]};
 }
 
@@ -220,6 +221,7 @@ async function inspect(deal){
   out.correspondencePartial=partial;
   out.requisitesInnCandidates=evidence.requisitesInnCandidates;
   out.legalNameCandidates=evidence.legalNameCandidates;
+  out.firstPartyActivities=evidence.firstPartyActivities;
   out.senderEmails=evidence.senderEmails;
   out.websiteHints=evidence.websiteHints;
   out.phoneHints=evidence.phoneHints;
