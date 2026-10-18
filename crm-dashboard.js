@@ -275,27 +275,37 @@ function enqueueLinkedContactSites(){
  if(actualQueued)console.log(JSON.stringify({component:"topsense-dashboard",event:"linked-corporate-domain-discovery",
   queuedCandidates:actualQueued,candidatesConsidered:suggested.length,companiesWithMultipleContactDomains:multipleDomains}));
 }
-function enqueueDealMailSites(){
+function enqueueDealMailSites({limit=24}={}){
  const profiler=require("./website-profiler");
  const intake=require("./crm-deal-intake");
- let considered=0,queued=0;
+ const domains=require("./company-email-domains");
+ let considered=0,queued=0,multipleSenderDomains=0,noInboundSender=0;
+ // Only the sender's address of an inbound original CRM deal message.
+ // Manual CRM company website/name and quoted third-party domains are not
+ // used as evidence of the customer's company activity.
  for(const c of state.companies){
-  if(queued>=60)break;
-  // Previously verified specific legal-entity sites remain authoritative.
-  if(c.verifiedOrgType||c.siteCandidate||c.corporateDomain)continue;
-  const profile=profiler.get(c.id);
-  if(!["site_absent","site_pending","site_unavailable"].includes(profile.status))continue;
-  const first=intake.forCompany(c.id).find(d=>d.incomingEmails>0&&d.corporateDomains.length);
-  if(!first)continue;
+  if(queued>=limit)break;
+  if(c.verifiedOrgType||require("./client-finalization").isComplete(c.id))continue;
+  const correspondence=intake.forCompany(c.id).filter(d=>d.incomingEmails>0);
+  const observed=[...new Set(correspondence.flatMap(d=>
+    domains.extract(d.senderEmails||[])))];
+  if(!observed.length){noInboundSender++;continue}
+  if(observed.length!==1){multipleSenderDomains++;continue}
+  const selected=observed[0];
+  const previous=profiler.get(c.id);
+  // Already inspected this exact sender-domain site. Do not recheck because
+  // its type remained ambiguous, or because the CRM card shows another site.
+  if(previous?.siteIdentityEvidence==="inbound_sender_domain_matches_website"&&
+     previous?.emailSenderDomain===selected)continue;
   considered++;
-  for(const candidate of first.corporateDomains.slice(0,3)){
-   const accepted=profiler.enqueue([{...c,siteCandidate:"",
-    corporateDomain:candidate,siteSource:"Домен из входящей сделки"}])||0;
-   if(accepted){queued+=accepted;break}
-  }
+  queued+=profiler.enqueue([{...c,corporateDomain:selected,
+   siteCandidate:"",siteSource:"Домен отправителя входящего письма",
+   emailSenderDomain:selected}])||0;
  }
- if(queued)console.log(JSON.stringify({component:"topsense-dashboard",
-  event:"deal-email-website-candidates-queued",count:queued,considered}));
+ if(queued||multipleSenderDomains)
+  console.log(JSON.stringify({component:"topsense-dashboard",
+   event:"sender-domain-site-research",considered,queued,
+   conflictingSenderDomains:multipleSenderDomains,noInboundSender}));
  return queued;
 }
 function resumeUnresolvedCompanySites(){
@@ -882,6 +892,11 @@ function coverageLog(){
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"") === "1"&&
      snap.dealOnlyClients?.length&&dealIntake.stats().queued<80)
    require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:12});
+  // Primary free site research now follows ORIGINAL inbound sender domain,
+  // without waiting for the older CRM-site queue to become empty.
+  if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1"&&
+     require("./website-profiler").stats().queued<180)
+    enqueueDealMailSites({limit:24});
   const companyList=snap.companies||[];
   const reviewQueue=require("./qualification-review-worklist").inspect(companyList);
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
