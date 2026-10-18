@@ -93,6 +93,9 @@ function apply(c){
   siteVerified:saved.siteUrl||c.siteVerified||"",
   classificationFrozen:saved.rank>=4,
   classificationProvisional:saved.rank<4,
+  classificationVerified:saved.rank>=5,
+  classificationNeedsLegalReview:saved.rank===4,
+  classificationEvidenceStatus:saved.rank>=5?"independently_verified":saved.rank===4?"legacy_site_requires_identity_audit":"provisional",
   classificationFrozenAt:saved.rank>=4?saved.savedAt:null,
   ledgerRestored:true,companyIdentityReviewRequired:false,
   researchStatus:c.researchStatus||"qualified_immutable"};
