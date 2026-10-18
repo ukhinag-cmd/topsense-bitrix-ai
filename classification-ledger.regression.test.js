@@ -76,3 +76,25 @@ test("a frozen verified type never changes even with new original letter evidenc
  assert.equal(ledger.apply(fresh).organizationType,contractor);
  assert.equal(ledger.offer(fresh),false);
 });
+
+test("CRM website alone never freezes a new company type",()=>{
+ const id="49901",name="ООО Пример";
+ const candidate={id,name,organizationType:engineer,siteStatus:"site_profiled",
+  siteSource:"Сайт из CRM",segmentSource:"Деятельность в профильных разделах сайта",
+  segmentConfidence:"Подтверждено профильными разделами"};
+ assert.equal(ledger.rank(candidate),3);
+ assert.equal(ledger.offer(candidate),true);
+ const legacy={id:"49902",name,organizationType:contractor,
+  siteStatus:"official_site_verified",verifiedOrgType:contractor,
+  siteSource:"Официальный сайт, проверенный по юридическим данным"};
+ assert.equal(ledger.rank(legacy),5);
+});
+test("historical site-only locks remain unchanged and flagged for audit",()=>{
+ const id="49903",name="ООО Контрагент";
+ assert.equal(ledger.ingest([row(id,name,contractor,4)]),1);
+ const old=ledger.apply({id,name,organizationType:engineer});
+ assert.equal(old.organizationType,contractor);
+ assert.equal(old.classificationFrozen,true);
+ assert.equal(old.classificationNeedsLegalReview,true);
+ assert.equal(old.classificationVerified,false);
+});
