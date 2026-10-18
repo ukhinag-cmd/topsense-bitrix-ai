@@ -199,8 +199,7 @@ async function one(c){
   const sender=String(c.emailSenderDomain||"").toLowerCase().replace(/^www\./,"");
   const host=new URL(result.url).hostname.toLowerCase().replace(/^www\./,"");
   const inboundSenderSiteMatch=candidates[0].origin==="Домен отправителя входящего письма"&&
-   Boolean(sender)&&sender===host&&
-   require("./company-email-domains").extract("customer@"+sender).includes(sender)&&
+   require("./sender-domain-site-proof").matches(sender,result.url)&&
    !redirectedToOtherDomain;
   const legalNameMatchesOwnSite=require("./name-site-search").legalNameOnOwnSite(c,pages);
   const crmWebsiteOnly=candidates[0].origin==="Сайт из CRM"&&!c.verifiedOrgType;
