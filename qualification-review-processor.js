@@ -50,12 +50,24 @@ async function tick(companies){
    const sourceIds=[...new Set((owner.crmIdList?.length?owner.crmIdList:[id]).map(toId)
     .filter(x=>/^\d+$/.test(x)))].slice(0,3);
    const pages=await Promise.all(sourceIds.flatMap(cid=>[deals(cid,"ASC"),deals(cid,"DESC")]));
-   const found=[...new Map(pages.flatMap(list=>list.slice(0,2))
+   const linked=(owner.saleInfo?.linkedDeals||[]).filter(d=>
+    d.linkVerified===true&&/^\d+$/.test(toId(d.id))).slice(0,5)
+    .map(d=>({ID:toId(d.id),COMPANY_ID:id,DATE_CREATE:"",
+     TITLE:"",verifiedHistoricalLink:true}));
+   // The audited CRM link is acceptable; a company-name similarity alone is not.
+   const found=[...new Map([...pages.flatMap(list=>list.slice(0,2)),...linked]
     .map(d=>[toId(d.ID),d])).values()].slice(0,10);
    submitted+=intake.queueDeals(found);
    inspected++;checked++;
    if(found.length){pending.set(id,{signature:signature(owner),dealIds:found.map(d=>toId(d.ID))});}
-   else{done.set(id,signature(owner));changed=true;dirty=true;}
+   else{
+    // The historical deal audit may still be scanning orphaned requests.
+    // Do not permanently mark a company as researched before that finishes.
+    const audit=require("./crm-sales-audit").stats();
+    if(audit.status==="complete"){
+     done.set(id,signature(owner));changed=true;dirty=true;
+    }else retryAfter.set(id,Date.now()+30*60*1000);
+   }
   }catch(e){errors++;lastError=String(e.message||e).slice(0,100);
    retryAfter.set(id,Date.now()+30*60*1000);continue}
  }
