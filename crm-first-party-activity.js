@@ -71,7 +71,8 @@ function qualify(c){
  const finalization=require("./client-finalization");
  if(ledger.get(c?.id)||finalization.isComplete(c?.id))return c;
  const requisite=require("./company-requisites").get(c?.id);
- const profiles=require("./crm-deal-intake").forCompany(c?.id);
+ const profiles=[...require("./crm-deal-intake").forCompany(c?.id),
+  ...require("./qualification-review-processor").evidenceProfiles(c?.id)];
  const proof=decide(c,profiles,requisite);
  if(!proof)return c;
  return {...c,organizationType:proof.type,type:proof.type,proposedType:"",
