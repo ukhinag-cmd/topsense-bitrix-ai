@@ -9,7 +9,7 @@ const intake=require("./crm-deal-intake");
 let running=false,cycles=0,queued=0,checked=0,errors=0,lastAt=null,lastError="",dirty=false;
 const toId=v=>String(v??"").trim();
 function signature(c){return crypto.createHash("sha256").update(JSON.stringify([c.name,c.crmIdList||[c.id],c.latestCorrespondenceActivityId||"",c.siteVerified||c.siteProfileUrl||""])).digest("hex").slice(0,24)}
-function ingest(rows){const p=(rows||[]).find(r=>r?.key===KEY)?.payload;if(!p||p.recordType!=="topsense-review-worker-checkpoint-v1"||!Array.isArray(p.seen))return 0;for(const item of p.seen){if(Array.isArray(item)&&/^\d+$/.test(String(item[0]))&&/^[0-9a-f]{24}$/.test(String(item[1])))done.set(String(item[0]),String(item[1]))}for(const row of rows||[]){
+function ingest(rows){const p=(rows||[]).find(r=>r?.key===KEY)?.payload;if(p?.recordType==="topsense-review-worker-checkpoint-v1"&&Array.isArray(p.seen))for(const item of p.seen){if(Array.isArray(item)&&/^\d+$/.test(String(item[0]))&&/^[0-9a-f]{24}$/.test(String(item[1])))done.set(String(item[0]),String(item[1]))}for(const row of rows||[]){
  const key=String(row?.key||"");
  if(!key.startsWith(DOSSIER_PREFIX))continue;
  const id=key.slice(DOSSIER_PREFIX.length),v=row?.payload;
@@ -113,5 +113,5 @@ async function tick(companies){
  console.log(JSON.stringify(summary));return summary;
  }finally{running=false}
 }
-function stats(){return {cycles,queued,checked,errors,lastAt,lastError,checkpointed:done.size,inFlight:pending.size,checkpointWritePending:dirty,cooldown:retryAfter.size,dossiersSaved:dossiers.size,dossiersPending:unsavedDossiers.size}}
+function stats(){return {cycles,queued,checked,errors,lastAt,lastError,checkpointed:done.size,inFlight:pending.size,checkpointWritePending:dirty,cooldown:retryAfter.size,dossiersWithEvidence:dossiers.size,dossiersPersisted:dossiers.size-unsavedDossiers.size,dossiersPending:unsavedDossiers.size}}
 module.exports={tick,stats,ingest,signature,evidenceSummary};
