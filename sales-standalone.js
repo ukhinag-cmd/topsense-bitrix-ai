@@ -26,7 +26,7 @@ function qualificationDemo(i){
  const criteria=QUAL_CRITERIA.map((criterion,j)=>{
    const k=(i*2+j*3)%7;
    let state=k===0?"нет данных":k===1||k===2?"частично":"подтверждено";
-   if(i===1&&j===2)state="подтверждено";
+   if([1,3,7,8,11,13,16].includes(i)&&["fit","budget","decision"].includes(criterion.key))state="подтверждено";
    const points=state==="подтверждено"?criterion.weight:state==="частично"?Math.floor(criterion.weight/2):0;
    let finding=state==="нет данных"?"Сведения не установлены":state==="частично"?"Требуется подтверждение клиента":"Сведения подтверждены клиентом (демо)";
    if(j===2&&state==="подтверждено")finding=i%6===1?"Клиент подтвердил отсутствие бюджета (демо)":"Клиент подтвердил наличие бюджета (демо)";
@@ -56,7 +56,7 @@ function scoreDemo({stage,nextStatus,contact,stageDays,qualificationCriteria,i})
  if(fit.state!=="подтверждено")commercialMissing.push("соответствие решения требованиям");
  else if(i%7===3)add(commercialFactors,"Решение не полностью соответствует запросу клиента",20);
  if(contact===null)commercialMissing.push("активность клиента");
- else if(i%4===2)add(commercialFactors,"Клиент слабо отвечает на коммуникации (демо)",25);
+ else if(i%4===2||[1,7,13].includes(i))add(commercialFactors,"Клиент слабо отвечает на коммуникации (демо)",25);
  if(stageDays===null)commercialMissing.push("длительность текущей стадии");
  else if(stageDays>30)add(commercialFactors,"На стадии более 30 дней",20);
  else if(stageDays>14)add(commercialFactors,"На стадии более 14 дней",10);
