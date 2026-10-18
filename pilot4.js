@@ -337,6 +337,34 @@ async function runPilot(){
     return next;
   }).filter(Boolean);
   const queue=batch.slice(0,MAX_QUEUE);
+  // Explain skipped research without unlocking a previous paid attempt.
+  // No company names, contact details or personal information leave logs.
+  const attemptRows=new Map(),reservationIds=new Set();
+  for(const row of entries){
+   const key=String(row.key||"");
+   const result=/^pilot:v([1234]):result:(\d+)$/.exec(key);
+   const reservation=/^pilot:v([1234]):reservation:(\d+)$/.exec(key);
+   if(result){
+    const id=result[2],version=Number(result[1]);
+    if(!attemptRows.has(id)||attemptRows.get(id).version<version)
+     attemptRows.set(id,{version,status:String(row.payload?.status||"unknown")});
+   }
+   if(reservation)reservationIds.add(reservation[2]);
+  }
+  queueAudit.blockedBreakdown={reservationWithoutResult:0,reviewResult:0,
+   classifiedResult:0,errorResult:0,otherPreviousAttempt:0};
+  for(const group of candidates){
+   const ids=group.ids.filter(id=>!completion.isComplete(id));
+   if(!ids.length||ids.some(id=>!skip.has(id)))continue;
+   const row=ids.map(id=>attemptRows.get(id)).find(Boolean);
+   let category="otherPreviousAttempt";
+   if(!row&&ids.some(id=>reservationIds.has(id)))category="reservationWithoutResult";
+   else if(row?.status==="review")category="reviewResult";
+   else if(row?.status==="classified")category="classifiedResult";
+   else if(/error|failed|timeout/i.test(row?.status||""))category="errorResult";
+   queueAudit.blockedBreakdown[category]++;
+  }
+  queueAudit.policy="No retry of paid attempts; recover through new verified evidence or audited reservation reconciliation";
   recordsSeen=batch.length;
   const ledger=spentV4(entries);
   let committed=ledger.committedUsd;
