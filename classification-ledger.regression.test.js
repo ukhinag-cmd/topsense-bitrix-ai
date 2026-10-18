@@ -98,3 +98,23 @@ test("historical site-only locks remain unchanged and flagged for audit",()=>{
  assert.equal(old.classificationNeedsLegalReview,true);
  assert.equal(old.classificationVerified,false);
 });
+
+test("legacy website type can be corroborated only with identical sender-domain type",()=>{
+ const id="49911",name="ООО Тестовый Сервис",type=contractor;
+ assert.equal(ledger.ingest([row(id,name,type,4)]),1);
+ const proof={id,name,organizationType:type,type,
+  researchStatus:"mail_domain_site_qualified",
+  siteStatus:"site_profiled",siteIdentityVerified:true,
+  siteSource:"Домен отправителя входящего письма",
+  emailSenderDomain:"verified.example",
+  siteProfileUrl:"https://verified.example",
+  segmentConfidence:"Подтверждено — домен входящего отправителя совпал с сайтом"};
+ const corroborated=ledger.apply(proof);
+ assert.equal(corroborated.organizationType,type);
+ assert.equal(corroborated.pendingEvidenceUpgrade,true);
+ assert.equal(ledger.offer(corroborated),true);
+ assert.equal(ledger.offer(corroborated),false);
+ const conflict=ledger.apply({...proof,organizationType:engineer});
+ assert.equal(conflict.organizationType,type);
+ assert.equal(ledger.offer({...proof,organizationType:engineer}),false);
+});
