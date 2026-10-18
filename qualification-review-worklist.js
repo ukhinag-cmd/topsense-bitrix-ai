@@ -85,7 +85,7 @@ function inspect(companies){
  return {loadedAt,total:items.length,totals,items};
 }
 function render(companies){
- const s=inspect(companies),t=s.totals;
+ const s=inspect(companies),t=s.totals,worker=require("./qualification-review-processor").stats();
  const card=(label,value)=>'<div style="border:1px solid #d7e2e9;border-radius:14px;padding:18px;background:#fff">'+
    '<div style="font-size:13px;color:#627b89">'+esc(label)+'</div><strong style="font-size:28px">'+esc(value)+'</strong></div>';
  const rows=s.items.slice(0,60).map(item=>
@@ -102,7 +102,9 @@ function render(companies){
   card("Нуждаются в проверке",s.total)+card("AI-результат review",t.review)+
   card("Резервация без результата",t.reservation_without_result)+card("С ошибками",t.error)+
   card("Есть подтверждённые данные сайта",t.verified_site_evidence)+
-  card("Появилась новая переписка",t.with_new_correspondence)+'</section>'+
+  card("Появилась новая переписка",t.with_new_correspondence)+
+  card("Сделок направлено на проверку",worker.queued)+card("CRM-групп проверено",worker.checked)+
+  card("Проверок подтверждено",worker.checkpointed)+'</section>'+
   '<h2 style="margin-top:35px">Приоритетные задания</h2>'+
   '<p style="color:#627b89;font-size:13px">Показаны первые 60; остальные сохраняются в общей очереди. Для смены типа требуется самостоятельное доказательство.</p>'+
   '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:11px">'+(rows||'<p>Нет заданий.</p>')+'</div></main></body></html>';
