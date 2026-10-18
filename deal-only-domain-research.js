@@ -22,7 +22,13 @@ function domainFor(c){
    if(value)domains.add(value);
   }
  }
- return domains.size===1?[...domains][0]:"";
+ if(domains.size>1)return ""; // multiple organizations may share an inferred group
+ const ledger=require("./deal-only-sender-ledger");
+ if(domains.size===1){
+  const domain=[...domains][0];
+  ledger.remember(c.id,domain);return domain;
+ }
+ return ledger.get(c?.id);
 }
 function enqueue(clients,limit=8){
  if(process.env.TOPSENSE_ANALYTICS_READONLY!=="1")return 0;
