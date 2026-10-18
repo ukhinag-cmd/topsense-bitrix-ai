@@ -323,7 +323,19 @@ async function runPilot(){
   completion.ingest(entries);
   const existing=new Map(entries.filter(e=>/^pilot:v4:(result|reservation):\d+$/.test(String(e.key||""))).map(e=>[String(e.key),e.payload||{}]));
   const skip=priorPaidIds(entries);
-  const batch=(await crmCandidates()).map(x=>x.ids.find(id=>!skip.has(id)&&!completion.isComplete(id))).filter(Boolean);
+  const candidates=await crmCandidates();
+  // Diagnostic only: record why no new paid work can be selected. Do not
+  // release old reservations or re-charge a CRM ID with an earlier attempt.
+  const queueAudit={crmCandidateGroups:candidates.length,previouslyAttemptedGroups:0,
+    qualifiedFrozenGroups:0,eligibleGroups:0};
+  const batch=candidates.map(x=>{
+    const pending=x.ids.filter(id=>!completion.isComplete(id));
+    if(!pending.length){queueAudit.qualifiedFrozenGroups++;return null;}
+    const next=pending.find(id=>!skip.has(id));
+    if(!next){queueAudit.previouslyAttemptedGroups++;return null;}
+    queueAudit.eligibleGroups++;
+    return next;
+  }).filter(Boolean);
   const queue=batch.slice(0,MAX_QUEUE);
   recordsSeen=batch.length;
   const ledger=spentV4(entries);
@@ -334,7 +346,7 @@ async function runPilot(){
    resultStatus=!queue.length?"queue_drained":"budget_exhausted";
    const summary={recordType:"topsense-paid-summary",status:resultStatus,approvedLimitUsd:budget,
     committedUsd:committed,knownCostUsd:ledger.knownCost,remainingCandidates:queue.length?batch.length:0,
-    aiCallsTotal:ledger.calls,processedThisRun:0,updatedAt:iso()};
+    aiCallsTotal:ledger.calls,processedThisRun:0,queueAudit,updatedAt:iso()};
    await upsert(NS+"summary",summary);log("pass-finished",summary);return summary;
   }
   log("batch-start",{queue:queue.length,remainingCandidates:batch.length,spentCommittedUsd:committed,budget});
@@ -440,7 +452,7 @@ async function runPilot(){
   const summary={recordType:"topsense-paid-summary",status:resultStatus,processed,aiCalls,
    classified:counts.classified,review:counts.review,errors,deferredCrmReads,estimatedModelSpendUsd:modelSpend,
    committedUsd:committed,approvedLimitUsd:budget,
-   remainingCandidates:Math.max(0,batch.length-processed),updatedAt:iso()};
+   remainingCandidates:Math.max(0,batch.length-processed),queueAudit,updatedAt:iso()};
   // Fixed-key summary is idempotent; one safe retry changes no paid calls.
   try{await upsert(NS+"summary",summary)}
   catch(first){await pause(1200);await upsert(NS+"summary",summary)}
