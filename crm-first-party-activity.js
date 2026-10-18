@@ -75,7 +75,8 @@ function decide(company,profiles,requisite,locked=false){
 function qualify(c){
  const ledger=require("./classification-ledger");
  const finalization=require("./client-finalization");
- if(ledger.get(c?.id)||finalization.isComplete(c?.id)||
+ const prior=ledger.get(c?.id);
+ if((prior&&prior.rank>=4)||finalization.isComplete(c?.id)||
   c?.verificationStatus==="confirmed"||taxonomy.known(c?.verifiedOrgType))return c;
  const requisite=require("./company-requisites").get(c?.id);
  const profiles=[...require("./crm-deal-intake").forCompany(c?.id),
