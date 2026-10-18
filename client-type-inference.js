@@ -198,6 +198,25 @@ function apply(records){
   const previous=valid.has(c.organizationType)?c.organizationType:(valid.has(c.type)?c.type:"");
   const byName=infer(c.name);
   const officiallyVerifiedType=valid.has(c.verifiedOrgType)?c.verifiedOrgType:"";
+  // Primary TOP-SENSE rule: a direct CRM deal's inbound sender domain
+  // matches the site host, and the site itself unambiguously describes
+  // its own activity. CRM company legal requisites are optional.
+  const domainBasedType=site?.status==="site_profiled"&&
+   site?.siteIdentityVerified===true&&
+   site?.siteIdentityEvidence==="inbound_sender_domain_matches_website"&&
+   valid.has(site.siteType)&&site.emailSenderDomain;
+  if(domainBasedType)return {...c,
+   organizationType:site.siteType,type:site.siteType,
+   proposedType:"",siteStatus:"site_profiled",
+   siteProfileUrl:site.url||"",siteVerified:site.url||"",
+   siteIdentityVerified:true,siteSource:"Домен отправителя входящего письма",
+   emailSenderDomain:site.emailSenderDomain,
+   segmentConfidence:"Подтверждено — домен входящего отправителя совпал с сайтом",
+   segmentSource:"Собственная деятельность на сайте "+(site.url||"")+
+    "; домен совпадает с корпоративной почтой отправителя входящей сделки",
+   verification:"Сайт изучен; корпоративный домен отправителя и сайта совпадают",
+   researchStatus:"mail_domain_site_qualified"};
+
   // Reconcile previously persisted false non-profile site classifications;
   // no new site crawling or paid model calls. An actual contractor's own
   // service headings take precedence over a stray "charity"/"school" keyword.
