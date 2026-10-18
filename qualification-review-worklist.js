@@ -51,12 +51,14 @@ function inspect(companies){
   if(!matches.length)continue;
   const current=matches.sort((a,b)=>b.entry.version-a.entry.version)[0];
   const cat=category(current.entry);
-  if(!(cat in totals))totals.other_attempt++;
-  else totals[cat]++;
   if(taxonomy.known(c.organizationType)){
    totals.already_qualified++;
    continue;
   }
+  // Status cards must count only unfinished cases, not historical results
+  // for companies whose type is already verified and frozen.
+  if(!(cat in totals))totals.other_attempt++;
+  else totals[cat]++;
   const sites=ids.map(id=>profiler.get(id));
   const verified=sites.some(site=>site?.status==="site_profiled"&&taxonomy.known(site.siteType));
   const identityConflict=Boolean(c.companyIdentityReviewRequired)||
