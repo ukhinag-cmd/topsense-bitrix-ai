@@ -940,6 +940,8 @@ function coverageLog(){
    typed:typed.length,untyped:companyList.length-typed.length,coveredTypes:distinctTypes.size,
    typedFromVerifiedOriginalDeals:companyList.filter(c=>
     /Собственная деятельность в письме сделки/i.test(String(c.segmentSource||""))).length,
+   typedFromSenderDomainSite:companyList.filter(c=>
+    /домен совпадает с корпоративной почтой отправителя входящей сделки/i.test(String(c.segmentSource||""))).length,
    censusReady:snap.classificationCensusReady,censusDisplay:snap.classificationDisplay,
    ledger:snap.classificationLedger,
    siteCrawl:require("./website-profiler").stats(),
