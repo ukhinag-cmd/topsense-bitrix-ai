@@ -9,6 +9,19 @@ const PORT = process.env.PORT || 10000;
 function analyticsReadOnly(){return String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1";}
 const MAX_BODY = 1024 * 1024;
 
+// Periodic lightweight memory diagnostic for Render's 512 MB container.
+// Never log customer content, credentials or CRM records.
+const memoryHealthTimer=setInterval(()=>{
+  const usage=process.memoryUsage();
+  const mb=x=>Math.round(x/1024/1024);
+  console.log(JSON.stringify({component:"topsense-runtime",event:"heap-health",
+    rssMB:mb(usage.rss),heapUsedMB:mb(usage.heapUsed),
+    heapTotalMB:mb(usage.heapTotal),externalMB:mb(usage.external),
+    uptimeHours:Math.round(process.uptime()/3600*10)/10,
+    at:new Date().toISOString()}));
+},15*60*1000);
+memoryHealthTimer.unref?.();
+
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
