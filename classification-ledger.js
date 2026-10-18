@@ -16,7 +16,14 @@ function identity(c){
  const id=str(c?.id),name=str(c?.name).toLocaleLowerCase("ru-RU").replace(/ё/g,"е").replace(/\s+/g," ");
  return id&&name?crypto.createHash("sha256").update(id+"|"+name).digest("hex"):"";
 }
+function inboundProof(c){
+ return c?.researchStatus==="inbound_self_description_qualified"&&
+  taxonomy.known(c?.organizationType)&&
+  str(c?.segmentSource).startsWith("Собственная деятельность в письме сделки ")&&
+  /подтверждённым совпадением ИНН/.test(str(c?.verification));
+}
 function rank(c){
+ if(inboundProof(c))return 5;
  const source=str(c?.segmentSource).toLowerCase(),conf=str(c?.segmentConfidence).toLowerCase();
  if(source.includes("название crm")||conf.includes("по названию"))return 1;
  if(c?.siteStatus==="research_completed")return 6;
@@ -62,6 +69,11 @@ function apply(c){
   companyIdentityReviewRequired:true,previousQualifiedType:saved.type,
   previousQualifiedName:saved.companyName||"",
   researchStatus:"identity_changed_requires_review"};
+ // A name-only or preliminary AI result is NOT a permanently qualified type.
+ // Permit ONLY verified new first-party activity evidence to supersede it.
+ if(saved.rank<=2&&inboundProof(c))return {...c,
+  previousProvisionalType:saved.type,pendingEvidenceUpgrade:true,
+  classificationFrozen:false,ledgerRestored:true};
  return {...c,organizationType:saved.type,type:saved.type,
   category:saved.category||c.category,
   segmentSource:"Квалификация закреплена · "+(saved.source||"сохранённый источник"),
@@ -69,7 +81,9 @@ function apply(c){
   verification:saved.verification||"Сохранено в аналитической базе",
   siteProfileUrl:saved.siteUrl||c.siteProfileUrl||"",
   siteVerified:saved.siteUrl||c.siteVerified||"",
-  classificationFrozen:true,classificationFrozenAt:saved.savedAt,
+  classificationFrozen:saved.rank>=4,
+  classificationProvisional:saved.rank<4,
+  classificationFrozenAt:saved.rank>=4?saved.savedAt:null,
   ledgerRestored:true,companyIdentityReviewRequired:false,
   researchStatus:c.researchStatus||"qualified_immutable"};
 }
@@ -82,7 +96,9 @@ function offer(c){
  // No fresh correspondence => never rewrite an already qualified record.
  // Even with fresh correspondence, the existing type is kept until a
  // separate evidence-based requalification is explicitly approved.
- if(existing)return false;
+ // Only preliminaries may be upgraded; actual verified qualifications stay
+ // immutable. Identity hash MUST still refer to the same original legal card.
+ if(existing&&!(existing.rank<=2&&inboundProof(c)&&existing.identityHash===hash))return false;
  const nextRank=rank(c);
  const row={recordType:"topsense-type-ledger-v1",companyId:id,identityHash:hash,
   companyName:str(c.name).slice(0,180),
@@ -128,5 +144,14 @@ async function flush(){
    attempted:batch.length,remaining:pending.size}));
  }finally{writing=false;if(pending.size)schedule(lastError?18000:2200)}
 }
-function stats(){return {loaded:records.size,restored,stored,pending:pending.size,errors,lastError}}
+function stats(){
+ const byRank={};
+ for(const row of records.values()){
+  const key=String(row.rank);
+  byRank[key]=(byRank[key]||0)+1;
+ }
+ return {loaded:records.size,restored,stored,pending:pending.size,errors,lastError,
+  provisional:[...records.values()].filter(x=>x.rank<4).length,
+  frozenVerified:[...records.values()].filter(x=>x.rank>=4).length,byRank};
+}
 module.exports={PREFIX,LEGACY_PREFIX,identity,rank,valid,ingest,apply,offer,offerMany,flush,stats,get};
