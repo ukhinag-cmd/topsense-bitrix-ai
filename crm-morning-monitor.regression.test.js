@@ -13,7 +13,7 @@ function saved(name,type,at="2026-10-15T06:05:00Z"){
   verification:"Сверено",siteUrl:"https://factory.example/",
   savedAt:at};
 }
-test("Qualified company type/site/name cannot be changed by fresh website scan or manual CRM edit",()=>{
+test("Stored provisional identity and type require review before a conflicting CRM edit",()=>{
  ledger.ingest([{key:ledger.PREFIX+id,payload:saved("ООО Тестовое предприятие","Монтажно-строительная организация")}]);
  const altered=ledger.apply({id,name:"ООО Исправленный менеджером",
   organizationType:"Дилер промышленного оборудования",
@@ -28,7 +28,8 @@ test("Qualified company type/site/name cannot be changed by fresh website scan o
   siteVerified:"https://wrong.example/"});
  assert.equal(original.organizationType,"Монтажно-строительная организация");
  assert.equal(original.siteVerified,"https://factory.example/");
- assert.equal(original.classificationFrozen,true);
+ assert.equal(original.classificationFrozen,false);
+ assert.equal(original.classificationProvisional,true);
  assert.equal(ledger.offer({...original,organizationType:"Производитель КИПиА / датчиков"}),false);
 });
 test("Daily change policy is Moscow-local 08:00 and distinguishes email from calls",()=>{
@@ -106,6 +107,7 @@ test("Main server schedules daily change scanner with no paid AI and keeps Bitri
 test("Deal intake honors forced re-inspection only when new correspondence was seen",()=>{
  const source=fs.readFileSync("crm-deal-intake.js","utf8");
  assert.match(source,/function queueDeals\(deals,\{force=false\}=\{\}\)/);
- assert.match(source,/if\(\(visited\.has\(id\)&&!force\)\|\|pending\.has\(id\)\)continue/);
+ assert.match(source,/if\(pending\.has\(id\)\)continue/);
+ assert.match(source,/if\(visited\.has\(id\)&&!force\)continue/);
  assert.match(source,/if\(force\)visited\.delete\(id\)/);
 });

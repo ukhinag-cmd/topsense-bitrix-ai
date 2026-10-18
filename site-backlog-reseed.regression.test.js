@@ -19,6 +19,7 @@ function harness(){
   if(x==="./company-email-domains")return email;
   if(x==="./website-profiler")return profiler;
   if(x==="./crm-deal-intake")return {forCompany:id=>dealCases.get(String(id))||[]};
+  if(x==="./client-finalization")return {isComplete:()=>false};
   if(x==="./company-requisites")return {stats:()=>({status:"ready"}),get:id=>legalMap.get(String(id))||{status:"not_found"}};
   if(x==="./manual-website-candidates")return require("./manual-website-candidates");
   if(x==="./name-site-search")return {stats:()=>({remaining:0}),enqueueByInn:list=>{innQueued.push(...list);return list.length}};
@@ -74,13 +75,13 @@ test("exhausted site queue schedules distinct verified-INN lookup",()=>{
  assert.ok(h.logs.some(x=>x.event==="inn-site-discovery-started"&&x.queued===1));
 });
 
-test("deal inbound email domain is tried before manual CRM cards for an unlinked website",()=>{
+test("original inbound sender domain is tried before manual CRM cards for an unlinked website",()=>{
  const h=harness();
  h.state.companies=[{id:"33",name:"ООО Промышленный сервис",crmEmails:[],corporateDomain:"",siteCandidate:""}];
- h.dealCases.set("33",[{id:"6000",incomingEmails:1,corporateDomains:["industrial-service.ru"]}]);
+ h.dealCases.set("33",[{id:"6000",incomingEmails:1,senderEmails:["buyer@industrial-service.ru"]}]);
  h.resume();
  assert.equal(h.submitted.length,1);
- assert.equal(h.submitted[0].siteSource,"Домен из входящей сделки");
+ assert.equal(h.submitted[0].siteSource,"Домен отправителя входящего письма");
  assert.equal(h.submitted[0].corporateDomain,"industrial-service.ru");
  assert.ok(h.logs.some(x=>x.event==="deal-email-website-candidates-queued"));
 });

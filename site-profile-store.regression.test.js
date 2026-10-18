@@ -39,8 +39,9 @@ test("The checkpoint contains only public website evidence, never CRM contacts",
   process.env.GOOGLE_SHEET_STORE_SECRET="fake-test-secret";
   global.fetch=async(_url,options)=>{
    const body=JSON.parse(options.body);
-   if(body.action==="load")return {ok:true,json:async()=>({ok:true,rows:fakeRows})};
-   if(body.action==="upsert"){fakeRows.push(...body.rows);return {ok:true,json:async()=>({ok:true})};}
+   const response=data=>({ok:true,status:200,text:async()=>JSON.stringify(data)});
+   if(body.action==="load")return response({ok:true,rows:fakeRows});
+   if(body.action==="upsert"){fakeRows.push(...body.rows);return response({ok:true});}
    throw Error("Unexpected action");
   };
   store.queue(source,{...profile,crmEmails:["private@example.com"],contactNames:["private person"]});

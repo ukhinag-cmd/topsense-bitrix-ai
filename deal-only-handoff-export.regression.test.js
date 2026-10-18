@@ -30,8 +30,13 @@ test("Handoff CSV contains every unresolved/ambiguous CRM-less deal with stable 
  assert.equal(all.exported,4);
  assert.equal(exportApi.summary(all).alreadyHasIdentityCandidate,1);
 });
-test("Existing core company classification continues but historical deal-only research is opt-in",()=>{
- for(const path of ["crm-dashboard.js","crm-sales-audit.js","deal-only-client-registry.js"]){
+test("Historical deep research stays opt-in and lightweight deal checks stay read-only",()=>{
+ const dashboard=fs.readFileSync("crm-dashboard.js","utf8");
+ assert.match(dashboard,/TOPSENSE_ANALYTICS_READONLY/);
+ assert.match(dashboard,/deal-only-dossier-queue/);
+ assert.match(dashboard,/deal-only-domain-research/);
+ assert.match(dashboard,/dealIntake\.stats\(\)\.queued<80/);
+ for(const path of ["crm-sales-audit.js","deal-only-client-registry.js"]){
   const code=fs.readFileSync(path,"utf8");
   assert.match(code,/TOPSENSE_DEAL_ONLY_RESEARCH_ENABLED/);
   assert.match(code,/\|\|"0"/);
