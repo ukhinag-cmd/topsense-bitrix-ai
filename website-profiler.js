@@ -193,13 +193,24 @@ async function one(c){
   // HTTP-only fallback must corroborate company identity on the page.
   const insecureTransport=new URL(result.url).protocol==="http:";
   const thirdParty=c.siteSource==="Домен привязанного контакта"||c.siteSource==="Альтернативный домен привязанного контакта"||c.siteSource==="Домен из входящей сделки"||c.siteSource==="Кандидат из прежнего AI-пилота"||orphanSource||redirectedToOtherDomain||emailDomainOnly||identifiedReference||insecureTransport||provisionalLegalNameSearch;
-  const trusted=provisionalLegalNameSearch?
-   require("./name-site-search").legalNameOnOwnSite(c,pages):
-   orphanSource?orphanNameConfirmed:(!thirdParty||checkedName);
+  // A website typed into the CRM by a manager is not proof of ownership.
+  // Require the company's FULL legal name on its own website, not one
+  // matching keyword in a partner / holding / customer listing.
+  const legalNameMatchesOwnSite=require("./name-site-search").legalNameOnOwnSite(c,pages);
+  const crmWebsiteOnly=candidates[0].origin==="Сайт из CRM"&&!c.verifiedOrgType;
+  const trusted=provisionalLegalNameSearch?legalNameMatchesOwnSite:
+   orphanSource?(orphanNameConfirmed&&legalNameMatchesOwnSite):
+   crmWebsiteOnly?legalNameMatchesOwnSite:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
   const profile={status:!trusted?"site_identity_unclear":provisionalLegalNameSearch&&found&&!ambiguous?
    "site_preliminary_profiled":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,
-   staffEvidence:trusted&&!provisionalLegalNameSearch?require("./staff-evidence").fromPages(pages):null,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?(provisionalLegalNameSearch?"Предварительная — совпали полное наименование и ОПФ, реквизиты пока не сверены":"Предварительная по нескольким страницам"):"Не определена",checkedAt:new Date().toISOString()};
+   staffEvidence:trusted&&!provisionalLegalNameSearch?require("./staff-evidence").fromPages(pages):null,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",
+   siteIdentityEvidence:legalNameMatchesOwnSite?"full_legal_name_on_own_site":
+    "legal_ownership_not_confirmed",
+   // Website reading never establishes legal identity by itself.
+   siteIdentityVerified:Boolean(c.verifiedOrgType&&
+    c.siteSource==="Официальный сайт, проверенный по юридическим данным"),
+   siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?(provisionalLegalNameSearch?"Предварительная — совпали полное наименование и ОПФ, реквизиты пока не сверены":"Предварительная по нескольким страницам"):"Не определена",checkedAt:new Date().toISOString()};
   profiles.set(c.id,profile);
   evidenceStore.queue(c,profile);
  }catch(error){if(evidenceRank(candidates[0].origin)<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
