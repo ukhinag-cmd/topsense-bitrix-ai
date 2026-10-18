@@ -29,9 +29,8 @@ function senderDomainSiteProof(c){
   c?.siteSource==="Домен отправителя входящего письма"&&
   taxonomy.known(c?.organizationType)&&
   /^Подтверждено — домен входящего отправителя совпал с сайтом/.test(str(c?.segmentConfidence))&&
-  str(c?.emailSenderDomain)&&
-  require("./company-email-domains").extract("customer@"+str(c.emailSenderDomain))
-   .includes(str(c.emailSenderDomain));
+  require("./sender-domain-site-proof").matches(
+   c.emailSenderDomain,c.siteProfileUrl||c.siteVerified);
 }
 function rank(c){
  if(senderDomainSiteProof(c)||inboundProof(c))return 5;
