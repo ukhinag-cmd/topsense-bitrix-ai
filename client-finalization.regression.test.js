@@ -10,6 +10,8 @@ function sample(){
  return {id:"501",name:"ООО Тестовый нефтесервис",organizationType:types.find(t=>t.name==="Промышленный сервис / техническая эксплуатация").name,
   siteStatus:"official_site_verified",siteVerified:"https://example.org",
   category:"Подрядчики",segmentConfidence:"Высокая — официальный сайт",
+  siteSource:"Официальный сайт, проверенный по юридическим данным",
+  verifiedOrgType:"Промышленный сервис / техническая эксплуатация",
   segmentSource:"Официальный сайт: проверены реквизиты",
   verification:"Подтверждено официальным сайтом",
   contactEmails:["buyer@example.org"],contactNames:["Контакт компании"],
@@ -20,6 +22,9 @@ test("Cannot finalize based on name-only, missing site, missing contact, unknown
  const {criteria}=freshModule(),c=sample();
  assert.equal(criteria(c,context()).complete,true);
  assert.equal(criteria({...c,siteStatus:"site_pending"},context()).complete,false);
+ assert.equal(criteria({...c,verifiedOrgType:""},context()).complete,false);
+ assert.equal(criteria({...c,siteSource:"Сайт из CRM"},context()).complete,false);
+ assert.equal(criteria({...c,siteStatus:"site_profiled",siteSource:"Сайт из CRM",verifiedOrgType:""},context()).complete,false);
  assert.equal(criteria({...c,contactEmails:[],contactNames:[]},context()).complete,false);
  assert.equal(criteria(c,{...context(),salesStatus:"partial"}).complete,false);
  assert.equal(criteria({...c,saleInfo:{purchaseStatus:"БЫЛА",paid:true}},{...context(),salesStatus:"partial"}).complete,true);
