@@ -3,7 +3,7 @@
 const freeDomains=new Set([
  "mail.ru","bk.ru","list.ru","inbox.ru","gmail.com","yandex.ru","ya.ru",
  "yahoo.com","rambler.ru","outlook.com","hotmail.com","icloud.com",
- "topsense.su","detector-gaza.ru"
+ "topsense.su","detector-gaza.ru","rutector.email"
 ]);
 function flatten(input){
  if(Array.isArray(input))return input.flatMap(flatten);
