@@ -144,11 +144,25 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
   const staffSource=staff.count&&staff.sourceUrl?
    ' <a href="'+esc(staff.sourceUrl)+'" target="_blank" rel="noopener noreferrer">Источник ↗</a>':"";
   const companyTitle=esc(c.name||"Без названия");
+  const evidenceStatus=c.classificationNeedsLegalReview===true?
+   "Исторический тип: требуется проверка основания":
+   c.companyIdentityReviewRequired===true?"Конфликт идентификации":
+   c.classificationVerified===true||c.researchStatus==="completed"||
+   c.verificationStatus==="confirmed"?"Подтверждено":
+   c.researchStatus==="mail_domain_site_qualified"&&c.siteIdentityVerified===true?
+   "Проверен домен отправителя и сайт":c.organizationType?
+   "Тип предварительный":"Тип не определён";
+  const typeEvidence=[c.segmentSource,c.segmentConfidence]
+   .filter(Boolean).map(v=>String(v).slice(0,260)).join(" · ");
+  const evidenceLine='<div class="companyMeta"><strong>Основание типа: '+
+   esc(evidenceStatus)+'</strong>'+(typeEvidence?
+   ' · '+esc(typeEvidence):' · Достоверного источника пока нет')+'</div>';
   return '<article class="companyCard"><div class="companyTitle">'+
    (site?'<a class="companyWebsite" href="'+esc(site)+'" target="_blank" rel="noopener noreferrer" title="'+(website.verified?"Перейти на изученный сайт":"Сайт-кандидат: принадлежность компании не подтверждена")+'">'+companyTitle+' ↗</a>':companyTitle)+'</div>'+
    '<div class="companyMeta">'+(c.companyCardMissing?
     'Клиент из сделок · CRM-карточка компании не создана':
     'CRM '+esc(ids.join(", ")))+' · '+esc(c.organizationType||c.industryDescription||"Тип требует проверки")+'</div>'+
+   evidenceLine+
    (c.subdivisions?.length?
     '<div class="companyMeta">Подразделения: '+c.subdivisions.map(x=>
      esc(x.name)+' (CRM '+esc(x.id)+')').join('; ')+'</div>':'')+
