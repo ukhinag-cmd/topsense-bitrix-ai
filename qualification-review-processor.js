@@ -44,8 +44,13 @@ async function tick(companies){
   if(!owner||done.get(id)===signature(owner))continue;
   try{
    // Only deals explicitly linked to this CRM legal entity.
-   const [oldest,newest]=await Promise.all([deals(id,"ASC"),deals(id,"DESC")]);
-   const found=[...new Map([...oldest.slice(0,2),...newest.slice(0,2)].map(d=>[toId(d.ID),d])).values()];
+   // A virtual duplicate group can contain several distinct CRM IDs.
+   // Inspect each source card separately, without guessing a legal merge.
+   const sourceIds=[...new Set((owner.crmIdList?.length?owner.crmIdList:[id]).map(toId)
+    .filter(x=>/^\d+$/.test(x)))].slice(0,3);
+   const pages=await Promise.all(sourceIds.flatMap(cid=>[deals(cid,"ASC"),deals(cid,"DESC")]));
+   const found=[...new Map(pages.flatMap(list=>list.slice(0,2))
+    .map(d=>[toId(d.ID),d])).values()].slice(0,10);
    submitted+=intake.queueDeals(found);
    inspected++;checked++;
    if(found.length){pending.set(id,{signature:signature(owner),dealIds:found.map(d=>toId(d.ID))});}
