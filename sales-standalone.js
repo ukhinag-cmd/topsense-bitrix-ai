@@ -70,19 +70,23 @@ function scoreDemo({stage,nextStatus,contact,stageDays,qualificationCriteria,i})
  const prospect=commercialMissing.length?null:prospectFactors.reduce((sum,f)=>sum+f.points,0);
  return {discipline,disciplineFactors,disciplineMissing,risk,riskFactors:commercialFactors,missing:commercialMissing,prospect,prospectFactors};
 }
-const demo=clients.map((client,i)=>{
+// Load-test fixture: 240 entirely fictional active deals.
+const demo=Array.from({length:240},(_,i)=>{
+ const client=clients[i%clients.length]+" (демо "+(Math.floor(i/clients.length)+1)+")";
+ const createdDaysAgo=(i*11)%540;
+ const createdAt=new Date(Date.now()-createdDaysAgo*86400000).toISOString().slice(0,10);
  const days=[-9,-2,0,1,3,7,14][i%7];
  const nextStatus=i%6===0?"Не проверено":days<0?"Просрочено":"Запланировано";
  const currency=["RUB","RUB","USD","EUR"][i%4];
  const stage=stages[i%stages.length];
- const contact=[2,10,25,4,14,null,30,5,18,3,8,26,1,15,null,9,24,6][i];
- const stageDays=[5,18,34,4,14,9,45,8,24,3,17,33,6,36,20,null,32,2][i];
+ const contact=[2,10,25,4,14,null,30,5,18,3,8,26,1,15,null,9,24,6][i%18];
+ const stageDays=[5,18,34,4,14,9,45,8,24,3,17,33,6,36,20,null,32,2][i%18];
  const q=qualificationDemo(i);
  const scores=scoreDemo({stage,nextStatus,contact,stageDays,qualificationCriteria:q.qualificationCriteria,i});
  const qualification=q.qualificationScore>=85?"Данные собраны":q.qualificationScore>=60?"Не полностью":"Требует уточнения";
  return {
    id:1001+i,client,name:["Поставка оборудования","Сервисный контракт","Запрос КП","Модернизация проекта"][i%4],
-   manager:managers[i%managers.length],stage,amount:(i+2)*85000,currency,
+   manager:managers[i%managers.length],stage,amount:((i%22)+2)*85000,currency,createdAt,
    ...q,...scores,qualification,contact,stageDays,nextStatus,
    due:new Date(Date.UTC(2026,9,18+days)).toISOString().slice(0,10),
    history:[{at:"2026-10-14",text:"Создана демонстрационная сделка"},{at:"2026-10-16",text:"Проверка коммерческого предложения"}]
@@ -100,8 +104,8 @@ function authorized(req) {
 }
 const safeJson = JSON.stringify(demo).replace(/</g, "\\u003c").replace(/>/g,"\\u003e").replace(/&/g,"\\u0026");
 const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TOP-SENS — Sales Control DEMO</title><style>
-:root{font-family:system-ui,-apple-system,sans-serif;color:#142333;background:#f5f7fb}*{box-sizing:border-box}body{margin:0}header{background:#102d43;color:#fff;padding:22px clamp(16px,4vw,56px)}h1{font-size:24px;margin:0}header p{margin:5px 0 0;color:#cfe1ee}.wrap{max-width:1480px;margin:auto;padding:24px clamp(12px,3vw,40px)}.banner{background:#fff4db;color:#825000;border:1px solid #f0d394;padding:12px 16px;border-radius:10px;font-weight:700;margin-bottom:16px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}.card,.panel{background:white;border:1px solid #e1e7ee;border-radius:12px;padding:17px;box-shadow:0 2px 8px #162c3b09}.card span{color:#607181;font-size:13px}.card strong{display:block;font-size:27px;margin-top:5px}.panel{margin-bottom:20px}h2{font-size:18px;margin:0 0 14px}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}input,select{width:100%;padding:10px;border:1px solid #cdd7e1;border-radius:8px;background:white;color:#132e40}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px;min-width:1220px}th,td{padding:12px 10px;border-bottom:1px solid #ecf0f4;text-align:left}th{background:#f0f5f8;color:#425568;white-space:nowrap}tr:hover{background:#f8fbfd}button{cursor:pointer;border:1px solid #bed0dd;border-radius:7px;background:#fff;padding:7px 9px;color:#144364}button:hover{background:#eaf4fc}.pill{padding:4px 7px;border-radius:7px;font-weight:700;display:inline-block}.good{background:#e7f7ee;color:#167047}.mid{background:#fff4d7;color:#815e06}.bad{background:#ffe9e9;color:#ad3030}.muted{background:#eff1f5;color:#5c6772}dialog{border:0;border-radius:14px;max-width:620px;width:calc(100% - 20px);padding:25px;box-shadow:0 20px 80px #102d4355}dialog::backdrop{background:#0b263b88}.dialogtop{display:flex;justify-content:space-between;align-items:center}.modebar{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}.modebar button{font-weight:700;padding:11px 16px}.modebar button.active{background:#144364;color:white;border-color:#144364}.focus{margin:0 0 16px;padding:14px 18px;background:#eaf4fc;border:1px solid #bbd9ef;border-radius:10px;color:#15415d}.foot{color:#657889;font-size:12px}ul{line-height:1.9}@media(max-width:550px){h1{font-size:21px}.wrap{padding:12px}.card strong{font-size:23px}}
-.insight-table{overflow-x:auto}.insight-table table{min-width:780px}.insight-label{font-weight:700}.insight-hint{font-size:12px;color:#607181;margin:0 0 12px}.insight-heading{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}.insight-heading h2{margin-bottom:8px}.insight-action{color:#16466a}.insight-empty{background:#f4f8fa;border-radius:8px;padding:14px}.missing-data{background:#fff4db;color:#825000;padding:10px;border-radius:8px}</style></head><body><header><h1>TOP-SENS / Sales Control</h1><p>Панель коммерческого директора · демонстрационная версия</p></header><main class="wrap"><div class="banner">ДЕМО — данные вымышленные. Bitrix24 не подключён, оценки не являются реальной аналитикой.</div><nav class="modebar" aria-label="Режим панели"><button type="button" id="ownerMode" class="active" aria-pressed="true">Собственник</button><button type="button" id="ropMode" aria-pressed="false">РОП</button></nav><div class="focus" id="modeFocus" role="status"></div><section class="cards" id="kpis"></section><section class="panel" id="insights" aria-label="Приоритеты режима"></section><section class="panel"><h2>Сделки и контроль действий</h2><p class="insight-hint">Два независимых показателя: коммерческий риск — угроза сделке, дисциплина — выполнение действий менеджером. Качество квалификации оценивает полноту подтверждённых сведений, а не вероятность покупки.</p><div class="filters"><input id="search" placeholder="Поиск клиента или сделки" aria-label="Поиск"><select id="manager" aria-label="Менеджер"><option value="">Все менеджеры</option></select><select id="stage" aria-label="Стадия"><option value="">Все стадии</option></select><select id="risk" aria-label="Коммерческий риск"><option value="">Любой риск</option><option value="high">Высокий (≥ 60)</option><option value="low">Низкий (&lt; 60)</option><option value="unknown">Недостаточно данных</option></select><select id="discipline" aria-label="Дисциплина менеджера"><option value="">Любая дисциплина</option><option value="low">Ниже 60</option><option value="unknown">Недостаточно данных</option></select><select id="quality" aria-label="Качество квалификации"><option value="">Любое качество квалификации</option><option value="low">Ниже 70</option><option value="high">70 и выше</option></select><select id="next" aria-label="Следующий шаг"><option value="">Любое следующее действие</option><option>Просрочено</option><option>Запланировано</option><option>Не проверено</option></select><select id="sort" aria-label="Сортировка"><option value="risk">Сначала риск</option><option value="prospect">Сначала перспективные</option><option value="amount">Сначала крупные</option><option value="due">По сроку следующего действия</option></select></div><p class="insight-hint">Все оценки учебные, по вымышленным сведениям. Нажмите «Открыть», чтобы увидеть расчёт и подтверждение критериев.</p><div class="scroll"><table><thead><tr><th>Клиент / сделка</th><th>Менеджер</th><th>Стадия</th><th>Сумма</th><th>Перспективность</th><th>Коммерческий риск</th><th>Дисциплина</th><th>Качество квалификации</th><th>Следующее действие</th><th>Детали</th></tr></thead><tbody id="rows"></tbody></table></div><p class="foot" id="count"></p></section><p class="foot">Демо-данные существуют только в коде и браузере; изменений CRM и отправки писем нет.</p></main><dialog id="details"><div class="dialogtop"><h2 id="detailTitle">Сделка</h2><button id="close">Закрыть</button></div><div id="detailBody"></div></dialog><script>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#142333;background:#f5f7fb}*{box-sizing:border-box}body{margin:0}header{background:#102d43;color:#fff;padding:22px clamp(16px,4vw,56px)}h1{font-size:24px;margin:0}header p{margin:5px 0 0;color:#cfe1ee}.wrap{max-width:1480px;margin:auto;padding:24px clamp(12px,3vw,40px)}.banner{background:#fff4db;color:#825000;border:1px solid #f0d394;padding:12px 16px;border-radius:10px;font-weight:700;margin-bottom:16px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}.card,.panel{background:white;border:1px solid #e1e7ee;border-radius:12px;padding:17px;box-shadow:0 2px 8px #162c3b09}.card span{color:#607181;font-size:13px}.card strong{display:block;font-size:27px;margin-top:5px}.panel{margin-bottom:20px}h2{font-size:18px;margin:0 0 14px}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}input,select{width:100%;padding:10px;border:1px solid #cdd7e1;border-radius:8px;background:white;color:#132e40}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px;min-width:1340px}th,td{padding:12px 10px;border-bottom:1px solid #ecf0f4;text-align:left}th{background:#f0f5f8;color:#425568;white-space:nowrap}tr:hover{background:#f8fbfd}button{cursor:pointer;border:1px solid #bed0dd;border-radius:7px;background:#fff;padding:7px 9px;color:#144364}button:hover{background:#eaf4fc}.pill{padding:4px 7px;border-radius:7px;font-weight:700;display:inline-block}.good{background:#e7f7ee;color:#167047}.mid{background:#fff4d7;color:#815e06}.bad{background:#ffe9e9;color:#ad3030}.muted{background:#eff1f5;color:#5c6772}dialog{border:0;border-radius:14px;max-width:620px;width:calc(100% - 20px);padding:25px;box-shadow:0 20px 80px #102d4355}dialog::backdrop{background:#0b263b88}.dialogtop{display:flex;justify-content:space-between;align-items:center}.modebar{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}.modebar button{font-weight:700;padding:11px 16px}.modebar button.active{background:#144364;color:white;border-color:#144364}.focus{margin:0 0 16px;padding:14px 18px;background:#eaf4fc;border:1px solid #bbd9ef;border-radius:10px;color:#15415d}.foot{color:#657889;font-size:12px}ul{line-height:1.9}@media(max-width:550px){h1{font-size:21px}.wrap{padding:12px}.card strong{font-size:23px}}
+.insight-table{overflow-x:auto}.insight-table table{min-width:780px}.insight-label{font-weight:700}.insight-hint{font-size:12px;color:#607181;margin:0 0 12px}.insight-heading{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}.insight-heading h2{margin-bottom:8px}.insight-action{color:#16466a}.insight-empty{background:#f4f8fa;border-radius:8px;padding:14px}.missing-data{background:#fff4db;color:#825000;padding:10px;border-radius:8px}.pager{display:flex;justify-content:flex-end;align-items:center;gap:12px;flex-wrap:wrap;padding-top:14px}.pager button:disabled{opacity:.45;cursor:not-allowed}.pager span{font-size:13px;color:#455968}</style></head><body><header><h1>TOP-SENS / Sales Control</h1><p>Панель коммерческого директора · демонстрационная версия</p></header><main class="wrap"><div class="banner">ДЕМО — данные вымышленные. Bitrix24 не подключён, оценки не являются реальной аналитикой.</div><nav class="modebar" aria-label="Режим панели"><button type="button" id="ownerMode" class="active" aria-pressed="true">Собственник</button><button type="button" id="ropMode" aria-pressed="false">РОП</button></nav><div class="focus" id="modeFocus" role="status"></div><section class="cards" id="kpis"></section><section class="panel" id="insights" aria-label="Приоритеты режима"></section><section class="panel"><h2>Сделки и контроль действий</h2><p class="insight-hint">По умолчанию показаны все активные сделки, даже старые. Фильтр периода ограничивает дату создания. Все сведения — вымышленные.</p><p class="insight-hint">Два независимых показателя: коммерческий риск — угроза сделке, дисциплина — выполнение действий менеджером. Качество квалификации оценивает полноту подтверждённых сведений, а не вероятность покупки.</p><div class="filters"><select id="period" aria-label="Период создания"><option value="all">Все активные сделки</option><option value="30">Созданы за 30 дней</option><option value="90">Созданы за 90 дней</option><option value="365">Созданы за 365 дней</option></select><input id="search" placeholder="Поиск клиента или сделки" aria-label="Поиск"><select id="manager" aria-label="Менеджер"><option value="">Все менеджеры</option></select><select id="stage" aria-label="Стадия"><option value="">Все стадии</option></select><select id="risk" aria-label="Коммерческий риск"><option value="">Любой риск</option><option value="high">Высокий (≥ 60)</option><option value="low">Низкий (&lt; 60)</option><option value="unknown">Недостаточно данных</option></select><select id="discipline" aria-label="Дисциплина менеджера"><option value="">Любая дисциплина</option><option value="low">Ниже 60</option><option value="unknown">Недостаточно данных</option></select><select id="quality" aria-label="Качество квалификации"><option value="">Любое качество квалификации</option><option value="low">Ниже 70</option><option value="high">70 и выше</option></select><select id="next" aria-label="Следующий шаг"><option value="">Любое следующее действие</option><option>Просрочено</option><option>Запланировано</option><option>Не проверено</option></select><select id="sort" aria-label="Сортировка"><option value="risk">Сначала риск</option><option value="prospect">Сначала перспективные</option><option value="amount">Сначала крупные</option><option value="due">По сроку следующего действия</option></select></div><p class="insight-hint">Все оценки учебные, по вымышленным сведениям. Нажмите «Открыть», чтобы увидеть расчёт и подтверждение критериев.</p><div class="scroll"><table><thead><tr><th>Клиент / сделка</th><th>Менеджер</th><th>Стадия</th><th>Сумма</th><th>Перспективность</th><th>Коммерческий риск</th><th>Дисциплина</th><th>Качество квалификации</th><th>Дата создания</th><th>Следующее действие</th><th>Детали</th></tr></thead><tbody id="rows"></tbody></table></div><div class="pager"><button id="prevPage" type="button">← Назад</button><span id="pageInfo" aria-live="polite"></span><button id="nextPage" type="button">Вперёд →</button></div><p class="foot" id="count"></p></section><p class="foot">Демо-данные существуют только в коде и браузере; изменений CRM и отправки писем нет.</p></main><dialog id="details"><div class="dialogtop"><h2 id="detailTitle">Сделка</h2><button id="close">Закрыть</button></div><div id="detailBody"></div></dialog><script>
 
 "use strict";
 const deals=${safeJson};
@@ -111,21 +115,23 @@ const score=v=>v===null?"Недостаточно данных":String(v)+"/100"
 const cssScore=(v,badHigh=false)=>v===null?"muted":badHigh?(v>=60?"bad":v>=35?"mid":"good"):(v>=80?"good":v>=60?"mid":"bad");
 const money=d=>new Intl.NumberFormat("ru-RU",{maximumFractionDigits:0}).format(d.amount)+" "+d.currency;
 let mode="owner";
+const PAGE_SIZE=50;let page=1;
 const priorities=d=>(d.nextStatus==="Просрочено"?5:0)+(d.discipline!==null&&d.discipline<60?4:0)+(d.risk!==null&&d.risk>=60?3:0)+(d.qualificationScore<70?2:0)+(d.risk===null||d.discipline===null?1:0);
-function setMode(nextMode){mode=nextMode;for(const [id,on] of [["ownerMode",mode==="owner"],["ropMode",mode==="rop"]]){$(id).classList.toggle("active",on);$(id).setAttribute("aria-pressed",String(on))}render()}
+function setMode(nextMode){mode=nextMode;page=1;for(const [id,on] of [["ownerMode",mode==="owner"],["ropMode",mode==="rop"]]){$(id).classList.toggle("active",on);$(id).setAttribute("aria-pressed",String(on))}render()}
 $("ownerMode").addEventListener("click",()=>setMode("owner"));
 $("ropMode").addEventListener("click",()=>setMode("rop"));
 for(const [id,vals] of [["manager",[...new Set(deals.map(d=>d.manager))]],["stage",[...new Set(deals.map(d=>d.stage))]]])
  for(const value of vals){const o=document.createElement("option");o.value=value;o.textContent=value;$(id).append(o)}
 function current(){
  const query=$("search").value.toLocaleLowerCase("ru"),manager=$("manager").value,stage=$("stage").value;
- const risk=$("risk").value,discipline=$("discipline").value,quality=$("quality").value,next=$("next").value;
+ const risk=$("risk").value,discipline=$("discipline").value,quality=$("quality").value,next=$("next").value,period=$("period").value;
  const a=deals.filter(d=>(d.client+" "+d.name).toLocaleLowerCase("ru").includes(query)
   &&(!manager||manager===d.manager)&&(!stage||stage===d.stage)
   &&(!risk||(risk==="unknown"?d.risk===null:risk==="high"?d.risk!==null&&d.risk>=60:d.risk!==null&&d.risk<60))
   &&(!discipline||(discipline==="unknown"?d.discipline===null:d.discipline!==null&&d.discipline<60))
   &&(!quality||(quality==="low"?d.qualificationScore<70:d.qualificationScore>=70))
-  &&(!next||d.nextStatus===next));
+  &&(!next||d.nextStatus===next)
+  &&(period==="all"||(Date.now()-new Date(d.createdAt+"T00:00:00Z").getTime())/86400000<=Number(period)));
  const sort=$("sort").value;
  a.sort((x,y)=>mode==="rop"&&sort==="risk"?(priorities(y)-priorities(x)||((y.risk??-1)-(x.risk??-1))):
   sort==="due"?x.due.localeCompare(y.due):((y[sort]??-1)-(x[sort]??-1)));
@@ -178,14 +184,17 @@ function renderInsights(a){
   result.map(x=>'<tr><td class="insight-label">'+esc(x.manager)+'</td><td>'+x.count+'</td><td>'+x.commercial+'</td><td>'+x.discipline+'</td><td>'+x.missing+'</td><td>'+x.quality+'/100</td><td>'+esc(x.amounts)+'</td></tr>').join("")+'</tbody></table></div>';
  }else{
   const attention=a.filter(d=>reasons(d).out.length).sort((x,y)=>priorities(y)-priorities(x)||x.id-y.id);
-  el.innerHTML='<h2>Очередь разбора РОПа</h2><p class="insight-hint">Отдельно показаны проблемы процесса, коммерческие препятствия и пробелы в квалификации.</p>'+
+  const top=attention.slice(0,10);
+  el.innerHTML='<h2>Очередь разбора РОПа</h2><p class="insight-hint">Первые 10 из '+attention.length+' проблемных сделок в выборке. Полный список ниже разбит на страницы. Отдельно показаны проблемы процесса, коммерческие препятствия и пробелы в квалификации.</p>'+
   (attention.length?'<div class="insight-table"><table><thead><tr><th>Клиент и сделка</th><th>Менеджер</th><th>Что обнаружено</th><th>Действие</th></tr></thead><tbody>'+
-  attention.map(d=>{const r=reasons(d);return '<tr><td class="insight-label">'+esc(d.client)+' — '+esc(d.name)+'</td><td>'+esc(d.manager)+'</td><td>'+esc(r.out.join("; "))+'</td><td>'+esc(r.actions.join("; "))+'</td></tr>'}).join("")+'</tbody></table></div>':
+  top.map(d=>{const r=reasons(d);return '<tr><td class="insight-label">'+esc(d.client)+' — '+esc(d.name)+'</td><td>'+esc(d.manager)+'</td><td>'+esc(r.out.join("; "))+'</td><td>'+esc(r.actions.join("; "))+'</td></tr>'}).join("")+'</tbody></table></div>':
   '<p class="insight-empty">В этой выборке нет требующих разбора учебных сделок.</p>');
  }
 }
 function render(){
  const a=current(),totals={};for(const d of a)totals[d.currency]=(totals[d.currency]||0)+d.amount;
+ const pages=Math.max(1,Math.ceil(a.length/PAGE_SIZE));page=Math.min(Math.max(page,1),pages);
+ const start=(page-1)*PAGE_SIZE,visible=a.slice(start,start+PAGE_SIZE);
  $("modeFocus").textContent=mode==="owner"?
  "Собственник: коммерческие риски, дисциплина отдела, качество квалификации и суммы отдельно по валютам.":
  "РОП: три независимые проверки — коммерческие препятствия, дисциплина менеджера, достоверность квалификации.";
@@ -198,24 +207,28 @@ function render(){
  ["Недостаточно данных",a.filter(d=>d.risk===null||d.discipline===null).length]];
  if(mode==="rop")cells.push(["Квалификация ниже 70",a.filter(d=>d.qualificationScore<70).length]);
  $("kpis").innerHTML=cells.map(([name,value])=>'<div class="card"><span>'+esc(name)+'</span><strong>'+esc(value)+'</strong></div>').join("");
- $("rows").innerHTML=a.map(d=>'<tr><td><strong>'+esc(d.client)+'</strong><br>'+esc(d.name)+'</td>'+
+ $("rows").innerHTML=visible.map(d=>'<tr><td><strong>'+esc(d.client)+'</strong><br>'+esc(d.name)+'</td>'+
  '<td>'+esc(d.manager)+'</td><td>'+esc(d.stage)+'</td><td>'+esc(money(d))+'</td>'+
  '<td><span class="pill '+cssScore(d.prospect)+'">'+esc(score(d.prospect))+'</span></td>'+
  '<td><span class="pill '+cssScore(d.risk,true)+'">'+esc(score(d.risk))+'</span></td>'+
  '<td><span class="pill '+cssScore(d.discipline)+'">'+esc(score(d.discipline))+'</span></td>'+
- '<td><span class="pill '+cssScore(d.qualificationScore)+'">'+d.qualificationScore+'/100</span></td>'+
+ '<td><span class="pill '+cssScore(d.qualificationScore)+'">'+d.qualificationScore+'/100</span></td><td>'+esc(d.createdAt)+'</td>'+
  '<td><span class="pill '+(d.nextStatus==="Просрочено"?"bad":d.nextStatus==="Не проверено"?"muted":"good")+'">'+esc(d.nextStatus)+'</span><br>'+esc(d.due)+'</td>'+
  '<td><button type="button" data-id="'+d.id+'">Открыть</button></td></tr>').join("");
- $("count").textContent="Показано "+a.length+" из "+deals.length+" вымышленных сделок";
+ $("count").textContent=a.length?"На странице "+visible.length+" сделок; в выборке "+a.length+" из "+deals.length+" активных вымышленных сделок. Общие показатели — по всей выборке.":"В выборке 0 из "+deals.length+" активных вымышленных сделок.";
+ $("pageInfo").textContent="Страница "+page+" из "+pages+" · "+(a.length?start+1:0)+"–"+(start+visible.length)+" из "+a.length;
+ $("prevPage").disabled=page<=1;$("nextPage").disabled=page>=pages;
  renderInsights(a);
 }
-for(const id of ["search","manager","stage","risk","discipline","quality","next","sort"])$(id).addEventListener(id==="search"?"input":"change",render);
+for(const id of ["period","search","manager","stage","risk","discipline","quality","next","sort"])$(id).addEventListener(id==="search"?"input":"change",()=>{page=1;render()});
+$("prevPage").addEventListener("click",()=>{if(page>1){page--;render()}});
+$("nextPage").addEventListener("click",()=>{if(page*PAGE_SIZE<current().length){page++;render()}});
 $("rows").addEventListener("click",e=>{
  const b=e.target.closest("button[data-id]");if(!b)return;
  const d=deals.find(item=>item.id===Number(b.dataset.id));if(!d)return;
  $("detailTitle").textContent=d.client+" — "+d.name;
  $("detailBody").innerHTML='<p><strong>Менеджер:</strong> '+esc(d.manager)+'</p><p><strong>Стадия:</strong> '+esc(d.stage)+'</p><p><strong>Сумма:</strong> '+esc(money(d))+'</p>'+
- '<p><strong>Следующее действие:</strong> '+esc(d.nextStatus)+' ('+esc(d.due)+')</p>'+scoreDetails(d)+
+ '<p><strong>Дата создания:</strong> '+esc(d.createdAt)+'</p><p><strong>Следующее действие:</strong> '+esc(d.nextStatus)+' ('+esc(d.due)+')</p>'+scoreDetails(d)+
  '<h3>Демонстрационная история</h3><ul>'+d.history.map(h=>'<li>'+esc(h.at)+' — '+esc(h.text)+'</li>').join("")+'</ul>';
  $("details").showModal();
 });
@@ -226,7 +239,8 @@ const security={"Cache-Control":"no-store","Content-Security-Policy":"default-sr
 http.createServer((req,res)=>{
   if(!authorized(req)){res.writeHead(401,{...security,"WWW-Authenticate":'Basic realm="TOP-SENS Sales"'});return res.end("Authentication required")}
   if(req.method!=="GET"){res.writeHead(405,{...security,Allow:"GET"});return res.end()}
-  if(req.url==="/sales"){res.writeHead(200,{...security,"Content-Type":"text/html; charset=utf-8"});return res.end(html)}
-  if(req.url==="/sales/status"){res.writeHead(200,{...security,"Content-Type":"application/json; charset=utf-8"});return res.end(JSON.stringify({ok:true,mode:"demo",crmConnected:false,demoDeals:demo.length}))}
+  const path=String(req.url||"").split("?")[0];
+  if(path==="/sales"){res.writeHead(200,{...security,"Content-Type":"text/html; charset=utf-8"});return res.end(html)}
+  if(path==="/sales/status"){res.writeHead(200,{...security,"Content-Type":"application/json; charset=utf-8"});return res.end(JSON.stringify({ok:true,mode:"demo",crmConnected:false,demoDeals:demo.length}))}
   res.writeHead(404,security);res.end("Not found");
 }).listen(port,"0.0.0.0",()=>console.log("TOP-SENS demo staging started"));
