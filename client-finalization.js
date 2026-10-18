@@ -63,8 +63,11 @@ function criteria(c,context={}){
  if(!c||!c.id||!identity(c))missing.push("company_identity");
  if(!valid.has(c?.organizationType))missing.push("approved_type");
  const website=safeWebsite(c?.siteVerified||c?.siteProfileUrl);
- const verifiedSite=c?.siteStatus==="official_site_verified" ||
-  (c?.siteStatus==="site_profiled"&&/официальный сайт|подтвержден[аоы] .*сайт/i.test(string(c?.siteSource||c?.verification)));
+ // Only independently reviewed legal-site attribution permits an immutable
+ // "research complete" lock. A CRM/AI website candidate is not enough.
+ const verifiedSite=c?.siteStatus==="official_site_verified"&&
+  valid.has(c?.verifiedOrgType)&&
+  string(c?.siteSource)==="Официальный сайт, проверенный по юридическим данным";
  if(!website||!verifiedSite)missing.push("verified_company_website");
  if(!context.contactsAt)missing.push("contacts_not_audited");
  if(!(Array.isArray(c?.contactEmails)&&c.contactEmails.length>0) &&
