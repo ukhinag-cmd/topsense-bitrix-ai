@@ -41,7 +41,7 @@ function urls(c){
    "Сайт из карточки компании, присланной письмом"].includes(c.siteSource);
  const fromEmail=!pinned&&Boolean(c.corporateDomain)&&selected==="https://"+c.corporateDomain;
  const origin=fromEmail?(
-   ["Домен привязанного контакта","Альтернативный домен привязанного контакта","Домен из входящей сделки",
+   ["Домен отправителя входящего письма","Домен привязанного контакта","Альтернативный домен привязанного контакта","Домен из входящей сделки",
     "Непривязанные CRM-контакты: совпали название и корпоративный домен"].includes(c.siteSource)
      ?c.siteSource:"Корпоративный домен e-mail CRM"
    ):(c.siteSource||"Сайт из CRM");
@@ -196,20 +196,32 @@ async function one(c){
   // A website typed into the CRM by a manager is not proof of ownership.
   // Require the company's FULL legal name on its own website, not one
   // matching keyword in a partner / holding / customer listing.
+  const sender=String(c.emailSenderDomain||"").toLowerCase().replace(/^www\./,"");
+  const host=new URL(result.url).hostname.toLowerCase().replace(/^www\./,"");
+  const inboundSenderSiteMatch=candidates[0].origin==="Домен отправителя входящего письма"&&
+   Boolean(sender)&&sender===host&&
+   require("./company-email-domains").extract("customer@"+sender).includes(sender)&&
+   !redirectedToOtherDomain;
   const legalNameMatchesOwnSite=require("./name-site-search").legalNameOnOwnSite(c,pages);
   const crmWebsiteOnly=candidates[0].origin==="Сайт из CRM"&&!c.verifiedOrgType;
-  const trusted=provisionalLegalNameSearch?legalNameMatchesOwnSite:
+  // User-approved qualification evidence: original inbound sender domain
+  // matches the inspected corporate website (www alias allowed). Do not
+  // require an INN/CRM company card, and never infer type from the email need.
+  const trusted=inboundSenderSiteMatch?true:
+   provisionalLegalNameSearch?legalNameMatchesOwnSite:
    orphanSource?(orphanNameConfirmed&&legalNameMatchesOwnSite):
    crmWebsiteOnly?legalNameMatchesOwnSite:(!thirdParty||checkedName);
   pagesScanned+=pages.length;checkedSites++;
   const profile={status:!trusted?"site_identity_unclear":provisionalLegalNameSearch&&found&&!ambiguous?
    "site_preliminary_profiled":ambiguous?"site_read_ambiguous_type":found?"site_profiled":"site_read_no_clear_type",source:candidates[0].origin,url:result.url,
    staffEvidence:trusted&&!provisionalLegalNameSearch?require("./staff-evidence").fromPages(pages):null,siteTitle:result.meta.title,siteDescription:result.meta.description,siteHeadings:pages.flatMap(p=>p.meta.headings).slice(0,18),sitePageCount:pages.length,sitePagesVisited:pages.map(p=>p.pageUrl),siteContactPages:pages.filter(p=>/(?:контакт|contact|kontakty|реквизит|rekvizit|requisite)/i.test(p.pageUrl)).map(p=>p.pageUrl),siteActivityReason:activity?.reason||"",
-   siteIdentityEvidence:legalNameMatchesOwnSite?"full_legal_name_on_own_site":
-    "legal_ownership_not_confirmed",
+   siteIdentityEvidence:inboundSenderSiteMatch?"inbound_sender_domain_matches_website":
+    legalNameMatchesOwnSite?"full_legal_name_on_own_site":"legal_ownership_not_confirmed",
+   emailSenderDomain:inboundSenderSiteMatch?sender:"",
    // Website reading never establishes legal identity by itself.
-   siteIdentityVerified:Boolean(c.verifiedOrgType&&
-    c.siteSource==="Официальный сайт, проверенный по юридическим данным"),
+   siteIdentityVerified:inboundSenderSiteMatch||
+    Boolean(c.verifiedOrgType&&
+     c.siteSource==="Официальный сайт, проверенный по юридическим данным"),
    siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?(provisionalLegalNameSearch?"Предварительная — совпали полное наименование и ОПФ, реквизиты пока не сверены":"Предварительная по нескольким страницам"):"Не определена",checkedAt:new Date().toISOString()};
   profiles.set(c.id,profile);
   evidenceStore.queue(c,profile);
@@ -232,6 +244,7 @@ function pump(){
  }
 }
 function evidenceRank(source){
+ if(source==="Домен отправителя входящего письма")return 8;
  if(source==="Сайт из подписи входящего письма")return 7;
  if(source==="Сайт из карточки компании, присланной письмом")return 6;
  if(source==="Корпоративный домен e-mail CRM")return 4;
