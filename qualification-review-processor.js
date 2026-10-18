@@ -41,7 +41,18 @@ function evidenceSummary(id,task,dealIds){
   legalNameFound:Array.isArray(row.legalNameCandidates)&&row.legalNameCandidates.length>0,
   websiteHintsFound:Array.isArray(row.websiteHints)&&row.websiteHints.length>0,
   correspondencePartial:Boolean(row.correspondencePartial),
-  readStatus:String(row.status||"unknown").slice(0,50)
+  readStatus:String(row.status||"unknown").slice(0,50),
+  // Only narrowly extracted, checksum-validated business evidence is stored;
+  // no original letter body, sender contacts, emails or attachments.
+  firstPartyActivities:(row.firstPartyActivities||[]).filter(x=>
+   x?.source==="explicit_original_inbound_self_description"&&
+   require("./company-requisites").validInn(x.inn)&&
+   require("./client-taxonomy").known(x.type)).slice(0,4).map(x=>({
+    type:String(x.type).slice(0,120),inn:String(x.inn),
+    activityId:toId(x.activityId),source:"explicit_original_inbound_self_description"})),
+  legalNameCandidates:(row.legalNameCandidates||[]).filter(x=>
+   require("./company-requisites").validInn(x.inn)&&x.name).slice(0,6).map(x=>({
+    name:String(x.name).slice(0,180),inn:String(x.inn),activityId:toId(x.activityId)}))
  }));
  return {recordType:"topsense-review-evidence-v1",crmCompanyId:id,
   signature:task.signature,checkedAt:new Date().toISOString(),
@@ -113,5 +124,12 @@ async function tick(companies){
  console.log(JSON.stringify(summary));return summary;
  }finally{running=false}
 }
+function evidenceProfiles(id){
+ const doc=dossiers.get(toId(id));if(!doc?.activities?.length)return [];
+ return doc.activities.filter(x=>Array.isArray(x.firstPartyActivities)&&x.firstPartyActivities.length)
+  .map(x=>({id:toId(x.dealId),companyId:toId(id),
+   correspondencePartial:Boolean(x.correspondencePartial),
+   firstPartyActivities:x.firstPartyActivities,legalNameCandidates:x.legalNameCandidates||[]}));
+}
 function stats(){return {cycles,queued,checked,errors,lastAt,lastError,checkpointed:done.size,inFlight:pending.size,checkpointWritePending:dirty,cooldown:retryAfter.size,dossiersWithEvidence:dossiers.size,dossiersPersisted:dossiers.size-unsavedDossiers.size,dossiersPending:unsavedDossiers.size}}
-module.exports={tick,stats,ingest,signature,evidenceSummary};
+module.exports={tick,stats,ingest,signature,evidenceSummary,evidenceProfiles};
