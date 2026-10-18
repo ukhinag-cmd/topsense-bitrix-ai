@@ -307,7 +307,7 @@ function enqueue(companies){
    sourcePriority.set(id,newRank);sourceFingerprints.set(id,signature);
    // Changing a same-priority website must invalidate a previous site's type.
    profiles.set(id,{status:hasSite?"site_pending":"site_absent",source:"Источник сайта изменился; нужна перепроверка"});
-   if(hasSite){queue.push(c);added++}
+   if(hasSite){if(c.siteSource==="Домен отправителя входящего письма")queue.unshift(c);else queue.push(c);added++}
    continue;
   }
   visited.add(id);sourcePriority.set(id,newRank);sourceFingerprints.set(id,signature);
@@ -322,7 +322,7 @@ function enqueue(companies){
   if(cached){
    profiles.set(id,cached);restoredProfiles++;continue;
   }
-  queue.push(c);added++;
+  if(c.siteSource==="Домен отправителя входящего письма")queue.unshift(c);else queue.push(c);added++;
  }
  pump();
  if((companies||[]).length>25)console.log(JSON.stringify({component:"site-profiler",event:"queue-updated",added,queued:queue.length,known:profiles.size,restoredProfiles}));
