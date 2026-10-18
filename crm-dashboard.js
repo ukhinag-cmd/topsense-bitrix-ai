@@ -920,7 +920,8 @@ function coverageLog(){
   console.log(JSON.stringify({component:"topsense-dashboard",event:"classification-coverage",
    customers:companyList.length,crmCards:state.companies.length,
    typed:typed.length,untyped:companyList.length-typed.length,coveredTypes:distinctTypes.size,
-   typedFromVerifiedOriginalDeals:companyList.filter(c=>c.researchStatus==="inbound_self_description_qualified").length,
+   typedFromVerifiedOriginalDeals:companyList.filter(c=>
+    /Собственная деятельность в письме сделки/i.test(String(c.segmentSource||""))).length,
    censusReady:snap.classificationCensusReady,censusDisplay:snap.classificationDisplay,
    ledger:snap.classificationLedger,
    siteCrawl:require("./website-profiler").stats(),
