@@ -45,8 +45,14 @@ function normalName(name){
 // No auto-assignment unless the original inbound message identifies the
 // SAME legal company with a checksum-valid INN from its own CRM requisites.
 function decide(company,profiles,requisite,locked=false){
- if(locked||taxonomy.known(company?.organizationType)||
-  company?.companyIdentityReviewRequired||requisite?.status!=="inn_recorded"||
+ if(locked||company?.companyIdentityReviewRequired||
+  company?.verificationStatus==="confirmed"||
+  taxonomy.known(company?.verifiedOrgType)||
+  (taxonomy.known(company?.organizationType)&&
+   company?.verification!=="Предварительная классификация"&&
+   company?.verification!=="AI — требует проверки"&&
+   company?.proposedType!==company?.organizationType)||
+  requisite?.status!=="inn_recorded"||
   !inn(requisite?.inn)||!normalName(company?.name))return null;
  const ownName=normalName(company.name),id=String(company.id||"");
  const matches=[];
@@ -69,7 +75,8 @@ function decide(company,profiles,requisite,locked=false){
 function qualify(c){
  const ledger=require("./classification-ledger");
  const finalization=require("./client-finalization");
- if(ledger.get(c?.id)||finalization.isComplete(c?.id))return c;
+ if(ledger.get(c?.id)||finalization.isComplete(c?.id)||
+  c?.verificationStatus==="confirmed"||taxonomy.known(c?.verifiedOrgType))return c;
  const requisite=require("./company-requisites").get(c?.id);
  const profiles=[...require("./crm-deal-intake").forCompany(c?.id),
   ...require("./qualification-review-processor").evidenceProfiles(c?.id)];
