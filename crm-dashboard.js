@@ -589,6 +589,7 @@ async function loadPilot(){
   require("./client-finalization").ingest(entries);
   require("./classification-census").ingest(entries);
   require("./classification-ledger").ingest(entries);
+  require("./website-profiler").hydrateFromArchive(entries);
   require("./deal-only-name-ledger").ingest(entries);
   require("./deal-only-sender-ledger").ingest(entries);
   require("./deal-only-site-ledger").ingest(entries);
