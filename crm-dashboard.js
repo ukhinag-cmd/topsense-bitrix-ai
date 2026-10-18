@@ -672,6 +672,7 @@ function data(known){
  const ledger=require("./classification-ledger");
  const monitor=require("./crm-morning-monitor");
  const typedRecords=require("./client-type-inference").apply(records)
+  .map(c=>require("./crm-first-party-activity").qualify(c))
   .map(c=>ledger.apply(c))
   .map(c=>finalization.apply({...c,
    finance2025:finances.withRequisite(c.finance2025,requisites.get(c.id)),
