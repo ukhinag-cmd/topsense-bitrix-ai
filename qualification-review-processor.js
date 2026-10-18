@@ -1,8 +1,15 @@
 "use strict";
 const worklist=require("./qualification-review-worklist");
+const crypto=require("node:crypto");
+const KEY="review-worker:v1:checkpoint";
+const done=new Map(),pending=new Map();
 const intake=require("./crm-deal-intake");
 let running=false,cycles=0,queued=0,checked=0,errors=0,lastAt=null,lastError="";
-const done=new Set(),toId=v=>String(v??"").trim();
+const toId=v=>String(v??"").trim();
+function signature(c){return crypto.createHash("sha256").update(JSON.stringify([c.name,c.crmIdList||[c.id],c.latestCorrespondenceActivityId||"",c.siteVerified||c.siteProfileUrl||""])).digest("hex").slice(0,24)}
+function ingest(rows){const p=(rows||[]).find(r=>r?.key===KEY)?.payload;if(!p||p.recordType!=="topsense-review-worker-checkpoint-v1"||!Array.isArray(p.seen))return 0;for(const item of p.seen){if(Array.isArray(item)&&/^\\d+$/.test(String(item[0]))&&/^[0-9a-f]{24}$/.test(String(item[1])))done.set(String(item[0]),String(item[1]))}return done.size}
+async function save(){const url=String(process.env.GOOGLE_SHEET_STORE_URL||""),secret=String(process.env.GOOGLE_SHEET_STORE_SECRET||"");if(!url||!secret)throw Error("checkpoint_unavailable");const payload={recordType:"topsense-review-worker-checkpoint-v1",seen:[...done],updatedAt:new Date().toISOString()};const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"upsert",secret,rows:[{key:KEY,payload}]}),signal:AbortSignal.timeout(25000)});const p=await r.json();if(!r.ok||p?.ok===false)throw Error("checkpoint_write_failed")}
+
 async function deals(companyId){
  const base=String(process.env.BITRIX_WEBHOOK_BASE||"").trim();
  if(!base||!/^\d+$/.test(companyId))throw Error("CRM read connection unavailable");
@@ -26,14 +33,16 @@ async function tick(companies){
  for(const item of all){
   if(inspected>=3)break;
   const id=toId(item.id);
-  if(done.has(id))continue;
+  if(pending.has(id))continue;
   const owner=companies.find(c=>(c.crmIdList||[c.id]).map(toId).includes(id));
-  if(!owner)continue;
+  if(!owner||done.get(id)===signature(owner))continue;
   try{
    // Only deals explicitly linked to this CRM legal entity.
    const found=await deals(id);
    submitted+=intake.queueDeals(found);
-   inspected++;done.add(id);checked++;
+   inspected++;checked++;
+   if(found.length){pending.set(id,{signature:signature(owner),dealIds:found.map(d=>toId(d.ID))});}
+   else{done.set(id,signature(owner));changed=true;}
   }catch(e){errors++;lastError=String(e.message||e).slice(0,100);break}
  }
  queued+=submitted;
@@ -42,5 +51,5 @@ async function tick(companies){
  console.log(JSON.stringify(summary));return summary;
  }finally{running=false}
 }
-function stats(){return {cycles,queued,checked,errors,lastAt,lastError}}
-module.exports={tick,stats};
+function stats(){return {cycles,queued,checked,errors,lastAt,lastError,checkpointed:done.size,inFlight:pending.size}}
+module.exports={tick,stats,ingest,signature};
