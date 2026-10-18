@@ -84,6 +84,17 @@ async function request(action,rows){
  }
  throw lastError||Error("private_store_unavailable");
 }
+function fromRows(rows){
+ const map=new Map();
+ for(const entry of rows||[]){
+  const key=String(entry?.key||"");
+  const record=entry?.payload;
+  const id=key.startsWith(PREFIX)?key.slice(PREFIX.length):"";
+  if(!/^\d+$/.test(id)||!fresh(record)||String(record.companyId)!==id)continue;
+  map.set(id,record);
+ }
+ return map;
+}
 async function load(){
  const map=new Map();
  if(!configured())return map;
@@ -173,4 +184,4 @@ async function flush(){
 }
 function stats(){return {configured:configured(),cacheRowsLoaded:loadedRows,siteProfilesStored:storedRows,
  writeErrors,pendingWrites:pending.size,lastError,batchLimit};}
-module.exports={configured,inputUrl,fingerprint,fresh,restored,load,queue,flush,stats};
+module.exports={configured,inputUrl,fingerprint,fresh,restored,fromRows,load,queue,flush,stats};
