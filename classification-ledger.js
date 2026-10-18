@@ -22,8 +22,19 @@ function inboundProof(c){
   str(c?.segmentSource).startsWith("Собственная деятельность в письме сделки ")&&
   /подтверждённым совпадением ИНН/.test(str(c?.verification));
 }
+function senderDomainSiteProof(c){
+ return c?.researchStatus==="mail_domain_site_qualified"&&
+  c?.siteStatus==="site_profiled"&&
+  c?.siteIdentityVerified===true&&
+  c?.siteSource==="Домен отправителя входящего письма"&&
+  taxonomy.known(c?.organizationType)&&
+  /^Подтверждено — домен входящего отправителя совпал с сайтом/.test(str(c?.segmentConfidence))&&
+  str(c?.emailSenderDomain)&&
+  require("./company-email-domains").extract("customer@"+str(c.emailSenderDomain))
+   .includes(str(c.emailSenderDomain));
+}
 function rank(c){
- if(inboundProof(c))return 5;
+ if(senderDomainSiteProof(c)||inboundProof(c))return 5;
  const source=str(c?.segmentSource).toLowerCase(),conf=str(c?.segmentConfidence).toLowerCase();
  // Verified and explicitly reviewed independent legal website evidence, not
  // just a matching company title / CRM website / a model's confidence claim.
@@ -81,7 +92,7 @@ function apply(c){
   researchStatus:"identity_changed_requires_review"};
  // A name-only or preliminary AI result is NOT a permanently qualified type.
  // Permit ONLY verified new first-party activity evidence to supersede it.
- if(saved.rank<=3&&inboundProof(c))return {...c,
+ if(saved.rank<=3&&(inboundProof(c)||senderDomainSiteProof(c)))return {...c,
   previousProvisionalType:saved.type,pendingEvidenceUpgrade:true,
   classificationFrozen:false,ledgerRestored:true};
  return {...c,organizationType:saved.type,type:saved.type,
@@ -112,7 +123,7 @@ function offer(c){
  // separate evidence-based requalification is explicitly approved.
  // Only preliminaries may be upgraded; actual verified qualifications stay
  // immutable. Identity hash MUST still refer to the same original legal card.
- if(existing&&!(existing.rank<=3&&inboundProof(c)&&existing.identityHash===hash))return false;
+ if(existing&&!(existing.rank<=3&&(inboundProof(c)||senderDomainSiteProof(c))&&existing.identityHash===hash))return false;
  const nextRank=rank(c);
  const row={recordType:"topsense-type-ledger-v1",companyId:id,identityHash:hash,
   companyName:str(c.name).slice(0,180),
