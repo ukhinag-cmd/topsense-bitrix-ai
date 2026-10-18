@@ -586,6 +586,7 @@ async function loadPilot(){
   require("./name-site-search-checkpoint").ingest(entries);
   require("./purchase-checkpoint").ingest(entries);
   require("./qualification-review-worklist").ingest(entries);
+  require("./qualification-review-processor").ingest(entries);
   const summary=entries.find(e=>e.key==="pilot:v4:summary")?.payload||{};
   const oldResults=new Set(entries.filter(e=>/^pilot:v[123]:result:/.test(String(e.key||""))).map(e=>String(e.payload?.companyId||"")).filter(Boolean));
   state.paidControl={
@@ -878,7 +879,12 @@ function coverageLog(){
    require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:48});
   const companyList=snap.companies||[];
   const reviewQueue=require("./qualification-review-worklist").inspect(companyList);
-  console.log(JSON.stringify({component:"qualification-review-worklist",event:"review-cycle",pending:reviewQueue.total,...reviewQueue.totals}));
+  if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
+   require("./qualification-review-processor").tick(companyList).catch(e=>{
+    console.warn(JSON.stringify({component:"qualification-review-processor",
+     event:"cycle-error",reason:String(e.message||e).slice(0,110)}));
+   });
+  console.log(JSON.stringify({component:"qualification-review-worklist",event:"review-cycle",pending:reviewQueue.total,...reviewQueue.totals,processor:require("./qualification-review-processor").stats()}));
   const typed=companyList.filter(x=>require("./client-taxonomy").known(x.organizationType));
   require("./classification-census").consider(companyList.length,typed.length,state.companies.length,snap.classificationCensusReady);
   if(snap.classificationLive?.ready)console.log(JSON.stringify({component:"topsense-dashboard",event:"live-classification-counter",typed:snap.classificationLive.typed,total:snap.classificationLive.total,oldSnapshot:snap.classificationDisplay?.typed,censusReady:snap.classificationCensusReady}));
