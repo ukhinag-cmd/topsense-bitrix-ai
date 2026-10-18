@@ -33,3 +33,18 @@ test("does not mix recovered deal-only clients into the CRM paid worklist",()=>{
  const result=queue.inspect([{id:"105",name:"Historical",companyCardMissing:true,organizationType:""}]);
  assert.equal(result.total,0);
 });
+
+test("a previous paid AI type without sufficient evidence remains in the worklist",()=>{
+ const ledger=require("./classification-ledger");
+ const id="417711",name="ООО Условный Поставщик";
+ const identity=ledger.identity({id,name});
+ ledger.ingest([{key:ledger.PREFIX+id,payload:{
+  recordType:"topsense-type-ledger-v1",companyId:id,identityHash:identity,
+  type:"Интегратор АСУ ТП",rank:1,source:"Название CRM",
+  savedAt:"2026-10-18T01:00:00.000Z"}}]);
+ queue.ingest([{key:"pilot:v4:result:"+id,payload:{status:"review"}}]);
+ const r=queue.inspect([{id,name,organizationType:"Интегратор АСУ ТП"}]);
+ assert.equal(r.total,1);
+ assert.equal(r.totals.provisional_prior_type,1);
+ assert.equal(r.totals.already_qualified,0);
+});
