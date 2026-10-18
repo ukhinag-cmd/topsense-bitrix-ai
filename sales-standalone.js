@@ -36,7 +36,7 @@ const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta n
 "use strict";
 const deals=${safeJson};
 const $=id=>document.getElementById(id);
-const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const money=d=>new Intl.NumberFormat("ru-RU",{maximumFractionDigits:0}).format(d.amount)+" "+d.currency;
 const color=(v,reverse=false)=>v>=70?(reverse?"bad":"good"):v>=45?"mid":(reverse?"good":"muted");
 for(const [id,values] of [["manager",[...new Set(deals.map(d=>d.manager))]],["stage",[...new Set(deals.map(d=>d.stage))]]])for(const value of values){const o=document.createElement("option");o.value=value;o.textContent=value;$(id).append(o)}
