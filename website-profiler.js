@@ -266,6 +266,18 @@ function restorePreliminaryNameProfile(c,row){
   siteSource:profile.source};
  return evidenceStore.restored(sameIdentity,row);
 }
+function hydrateFromArchive(rows){
+ const recovered=evidenceStore.fromRows(rows);
+ let count=0;
+ for(const [id,row] of recovered){
+  const current=persistedProfiles.get(id);
+  if(current&&Date.parse(current.checkedAt||0)>=Date.parse(row.checkedAt||0))continue;
+  persistedProfiles.set(id,row);count++;
+ }
+ if(count)console.log(JSON.stringify({component:"site-profiler",
+  event:"full-archive-hydrated",recovered:count,available:persistedProfiles.size}));
+ return count;
+}
 function enqueue(companies){
  // Restore already completed free site checks before starting a new crawl.
  // Render instances are ephemeral; a restart must not erase classification.
@@ -363,4 +375,4 @@ function stats(){
   queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
   restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
 }
-module.exports={enqueue,get,stats,retryTransient,fetchPage,fetchCorporateHome,homepageVariants,restorePreliminaryNameProfile};
+module.exports={enqueue,get,stats,retryTransient,fetchPage,fetchCorporateHome,homepageVariants,restorePreliminaryNameProfile,hydrateFromArchive};
