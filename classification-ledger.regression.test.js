@@ -48,3 +48,31 @@ test("enriched website type can be queued for permanent per-company storage",()=
  assert.equal(ledger.offer(c),true);
  assert.equal(ledger.offer(c),false);
 });
+
+test("verified original inbound letter upgrades only provisional earlier type",()=>{
+ const name="ООО Точная Компания",id="40003";
+ assert.equal(ledger.ingest([row(id,name,engineer,1)]),1);
+ const preliminary=ledger.apply({id,name,organizationType:engineer,siteStatus:"site_pending"});
+ assert.equal(preliminary.organizationType,engineer);
+ assert.equal(preliminary.classificationFrozen,false);
+ assert.equal(preliminary.classificationProvisional,true);
+ const verified={id,name,organizationType:contractor,
+  researchStatus:"inbound_self_description_qualified",
+  segmentSource:"Собственная деятельность в письме сделки 40 (активность 101), совпадает ИНН из реквизитов",
+  segmentConfidence:"Высокая — исходное входящее письмо с ИНН и юридическим наименованием",
+  verification:"Собственное заявление компании с подтверждённым совпадением ИНН"};
+ assert.equal(ledger.apply(verified).organizationType,contractor);
+ assert.equal(ledger.offer(verified),true);
+ assert.equal(ledger.offer(verified),false);
+ assert.equal(ledger.apply({...verified,name:"ДРУГАЯ КОМПАНИЯ"}).organizationType,"");
+});
+test("a frozen verified type never changes even with new original letter evidence",()=>{
+ const name="ООО Проверенный Подрядчик",id="40004";
+ assert.equal(ledger.ingest([row(id,name,contractor,5)]),1);
+ const fresh={id,name,organizationType:engineer,
+  researchStatus:"inbound_self_description_qualified",
+  segmentSource:"Собственная деятельность в письме сделки 99, совпадает ИНН из реквизитов",
+  verification:"Собственное заявление компании с подтверждённым совпадением ИНН"};
+ assert.equal(ledger.apply(fresh).organizationType,contractor);
+ assert.equal(ledger.offer(fresh),false);
+});
