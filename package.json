@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node --max-old-space-size=352 server.js",
+    "start": "node --max-old-space-size=1024 server.js",
     "test": "node --test *.regression.test.js"
   },
   "dependencies": {
