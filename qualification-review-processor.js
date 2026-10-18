@@ -2,7 +2,7 @@
 const worklist=require("./qualification-review-worklist");
 const crypto=require("node:crypto");
 const KEY="review-worker:v1:checkpoint";
-const done=new Map(),pending=new Map();
+const done=new Map(),pending=new Map(),retryAfter=new Map();
 const intake=require("./crm-deal-intake");
 let running=false,cycles=0,queued=0,checked=0,errors=0,lastAt=null,lastError="",dirty=false;
 const toId=v=>String(v??"").trim();
@@ -27,7 +27,7 @@ async function tick(companies){
  if(String(process.env.TOPSENSE_ANALYTICS_READONLY)!=="1")return {status:"read_only_required"};
  if(!Array.isArray(companies)||companies.length<500)return {status:"snapshot_not_ready"};
  running=true;lastAt=new Date().toISOString();cycles++;
- let inspected=0,submitted=0;
+ let inspected=0,submitted=0,attempted=0;
  try{
  const all=worklist.inspect(companies).items;
  let changed=false;
@@ -37,11 +37,12 @@ async function tick(companies){
   }
  }
  for(const item of all){
-  if(inspected>=3)break;
+  if(attempted>=3)break;
   const id=toId(item.id);
-  if(pending.has(id))continue;
+  if(pending.has(id)||(retryAfter.get(id)||0)>Date.now())continue;
   const owner=companies.find(c=>(c.crmIdList||[c.id]).map(toId).includes(id));
   if(!owner||done.get(id)===signature(owner))continue;
+  attempted++;
   try{
    // Only deals explicitly linked to this CRM legal entity.
    // A virtual duplicate group can contain several distinct CRM IDs.
@@ -55,14 +56,15 @@ async function tick(companies){
    inspected++;checked++;
    if(found.length){pending.set(id,{signature:signature(owner),dealIds:found.map(d=>toId(d.ID))});}
    else{done.set(id,signature(owner));changed=true;dirty=true;}
-  }catch(e){errors++;lastError=String(e.message||e).slice(0,100);break}
+  }catch(e){errors++;lastError=String(e.message||e).slice(0,100);
+   retryAfter.set(id,Date.now()+30*60*1000);continue}
  }
  if(dirty){try{await save();dirty=false}catch(e){errors++;lastError=String(e.message||e).slice(0,100);}}
  queued+=submitted;
  const summary={component:"qualification-review-processor",event:"cycle",at:lastAt,
- inspected,submitted,totalChecked:checked,remaining:Math.max(0,all.length-done.size),errors};
+ inspected,attempted,submitted,totalChecked:checked,remaining:Math.max(0,all.length-done.size),errors};
  console.log(JSON.stringify(summary));return summary;
  }finally{running=false}
 }
-function stats(){return {cycles,queued,checked,errors,lastAt,lastError,checkpointed:done.size,inFlight:pending.size,checkpointWritePending:dirty}}
+function stats(){return {cycles,queued,checked,errors,lastAt,lastError,checkpointed:done.size,inFlight:pending.size,checkpointWritePending:dirty,cooldown:retryAfter.size}}
 module.exports={tick,stats,ingest,signature};
