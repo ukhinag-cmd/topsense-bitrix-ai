@@ -37,10 +37,12 @@ function category(entry){
 }
 function inspect(companies){
  const taxonomy=require("./client-taxonomy");
+ const ledger=require("./classification-ledger");
+ const completed=require("./client-finalization");
  const profiler=require("./website-profiler");
  const totals={review:0,reservation_without_result:0,error:0,
   previously_classified:0,other_attempt:0,never_attempted:0,
-  already_qualified:0,requires_identity_review:0,with_new_correspondence:0,
+  already_qualified:0,provisional_prior_type:0,requires_identity_review:0,with_new_correspondence:0,
   verified_site_evidence:0,awaiting_independent_evidence:0};
  const items=[];
  for(const c of companies||[]){
@@ -51,10 +53,19 @@ function inspect(companies){
   if(!matches.length)continue;
   const current=matches.sort((a,b)=>b.entry.version-a.entry.version)[0];
   const cat=category(current.entry);
-  if(taxonomy.known(c.organizationType)){
+  const isTyped=taxonomy.known(c.organizationType);
+  const isActuallyFrozen=isTyped&&(
+   c.classificationFrozen===true||
+   c.verificationStatus==="confirmed"||
+   taxonomy.known(c.verifiedOrgType)||
+   ids.some(id=>completed.isComplete(id)||(ledger.get(id)?.rank||0)>=4));
+  // Previous "typed" counts included name-only and AI-provisional guesses.
+  // Such cases still need original correspondence research.
+  if(isActuallyFrozen){
    totals.already_qualified++;
    continue;
   }
+  if(isTyped)totals.provisional_prior_type++;
   // Status cards must count only unfinished cases, not historical results
   // for companies whose type is already verified and frozen.
   if(!(cat in totals))totals.other_attempt++;
