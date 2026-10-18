@@ -703,7 +703,8 @@ function data(known){
  const baseAnalyticCompanies=virtual.companies.map(c=>({...c,
   name:require("./company-name-format").display(c.name).name,
   relationshipPotential:require("./client-relationship-potential").score(c)}));
- const dealOnlyClients=require("./deal-only-client-registry").view(baseAnalyticCompanies);
+ const dealOnlyClients=require("./deal-only-domain-research").apply(
+  require("./deal-only-client-registry").view(baseAnalyticCompanies));
  const allAnalyticCompanies=require("./holding-network").decorate([...baseAnalyticCompanies,...dealOnlyClients]);
  const holdingGroups=require("./holding-network").view(allAnalyticCompanies);
  // A virtual duplicate is never treated as independently proven identity.
@@ -896,6 +897,9 @@ function coverageLog(){
   // without waiting for the older CRM-site queue to become empty.
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
     enqueueDealMailSites({limit:12});
+  if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1"&&
+     snap.dealOnlyClients?.length)
+   require("./deal-only-domain-research").enqueue(snap.dealOnlyClients,8);
   const companyList=snap.companies||[];
   const reviewQueue=require("./qualification-review-worklist").inspect(companyList);
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
