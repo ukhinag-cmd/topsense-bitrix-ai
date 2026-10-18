@@ -22,7 +22,7 @@ function discover(description,activityId){
   .replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").slice(0,5500);
  const ids=[...new Set([...top.matchAll(/(?:ИНН|INN)\s*[:№#-]?\s*(\d{10}|\d{12})(?!\d)/gi)].map(m=>inn(m[1])).filter(Boolean))];
  if(ids.length!==1)return [];
- const self=/\b(?:наша\s+(?:компания|организация|фирма)|мы)\s+(?:специализируемся\s+на|занимаемся|осуществляем|выполняем|производим|изготавливаем|выпускаем|являемся)\s+([^.!?\n]{10,240})/giu;
+ const self=/(?:^|[\s;:])(?:(?:наша\s+(?:компания|организация|фирма))\s+(?:специализируется\s+на|занимается|осуществляет|выполняет|производит|изготавливает|выпускает|является)|мы\s+(?:специализируемся\s+на|занимаемся|осуществляем|выполняем|производим|изготавливаем|выпускаем|являемся))\s+([^.!?\n]{10,240})/giu;
  const matching=[];
  for(const match of top.matchAll(self)){
   const statement=match[0].trim();
@@ -36,4 +36,50 @@ function discover(description,activityId){
  // Contradictory business claims cannot be auto-validated.
  return matching.length===1?matching:[];
 }
-module.exports={discover};
+
+function normalName(name){
+ return String(name||"").toLowerCase().replace(/ё/g,"е")
+  .replace(/(?:^|\s)(?:ооо|пао|оао|ао|зао|нао|ип)(?=\s|$)/g," ")
+  .replace(/[^а-яa-z0-9]+/g,"").trim();
+}
+// No auto-assignment unless the original inbound message identifies the
+// SAME legal company with a checksum-valid INN from its own CRM requisites.
+function decide(company,profiles,requisite,locked=false){
+ if(locked||taxonomy.known(company?.organizationType)||
+  company?.companyIdentityReviewRequired||requisite?.status!=="inn_recorded"||
+  !inn(requisite?.inn)||!normalName(company?.name))return null;
+ const ownName=normalName(company.name),id=String(company.id||"");
+ const matches=[];
+ for(const p of profiles||[]){
+  if(String(p?.companyId)!==id||p?.correspondencePartial||
+    !Array.isArray(p?.firstPartyActivities))continue;
+  for(const candidate of p.firstPartyActivities){
+   if(candidate?.source!=="explicit_original_inbound_self_description"||
+    candidate.inn!==requisite.inn||!taxonomy.known(candidate.type))continue;
+   const legal=(p.legalNameCandidates||[]).some(x=>
+    x.inn===candidate.inn&&String(x.activityId)===String(candidate.activityId)&&
+    normalName(x.name)===ownName);
+   if(legal)matches.push({type:candidate.type,dealId:String(p.id),
+     activityId:String(candidate.activityId),inn:candidate.inn});
+  }
+ }
+ const types=[...new Set(matches.map(x=>x.type))];
+ return types.length===1?{...matches[0],type:types[0]}:null;
+}
+function qualify(c){
+ const ledger=require("./classification-ledger");
+ const finalization=require("./client-finalization");
+ if(ledger.get(c?.id)||finalization.isComplete(c?.id))return c;
+ const requisite=require("./company-requisites").get(c?.id);
+ const profiles=require("./crm-deal-intake").forCompany(c?.id);
+ const proof=decide(c,profiles,requisite);
+ if(!proof)return c;
+ return {...c,organizationType:proof.type,type:proof.type,proposedType:"",
+  segmentConfidence:"Высокая — исходное входящее письмо с ИНН и юридическим наименованием",
+  segmentSource:"Собственная деятельность в письме сделки "+proof.dealId+
+   " (активность "+proof.activityId+"), совпадает ИНН из реквизитов",
+  verification:"Собственное заявление компании с подтверждённым совпадением ИНН",
+  researchStatus:"inbound_self_description_qualified"};
+}
+module.exports={discover,decide,qualify};
+
