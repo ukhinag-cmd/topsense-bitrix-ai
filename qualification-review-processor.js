@@ -51,9 +51,11 @@ async function tick(companies){
     .filter(x=>/^\d+$/.test(x)))].slice(0,3);
    const pages=await Promise.all(sourceIds.flatMap(cid=>[deals(cid,"ASC"),deals(cid,"DESC")]));
    const linked=(owner.saleInfo?.linkedDeals||[]).filter(d=>
-    d.linkVerified===true&&/^\d+$/.test(toId(d.id))).slice(0,5)
-    .map(d=>({ID:toId(d.id),COMPANY_ID:id,DATE_CREATE:"",
-     TITLE:"",verifiedHistoricalLink:true}));
+    d.linkVerified===true&&/domain/i.test(String(d.linkSource||""))&&
+    /^\d+$/.test(toId(d.id))).slice(0,5)
+    .map(d=>({ID:toId(d.id),COMPANY_ID:toId(d.crmCompanyId||"0"),
+     DATE_CREATE:"",TITLE:"",verifiedHistoricalLink:true,
+     verifiedAnalyticalCompanyId:id}));
    // The audited CRM link is acceptable; a company-name similarity alone is not.
    const found=[...new Map([...pages.flatMap(list=>list.slice(0,2)),...linked]
     .map(d=>[toId(d.ID),d])).values()].slice(0,10);
