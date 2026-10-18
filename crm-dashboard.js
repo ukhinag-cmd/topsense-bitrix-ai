@@ -894,9 +894,8 @@ function coverageLog(){
    require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:12});
   // Primary free site research now follows ORIGINAL inbound sender domain,
   // without waiting for the older CRM-site queue to become empty.
-  if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1"&&
-     require("./website-profiler").stats().queued<180)
-    enqueueDealMailSites({limit:24});
+  if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
+    enqueueDealMailSites({limit:12});
   const companyList=snap.companies||[];
   const reviewQueue=require("./qualification-review-worklist").inspect(companyList);
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
