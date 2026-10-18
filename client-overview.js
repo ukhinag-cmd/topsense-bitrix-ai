@@ -101,9 +101,7 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  const pageSize=48,page=Math.max(1,Math.min(100,Number(requestedPage)||1));
  // Visually group repeated labels. Legal identities, purchases, finances,
  // contacts and deal links remain separate for each CRM record.
- const nameKey=c=>String(c.name||"").toLowerCase().replace(/ё/g,"е")
-  .replace(/^(?:ооо|ао|пао|зао|оао)\s*["«]?\s*/,"")
-  .replace(/[^а-яa-z0-9]/g,"");
+ const nameKey=c=>require("./company-display-key").key(c.name);
  const groupedByName=new Map();
  for(const c of selectedClients){
   const key=nameKey(c)||"crm:"+String(c.id);
