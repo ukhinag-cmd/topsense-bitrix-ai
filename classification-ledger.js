@@ -94,6 +94,13 @@ function apply(c){
  if(saved.rank<=3&&(inboundProof(c)||senderDomainSiteProof(c)))return {...c,
   previousProvisionalType:saved.type,pendingEvidenceUpgrade:true,
   classificationFrozen:false,ledgerRestored:true};
+ // Legacy site-only record can be strengthened if a newly checked original
+ // sender-domain site independently supports EXACTLY THE SAME type.
+ // A disagreement never changes the original type without manual review.
+ if(saved.rank===4&&saved.type===c.organizationType&&senderDomainSiteProof(c))
+  return {...c,previousProvisionalType:saved.type,
+   pendingEvidenceUpgrade:true,classificationFrozen:true,
+   classificationNeedsLegalReview:false,ledgerRestored:true};
  return {...c,organizationType:saved.type,type:saved.type,
   category:saved.category||c.category,
   segmentSource:"Квалификация закреплена · "+(saved.source||"сохранённый источник"),
@@ -122,7 +129,11 @@ function offer(c){
  // separate evidence-based requalification is explicitly approved.
  // Only preliminaries may be upgraded; actual verified qualifications stay
  // immutable. Identity hash MUST still refer to the same original legal card.
- if(existing&&!(existing.rank<=3&&(inboundProof(c)||senderDomainSiteProof(c))&&existing.identityHash===hash))return false;
+ const upgradePreliminary=existing&&existing.rank<=3&&
+  (inboundProof(c)||senderDomainSiteProof(c))&&existing.identityHash===hash;
+ const corroborateLegacy=existing&&existing.rank===4&&existing.type===type&&
+  senderDomainSiteProof(c)&&existing.identityHash===hash;
+ if(existing&&!upgradePreliminary&&!corroborateLegacy)return false;
  const nextRank=rank(c);
  const row={recordType:"topsense-type-ledger-v1",companyId:id,identityHash:hash,
   companyName:str(c.name).slice(0,180),
