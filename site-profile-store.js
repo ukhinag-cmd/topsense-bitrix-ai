@@ -114,6 +114,9 @@ function serialise(profile){
   sitePagesVisited:(profile.sitePagesVisited||[]).slice(0,6).map(s=>String(s).slice(0,600)),
   siteContactPages:(profile.siteContactPages||[]).slice(0,6).map(s=>String(s).slice(0,600)),
   siteActivityReason:String(profile.siteActivityReason||"").slice(0,260),
+  siteIdentityEvidence:String(profile.siteIdentityEvidence||"").slice(0,100),
+  siteIdentityVerified:profile.siteIdentityVerified===true,
+  emailSenderDomain:String(profile.emailSenderDomain||"").slice(0,180),
   siteType:profile.siteType||null,
   siteConfidence:String(profile.siteConfidence||"").slice(0,160),
   staffEvidence:profile.staffEvidence?.count>0?{
