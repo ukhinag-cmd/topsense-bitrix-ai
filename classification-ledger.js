@@ -92,7 +92,8 @@ function offer(c){
  if(!/^\d+$/.test(id)||!taxonomy.known(type))return false;
  const hash=identity(c);
  if(!hash)return false;
- const existing=records.get(id)||pending.get(id)?.payload;
+ // A pending verified upgrade takes precedence over an older stored provisional.
+ const existing=pending.get(id)?.payload||records.get(id);
  // No fresh correspondence => never rewrite an already qualified record.
  // Even with fresh correspondence, the existing type is kept until a
  // separate evidence-based requalification is explicitly approved.
