@@ -37,25 +37,18 @@ function companyWebsiteDetails(c){
 }
 function familyToSection(c){
  const t=typeMap.get(c.organizationType);
- // A manually inherited CRM category must never put an unclassified
- // customer into the industrial contractor list.
- if(!t)return "Не определены";
+ // Section membership and verification are DIFFERENT attributes.
+ // Keep every historical contractor visible; signal doubtful evidence in
+ // the card rather than silently reclassifying the client as undefined.
+ if(!t)return sections.includes(c.category)?c.category:"Не определены";
  const f=t.family;
- if(f==="Подрядчики"){
-  // Historical guess/site-candidate is not proof of own industrial services.
-  const evidenced=c.classificationVerified===true||
-   c.researchStatus==="completed"||
-   c.verificationStatus==="confirmed"||
-   (c.siteIdentityVerified===true&&c.siteStatus==="site_profiled"&&
-    c.siteSource==="Домен отправителя входящего письма");
-  return evidenced?"Подрядчики":"Не определены";
- }
  if(f==="Эксплуатация"||f==="Отраслевые производства")return "Конечные потребители";
+ if(f==="Подрядчики")return "Подрядчики";
  if(f==="Сервис")return "Сервис и метрология";
  if(f==="Торговля")return "Партнёрские продажи";
  if(f==="Интеграторы"||f==="Проектирование")return "Проектные продажи";
  if(f==="Производители")return c.organizationType==="Производитель газоаналитических приборов"?"Конкуренты":"Проектные продажи";
- return c.category==="Подрядчики"?"Не определены":sections.includes(c.category)?c.category:"Не определены";
+ return sections.includes(c.category)?c.category:"Не определены";
 }
 function aggregates(payload,section){
  const all=payload.companies||[];
