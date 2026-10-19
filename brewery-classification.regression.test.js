@@ -22,6 +22,7 @@ function setup(site){
   if(n==="./website-profiler")return{get:()=>site};
   if(n==="./client-finalization")return{isComplete:()=>false,apply:c=>c};
   if(n==="./corporate-role-evidence")return{classify:()=>null};
+  if(n==="./cached-sender-site-proof")return require("./cached-sender-site-proof");
   throw Error("Unexpected module: "+n);
  };
  vm.runInNewContext(code,{module,exports:module.exports,require:fakeRequire},{filename:"client-type-inference.js"});
