@@ -32,19 +32,31 @@ function domainFor(c){
 }
 function enqueue(clients,limit=8){
  if(process.env.TOPSENSE_ANALYTICS_READONLY!=="1")return 0;
- scanned++;let added=0;
+ scanned++;let added=0,seen=0,withSenderDomain=0,withoutSenderDomain=0,
+  provenSite=0,classifiedSite=0,unreachableSite=0,untypedSite=0;
  for(const c of clients||[]){
-  if(added>=limit)break;
   if(!c?.companyCardMissing||taxonomy.known(c.organizationType))continue;
+  seen++;
   const domain=domainFor(c),id=siteId(c);
-  if(!domain||!id)continue;
+  if(!domain||!id){withoutSenderDomain++;continue}
+  withSenderDomain++;
   const old=profiler.get(id);
-  if(old.siteIdentityEvidence==="inbound_sender_domain_matches_website"&&old.emailSenderDomain===domain)continue;
+  if(old.siteIdentityEvidence==="inbound_sender_domain_matches_website"&&old.emailSenderDomain===domain){
+   provenSite++;
+   if(taxonomy.known(old.siteType))classifiedSite++;
+   else untypedSite++;
+   continue;
+  }
+  if(old.status==="site_unavailable"||old.status==="site_identity_unclear")unreachableSite++;
+  if(added>=limit)continue;
   added+=profiler.enqueue([{id,name:c.name,corporateDomain:domain,emailSenderDomain:domain,
    siteCandidate:"",siteSource:"Домен отправителя входящего письма"}])||0;
  }
  queued+=added;
- if(added)console.log(JSON.stringify({component:"deal-only-domain-research",event:"queued",added,total:queued}));
+ if(added||scanned%4===1)console.log(JSON.stringify({component:"deal-only-domain-research",
+  event:"evidence-funnel",seen,withSenderDomain,withoutSenderDomain,
+  provenSite,classifiedSite,untypedSite,unreachableSite,
+  newlyQueued:added,totalQueued:queued,currentlyTyped:matched}));
  return added;
 }
 function apply(clients){
