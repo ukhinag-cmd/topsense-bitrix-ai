@@ -122,7 +122,7 @@ function explicitTopLevelFrom(raw){
  // evidence of sender identity.
  const v=String(raw||"").slice(0,700).replace(/<br\s*\/?>/gi,"\n")
   .replace(/<\/p>/gi,"\n").replace(/&lt;/gi,"<").replace(/&gt;/gi,">")
-  .replace(/<[^>]+>/g," ").trim();
+  .replace(/<\/?[a-z][a-z0-9]*(?:\s+[^>]*)?>/gi," ").trim();
  if(/^(?:пересланное\s+сообщение|forwarded\s+message|начало\s+переадресованного)/i.test(v))return "";
  const header=v.match(/^(?:от|from)\s*:\s*[^\n\r]{0,180}?\b([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i);
  if(!header)return "";
