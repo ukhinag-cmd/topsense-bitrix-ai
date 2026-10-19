@@ -7419,13 +7419,23 @@ server.listen(PORT, "0.0.0.0", () => {
   // client registry. It NEVER writes to Bitrix24 and is independently
   // controlled from legacy AI automation. All calls are reserved in the
   // private store before billing, with an explicit budget ceiling.
-  function paidClientCoverageTick(){
+  let paidClientCheckRunning=false,paidClientNextCheck=0;
+  async function paidClientCoverageTick(){
     if (!analyticsReadOnly() ||
-        String(process.env.TOPSENSE_PAID_CLASSIFICATION_ENABLED||"").trim()!=="1")return;
-    require("./pilot4").runPilot().catch(error=>{
+        String(process.env.TOPSENSE_PAID_CLASSIFICATION_ENABLED||"").trim()!=="1"||
+        paidClientCheckRunning||Date.now()<paidClientNextCheck)return;
+    paidClientCheckRunning=true;
+    try{
+      const summary=await require("./pilot4").runPilot();
+      // Entire previous paid cohort was already attempted. Re-scanning
+      // thousands of same Bitrix/Sheet records every 12 minutes wastes CPU.
+      // Daily CRM change monitoring remains independent and enabled.
+      if(summary?.status==="queue_drained"&&Number(summary.remainingCandidates||0)===0)
+        paidClientNextCheck=Date.now()+3*60*60*1000;
+    }catch(error){
       console.error(JSON.stringify({component:"topsense-paid-v4",event:"cycle-error",
         message:String(error?.message||error).slice(0,180),at:new Date().toISOString()}));
-    });
+    }finally{paidClientCheckRunning=false}
   }
   setTimeout(paidClientCoverageTick,90000);
   setInterval(paidClientCoverageTick,12*60*1000);
