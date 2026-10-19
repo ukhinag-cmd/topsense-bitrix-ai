@@ -262,9 +262,13 @@ function enqueuePriority(companies,limit=25){
  return added;
 }
 function enqueueByInn(companies){
+ // Historical searches by INN yielded virtually no company-site matches,
+ // and repeated wide sweeps preceded V8 heap crashes on the web process.
+ // Keep this path available for a dedicated opt-in worker, not the dashboard.
+ if(String(process.env.TOPSENSE_INN_WEB_SWEEP_ENABLED||"0")!=="1")return 0;
  let added=0;
  for(const c of companies||[]){
-  if(added>=30)break;
+  if(added>=6)break;
   const id=String(c?.id||""),inn=String(c?.crmInn||"").replace(/\D/g,"");
   if(!/^\d+$/.test(id)||!/(?:^\d{10}$|^\d{12}$)/.test(inn)||
      innTried.has(id)||pending.has(id)||completion.isComplete(id)||!eligible(c))continue;
