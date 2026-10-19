@@ -76,7 +76,23 @@ async function search(name,inn=""){
  u.searchParams.set("setlang","ru");
  const r=await fetch(u,{method:"GET",redirect:"manual",headers:{"accept":"application/rss+xml,application/xml","user-agent":"Mozilla/5.0"},signal:AbortSignal.timeout(14000)});
  if(!r.ok)throw Error("Search HTTP "+r.status);
- const text=(await r.text()).slice(0,175000);
+ // Read at most the RSS prefix. Calling response.text() first could
+ // allocate an arbitrarily large decompressed HTML response before slicing.
+ if(!r.body?.getReader)throw Error("Search response stream unavailable");
+ const reader=r.body.getReader();
+ const chunks=[];let bytes=0;
+ try{
+  while(bytes<175000){
+   const {done,value}=await reader.read();
+   if(done)break;
+   const part=value.subarray(0,Math.min(value.byteLength,175000-bytes));
+   chunks.push(part);bytes+=part.byteLength;
+  }
+ }finally{reader.cancel().catch(()=>{})}
+ const content=new Uint8Array(bytes);
+ let offset=0;
+ for(const chunk of chunks){content.set(chunk,offset);offset+=chunk.byteLength}
+ const text=new TextDecoder("utf-8",{fatal:false}).decode(content);
  if(!/<item>/i.test(text)&&!/<rss/i.test(text))throw Error("RSS search unavailable");
  const unique=new Set(),items=[];
  for(const m of text.matchAll(/<item>([\s\S]*?)<\/item>/gi)){
