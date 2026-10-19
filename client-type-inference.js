@@ -201,16 +201,19 @@ function apply(records){
   // Primary TOP-SENSE rule: a direct CRM deal's inbound sender domain
   // matches the site host, and the site itself unambiguously describes
   // its own activity. CRM company legal requisites are optional.
+  const cachedSenderProof=require("./cached-sender-site-proof").match(c,site);
   const domainBasedType=site?.status==="site_profiled"&&
-   site?.siteIdentityVerified===true&&
-   site?.siteIdentityEvidence==="inbound_sender_domain_matches_website"&&
-   valid.has(site.siteType)&&site.emailSenderDomain;
+   valid.has(site.siteType)&&(
+    site?.siteIdentityVerified===true&&
+    site?.siteIdentityEvidence==="inbound_sender_domain_matches_website"&&
+    site.emailSenderDomain||
+    cachedSenderProof);
   if(domainBasedType)return {...c,
    organizationType:site.siteType,type:site.siteType,
    proposedType:"",siteStatus:"site_profiled",
    siteProfileUrl:site.url||"",siteVerified:site.url||"",
    siteIdentityVerified:true,siteSource:"Домен отправителя входящего письма",
-   emailSenderDomain:site.emailSenderDomain,
+   emailSenderDomain:cachedSenderProof||site.emailSenderDomain,
    segmentConfidence:"Подтверждено — домен входящего отправителя совпал с сайтом",
    segmentSource:"Собственная деятельность на сайте "+(site.url||"")+
     "; домен совпадает с корпоративной почтой отправителя входящей сделки",
