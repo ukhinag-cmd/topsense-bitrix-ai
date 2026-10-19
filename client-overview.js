@@ -239,6 +239,10 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  const unresolvedSiteType=Number(crawlStatuses.site_read_ambiguous_type||0)+
   Number(crawlStatuses.site_read_no_clear_type||0);
  const reviewed=Number(payload.duplicateStats?.reviewGroupCount||0),grouped=Number(payload.duplicateStats?.groupedCount||0);
+ const ledgerAudit=payload.classificationLedger||{};
+ const strongTypes=Number(ledgerAudit.byRank?.["5"]||0)+Number(ledgerAudit.byRank?.["6"]||0);
+ const legacySiteAudit=Number(ledgerAudit.priorSiteRank4AuditRecommended||0);
+ const provisionalTypes=Number(ledgerAudit.provisional||0);
  const ai=payload.paidClassification||{};
  const barColor=colors[Math.max(0,sections.indexOf(section))];
  const tabs=sections.map((s,i)=>'<a class="tab '+(s===section?"active":"")+'" href="/contractors'+(i?"?section="+encodeURIComponent(s):"")+'">'+esc(s)+'</a>').join("");
@@ -301,6 +305,13 @@ function render(payload,requested,requestedType="",requestedPage=1,requestedPurc
  hero("Тип определён",nr(b.total?b.typed:effectiveTyped),
   (b.total?pct(b.typed,b.total):coverageLabel)+"% всех аналитических записей · "+
   "включая предварительные типы","#168B8F")+
+ (section==="Обзор"?
+  hero("Сильные подтверждения",nr(strongTypes),
+   "Только сохранённые классификации с более строгим доказательством, без предварительных","#155f55")+
+  hero("Исторические: нужна сверка",nr(legacySiteAudit),
+   "Старые типы по сайтам, юридическая или доменная привязка требует аудита","#A27129")+
+  hero("Предварительные типы",nr(provisionalTypes),
+   "Название CRM или неполная проверка сайта / AI; не считать подтверждёнными","#9A702B"):"")+
  hero("Не определён тип",nr(b.total?b.untyped:effectiveUntyped),
   "Ожидают проверки компании CRM и кандидаты из сделок","#C7843E")+
  hero("Клиенты с e-mail",nr(b.withEmail),"с контактным адресом CRM","#4B78B9")+
