@@ -898,7 +898,8 @@ function coverageLog(){
    const sites=require("./website-profiler").stats();
    // 4x more original historical deals when the site crawler is idle.
    // Still bounded by the existing intake queue and by read-only mode.
-   const perRun=currentBacklog<=24&&sites.queued<50&&sites.active===0?48:12;
+   const perRun=currentBacklog<=24&&sites.queued<50&&sites.active===0?48:
+    currentBacklog<60?24:12;
    require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun});
   }
   // Primary free site research now follows ORIGINAL inbound sender domain,
@@ -907,7 +908,8 @@ function coverageLog(){
     enqueueDealMailSites({limit:12});
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1"&&
      snap.dealOnlyClients?.length)
-   require("./deal-only-domain-research").enqueue(snap.dealOnlyClients,8);
+   require("./deal-only-domain-research").enqueue(snap.dealOnlyClients,
+    require("./website-profiler").stats().queued<1000?32:12);
   const companyList=snap.companies||[];
   const reviewQueue=require("./qualification-review-worklist").inspect(companyList);
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
