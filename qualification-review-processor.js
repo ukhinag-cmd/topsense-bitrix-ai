@@ -71,6 +71,10 @@ async function tick(companies){
  let inspected=0,submitted=0,attempted=0;
  try{
  const all=worklist.inspect(companies).items;
+ // Use spare read-only CRM capacity, but never flood the original-deal queue.
+ // No model calls and no CRM mutations are made by this worker.
+ const backlog=Number(intake.stats().queued||0);
+ const batchLimit=backlog<110&&pending.size<15?6:3;
  let changed=false;
  for(const [id,p] of pending){
   if(p.dealIds.every(dealId=>Boolean(intake.get(dealId)))){
@@ -81,7 +85,7 @@ async function tick(companies){
   }
  }
  for(const item of all){
-  if(attempted>=3)break;
+  if(attempted>=batchLimit)break;
   const id=toId(item.id);
   if(pending.has(id)||(retryAfter.get(id)||0)>Date.now())continue;
   const owner=companies.find(c=>(c.crmIdList||[c.id]).map(toId).includes(id));
@@ -120,7 +124,7 @@ async function tick(companies){
  if(dirty){try{await save();dirty=false}catch(e){errors++;lastError=String(e.message||e).slice(0,100);}}
  queued+=submitted;
  const summary={component:"qualification-review-processor",event:"cycle",at:lastAt,
- inspected,attempted,submitted,totalChecked:checked,remaining:Math.max(0,all.length-done.size),errors};
+ inspected,attempted,submitted,batchLimit,dealBacklog:backlog,totalChecked:checked,remaining:Math.max(0,all.length-done.size),errors};
  console.log(JSON.stringify(summary));return summary;
  }finally{running=false}
 }
