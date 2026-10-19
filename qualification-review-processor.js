@@ -74,7 +74,13 @@ async function tick(companies){
  // Use spare read-only CRM capacity, but never flood the original-deal queue.
  // No model calls and no CRM mutations are made by this worker.
  const backlog=Number(intake.stats().queued||0);
- const batchLimit=backlog<110&&pending.size<15?6:3;
+ const siteBusy=require("./website-profiler").stats();
+ const nameBusy=require("./name-site-search").stats();
+ // Heavy site parsing/searches have previously preceded OOM restarts.
+ // Do not raise CRM concurrency while those research queues are active.
+ const safeToExpand=backlog<110&&pending.size<15&&
+  siteBusy.queued<50&&siteBusy.active<2&&nameBusy.remaining===0;
+ const batchLimit=safeToExpand?6:3;
  let changed=false;
  for(const [id,p] of pending){
   if(p.dealIds.every(dealId=>Boolean(intake.get(dealId)))){
