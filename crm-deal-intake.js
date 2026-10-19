@@ -116,6 +116,19 @@ function extractLegalNameCandidates(raw,activityId){
  }
  return records;
 }
+function explicitTopLevelFrom(raw){
+ // Only an actual From/От header at the START of the original incoming
+ // email is accepted. Quoted/forwarded headers later in a thread are not
+ // evidence of sender identity.
+ const v=String(raw||"").slice(0,700).replace(/<br\s*\/?>/gi,"\n")
+  .replace(/<\/p>/gi,"\n").replace(/&lt;/gi,"<").replace(/&gt;/gi,">")
+  .replace(/<[^>]+>/g," ").trim();
+ if(/^(?:пересланное\s+сообщение|forwarded\s+message|начало\s+переадресованного)/i.test(v))return "";
+ const header=v.match(/^(?:от|from)\s*:\s*[^\n\r]{0,180}?\b([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i);
+ if(!header)return "";
+ return require("./company-email-domains").extract(header[1]).length?
+  header[1].toLowerCase():"";
+}
 function summarizeActivities(input){
  const rows=[...(input||[])].sort((a,b)=>Number(a.ID||0)-Number(b.ID||0));
  const incoming=rows.filter(isInbound);
@@ -140,6 +153,8 @@ function summarizeActivities(input){
    inboundStrings.push(txt);
    legalNameCandidates.push(...extractLegalNameCandidates(a.DESCRIPTION||"",a.ID));
    firstPartyActivities.push(...require("./crm-first-party-activity").discover(a.DESCRIPTION||"",a.ID));
+   const declaredSender=explicitTopLevelFrom(a.DESCRIPTION);
+   if(declaredSender&&businessEmails.size<20)businessEmails.add(declaredSender);
    for(const c of Array.isArray(a.COMMUNICATIONS)?a.COMMUNICATIONS:[]){
     for(const found of String(c.VALUE||"").matchAll(/[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})/giu)){
      const addr=found[0].toLowerCase(),host=found[1].toLowerCase();
@@ -291,4 +306,4 @@ function forCompany(id){
   .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0)).slice(0,15);
 }
 function stats(){return {...state}}
-module.exports={queueDeals,get,forCompany,stats,signals,summarizeActivities,extractLegalNameCandidates};
+module.exports={queueDeals,get,forCompany,stats,signals,summarizeActivities,extractLegalNameCandidates,explicitTopLevelFrom};
