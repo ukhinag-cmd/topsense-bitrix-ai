@@ -893,8 +893,14 @@ function coverageLog(){
   // Bound the workload so it cannot starve current inbound-deal processing.
   const dealIntake=require("./crm-deal-intake");
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"") === "1"&&
-     snap.dealOnlyClients?.length&&dealIntake.stats().queued<80)
-   require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun:12});
+     snap.dealOnlyClients?.length&&dealIntake.stats().queued<80){
+   const currentBacklog=Number(dealIntake.stats().queued||0);
+   const sites=require("./website-profiler").stats();
+   // 4x more original historical deals when the site crawler is idle.
+   // Still bounded by the existing intake queue and by read-only mode.
+   const perRun=currentBacklog<=24&&sites.queued<50&&sites.active===0?48:12;
+   require("./deal-only-dossier-queue").tick(snap.dealOnlyClients,{perRun});
+  }
   // Primary free site research now follows ORIGINAL inbound sender domain,
   // without waiting for the older CRM-site queue to become empty.
   if(String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1")
