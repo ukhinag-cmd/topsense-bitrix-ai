@@ -1,6 +1,6 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
-const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,paidControl:{},refreshFailures:0,nextRetryAt:null};
+const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,pilotRetryAt:null,pilotLastError:"",paidControl:{},refreshFailures:0,nextRetryAt:null};
 let companyRetryTimer=null,contactRetryTimer=null,salesAuditStartTimer=null;
 function analyticSeeds(){
  try{
@@ -547,6 +547,25 @@ async function loadLinkedContacts(){
 }
 // Pull the authorized, private model-classification checkpoint from the existing store.
 // This creates no OpenAI calls and never writes to the CRM.
+async function readPrivateStore(endpoint,secret){
+ let lastError=null;
+ const timeouts=[45000,60000,75000];
+ for(let attempt=0;attempt<timeouts.length;attempt++){
+  try{
+   const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},
+    body:JSON.stringify({action:"load",secret}),signal:AbortSignal.timeout(timeouts[attempt])});
+   const d=await r.json();
+   if(!r.ok||d.ok===false)throw Error("private AI store read error");
+   return Array.isArray(d.rows)?d.rows:[];
+  }catch(error){
+   lastError=error;
+   console.warn(JSON.stringify({component:"topsense-dashboard",event:"private-store-retry",
+    attempt:attempt+1,timeoutMs:timeouts[attempt],error:String(error.message||error).slice(0,120)}));
+   if(attempt+1<timeouts.length)await new Promise(resolve=>setTimeout(resolve,1500*(attempt+1)));
+  }
+ }
+ throw lastError||Error("private AI store unavailable");
+}
 async function loadPilot(){
  if(state.pilotLoading)return;
  const endpoint=String(process.env.GOOGLE_SHEET_STORE_URL||"");
@@ -554,11 +573,9 @@ async function loadPilot(){
  if(!endpoint||!secret)return;
  state.pilotLoading=true;
  try{
-  const r=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},
-    body:JSON.stringify({action:"load",secret}),signal:AbortSignal.timeout(18000)});
-  const d=await r.json();
-  if(!r.ok||d.ok===false)throw Error("private AI store read error");
-  const entries=Array.isArray(d.rows)?d.rows:[];
+  const entries=await readPrivateStore(endpoint,secret);
+  state.pilotRetryAt=null;
+  state.pilotLastError="";
   const censusRow=entries.find(x=>x?.key==="meta:topsense-classification-census:v1");
   console.log(JSON.stringify({component:"topsense-dashboard",event:"private-store-load-coverage",
    returnedRows:entries.length,
@@ -611,10 +628,17 @@ async function loadPilot(){
    status:summary.status||"not_started"
   };
   state.pilot=x;state.pilotUpdatedAt=new Date().toISOString();
+  state.pilotRetryAt=null;state.pilotLastError="";
   enqueuePreviousPilotSites();
   console.log(JSON.stringify({component:"topsense-dashboard",event:"ai-results-loaded",count:x.size}));
  }catch(error){
-  console.warn(JSON.stringify({component:"topsense-dashboard",event:"ai-results-unavailable",error:String(error.message).slice(0,100)}));
+  state.pilotLastError=String(error.message||error).slice(0,160);
+  state.pilotRetryAt=new Date(Date.now()+30000).toISOString();
+  // Never clear already restored classifications after a transient store failure.
+  if(state.pilot.size)state.pilotUpdatedAt=new Date().toISOString();
+  console.warn(JSON.stringify({component:"topsense-dashboard",event:"ai-results-unavailable",
+   error:state.pilotLastError,retainedResults:state.pilot.size,retryAt:state.pilotRetryAt}));
+  setTimeout(()=>{ if(!state.pilotLoading)loadPilot().catch(()=>{}); },30000);
  }finally{state.pilotLoading=false}
 }
 function commercialFromOrgType(t){
@@ -842,7 +866,9 @@ function route(req,res,pathname,known){
  }
  if(req.method!=="GET"){write(res,405,{error:"Read-only"});return true}
  if(!state.refreshing&&(!state.updatedAt||Date.now()-Date.parse(state.updatedAt)>30*60*1000))refresh().catch(()=>{});
- if(!state.pilotLoading&&(!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>65*1000))loadPilot().catch(()=>{});
+ if(!state.pilotLoading&&
+    (!state.pilotUpdatedAt||Date.now()-Date.parse(state.pilotUpdatedAt)>30*60*1000)&&
+    (!state.pilotRetryAt||Date.now()>=Date.parse(state.pilotRetryAt)))loadPilot().catch(()=>{});
  if(!state.contactsLoading&&(!state.contactsAt||Date.now()-Date.parse(state.contactsAt)>60*60*1000))loadLinkedContacts().catch(()=>{});
  if(["/intel/api","/dashboard/status","/contractors/status","/dashboard/contractors/status"].includes(pathname)){write(res,200,data(known));return true}
  if(pathname==="/contractors/holdings"){write(res,200,require("./client-holdings").page(data(known)),"text/html; charset=utf-8");return true}
