@@ -10,6 +10,8 @@ const persistedProfiles=new Map(),deferredCompanies=[];
 let restoring=false,restored=false,restoredProfiles=0;
 let pagesScanned=0,checkedSites=0,lastProgressLogged=0;
 let active=0,lastAt=0;
+const MAX_ACTIVE=Math.max(2,Math.min(8,Number(process.env.TOPSENSE_SITE_WORKERS||6)));
+const START_GAP_MS=Math.max(180,Math.min(1200,Number(process.env.TOPSENSE_SITE_START_GAP_MS||250)));
 function publicIPv4(ip){
  const x=ip.split(".").map(Number);
  if(x.length!==4||x.some(z=>!Number.isInteger(z)||z<0||z>255))return false;
@@ -227,8 +229,8 @@ async function one(c){
  }catch(error){if(evidenceRank(candidates[0].origin)<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
 }
 function pump(){
- while(active<2&&queue.length){
-  const now=Date.now();if(now-lastAt<1200){setTimeout(pump,1250);return}
+ while(active<MAX_ACTIVE&&queue.length){
+  const now=Date.now();if(now-lastAt<START_GAP_MS){setTimeout(pump,START_GAP_MS+20);return}
   const c=queue.shift();if(completion.isComplete(c.id))continue;
   active++;lastAt=Date.now();
   one(c).finally(()=>{
@@ -238,7 +240,7 @@ function pump(){
     const counts={};for(const profile of profiles.values())counts[profile.status]=(counts[profile.status]||0)+1;
     console.log(JSON.stringify({component:"site-profiler",event:"progress",checkedSites,pagesScanned,remaining:queue.length,active,byStatus:counts}));
    }
-   setTimeout(pump,1300);
+   setTimeout(pump,Math.max(120,START_GAP_MS));
   });
  }
 }
@@ -372,7 +374,7 @@ function stats(){
  const by={};for(const c of profiles.values())by[c.status]=(by[c.status]||0)+1;
  return {restorationComplete:restored,restorationInProgress:restoring,
   classificationSnapshotProvisional:!restored||queue.length>0||active>0,
-  queued:queue.length,active,processed:profiles.size,checkedSites,pagesScanned,
+  queued:queue.length,active,maxActive:MAX_ACTIVE,startGapMs:START_GAP_MS,processed:profiles.size,checkedSites,pagesScanned,
   restoredProfiles,byStatus:by,checkpoint:evidenceStore.stats()};
 }
 module.exports={enqueue,get,stats,retryTransient,fetchPage,fetchCorporateHome,homepageVariants,restorePreliminaryNameProfile,hydrateFromArchive};
