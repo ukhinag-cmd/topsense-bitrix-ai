@@ -27,7 +27,7 @@ function request(port, { method='GET', path='/', headers={}, body=null }={}) {
   });
 }
 
-async function fixture(t) {
+async function fixture(t, { bitrixToken = appToken } = {}) {
   const upstreamRequests=[];
   const upstream=http.createServer((req,res)=>{
     const chunks=[];
@@ -55,7 +55,7 @@ async function fixture(t) {
     html:()=>'<h1>test</h1>', status:()=>({ok:true}),
     handleEvent:async evt=>{handled.push(evt);signalResolve(evt);return evt;},
   };
-  const gateway=createGateway({upstreamPort,dashboardToken,bitrixToken:appToken,salesModule:fakeSales});
+  const gateway=createGateway({upstreamPort,dashboardToken,bitrixToken,salesModule:fakeSales});
   const gatewayPort=await listen(gateway);
   t.after(async()=>{await close(gateway);await close(upstream);});
   return {gatewayPort,upstreamRequests,handled,handledPromise};
@@ -69,6 +69,26 @@ test('mirrors only a valid authenticated deal event after the existing handler a
   await f.handledPromise;
   assert.equal(f.upstreamRequests[0].body,body);
   assert.deepEqual(f.handled[0],{event:'ONCRMDEALUPDATE',dealId:'38742',activityId:null});
+});
+
+test('rejects ambiguous or encoded aliases of protected routes before proxying', async t=>{
+  const f=await fixture(t);
+  for(const path of ['/%73ales','/sales%2Fstatus','/sales%3Fstatus','/bitrix%2Fevents','//sales/../bitrix/events','/SALES','/sales;status']) {
+    const response=await request(f.gatewayPort,{path});
+    assert.equal(response.status,400,path);
+  }
+  const queryAlias=await request(f.gatewayPort,{method:'POST',path:'/bitrix/events?bypass=1',headers:{'content-type':'application/x-www-form-urlencoded'},body:'event=ONCRMDEALUPDATE&data%5BFIELDS%5D%5BID%5D=38742&auth%5Bapplication_token%5D='+appToken});
+  assert.equal(queryAlias.status,400);
+  assert.equal(f.upstreamRequests.length,0);
+});
+
+test('fails closed when the Bitrix event token is not configured', async t=>{
+  const f=await fixture(t,{bitrixToken:''});
+  const body='event=ONCRMDEALUPDATE&data%5BFIELDS%5D%5BID%5D=38742&auth%5Bapplication_token%5D='+appToken;
+  const response=await request(f.gatewayPort,{method:'POST',path:'/bitrix/events',headers:{'content-type':'application/x-www-form-urlencoded'},body});
+  assert.equal(response.status,503);
+  assert.equal(f.upstreamRequests.length,0);
+  assert.equal(f.handled.length,0);
 });
 
 test('does not mirror a rejected Bitrix event', async t=>{
