@@ -111,7 +111,7 @@ function compareBitrixTimestamp(left, right) {
   if (ta > tb) return 1;
 
   const subMillisecond = value => {
-    const match = value.match(/[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.(\\d+))?/i);
+    const match = value.match(/[T ]\d{2}:\d{2}:\d{2}(?:\.(\d+))?/i);
     return (match?.[1] || "").slice(3).replace(/0+$/, "");
   };
   const fa = subMillisecond(a);
