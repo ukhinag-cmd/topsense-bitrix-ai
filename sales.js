@@ -9,6 +9,8 @@ const SALES = {
   managerLookupVersions: new Map(),
   stages: new Map(),
   dirty: new Set(),
+  dirtyVersions: new Map(),
+  flushing: false,
   flushTimer: null,
   syncTimer: null,
 };
@@ -410,28 +412,63 @@ async function snapshotDeal(deal, source = "event") {
   return row;
 }
 
-function markDirty(id) {
-  SALES.dirty.add(String(id));
+function scheduleFlush() {
   if (SALES.flushTimer) return;
   SALES.flushTimer = setTimeout(() => {
     SALES.flushTimer = null;
     flushDirty().catch(error => {
       SALES.lastError = { at: new Date().toISOString(), source: "sales-store", message: String(error.message || error) };
+      if (SALES.dirty.size) scheduleFlush();
     });
   }, 2500);
 }
 
+function markDirty(id) {
+  const key = String(id);
+  SALES.dirty.add(key);
+  SALES.dirtyVersions.set(key, (SALES.dirtyVersions.get(key) || 0) + 1);
+  scheduleFlush();
+}
+
 async function flushDirty() {
   if (!storeConfigured() || !SALES.dirty.size) return;
-  const ids = Array.from(SALES.dirty).slice(0, 50);
-  const rows = ids
-    .map(id => SALES.deals.get(id))
-    .filter(Boolean)
-    .map(row => ({ key: SALES_PREFIX + row.dealId, payload: row }));
-  if (!rows.length) return;
-  await storeRequest("upsert", rows);
-  ids.forEach(id => SALES.dirty.delete(id));
-  if (SALES.dirty.size) markDirty(Array.from(SALES.dirty)[0]);
+  if (SALES.flushing) {
+    scheduleFlush();
+    return;
+  }
+
+  SALES.flushing = true;
+  try {
+    const ids = Array.from(SALES.dirty).slice(0, 50);
+    const versions = new Map(ids.map(id => [id, SALES.dirtyVersions.get(id) || 0]));
+    const rows = ids
+      .map(id => SALES.deals.get(id))
+      .filter(Boolean)
+      .map(row => ({ key: SALES_PREFIX + row.dealId, payload: row }));
+
+    if (!rows.length) {
+      ids.forEach(id => {
+        if ((SALES.dirtyVersions.get(id) || 0) === versions.get(id)) {
+          SALES.dirty.delete(id);
+          SALES.dirtyVersions.delete(id);
+        }
+      });
+      return;
+    }
+
+    await storeRequest("upsert", rows);
+    ids.forEach(id => {
+      // A new event may dirty the same deal while this request is in flight.
+      // Clear only the exact version that was successfully persisted.
+      if ((SALES.dirtyVersions.get(id) || 0) === versions.get(id)) {
+        SALES.dirty.delete(id);
+        SALES.dirtyVersions.delete(id);
+      }
+    });
+  } finally {
+    SALES.flushing = false;
+    if (SALES.dirty.size) scheduleFlush();
+  }
 }
 
 async function loadPersisted() {
