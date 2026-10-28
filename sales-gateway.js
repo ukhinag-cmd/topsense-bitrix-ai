@@ -22,6 +22,32 @@ function dashboardAuthorized(req, expectedToken) {
   return supplied.length === actual.length && timingSafeEqual(supplied, actual);
 }
 
+function canonicalRequestPath(rawPath) {
+  let decoded = String(rawPath || '/');
+  for (let depth = 0; depth < 8; depth += 1) {
+    let next;
+    try { next = decodeURIComponent(decoded); } catch { return null; }
+    if (next === decoded) break;
+    decoded = next;
+    if (depth === 7) {
+      try { if (decodeURIComponent(decoded) !== decoded) return null; } catch { return null; }
+    }
+  }
+  // Encoded query/fragment delimiters make route interpretation ambiguous.
+  if (decoded.includes('?') || decoded.includes('#')) return null;
+  decoded = decoded.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  try {
+    decoded = new URL('http://localhost' + (decoded.startsWith('/') ? decoded : '/' + decoded)).pathname;
+  } catch { return null; }
+  return decoded.replace(/\/+$/, '') || '/';
+}
+
+function isProtectedPath(pathname) {
+  const withoutMatrixParams = pathname.split('/').map(segment => segment.split(';', 1)[0]).join('/');
+  const lower = withoutMatrixParams.toLowerCase();
+  return lower === '/sales' || lower.startsWith('/sales/') || lower === '/bitrix/events';
+}
+
 function createGateway({
   upstreamPort = APP_PORT,
   dashboardToken = String(process.env.SALES_DASHBOARD_TOKEN || ''),
@@ -30,13 +56,19 @@ function createGateway({
 } = {}) {
   const salesApi = salesModule || require('./sales');
   return http.createServer((req, res) => {
-    let requestUrl;
-    try { requestUrl = new URL(req.url || '/', 'http://localhost'); }
-    catch {
+    const rawPath = String(req.url || '/').split('?', 1)[0] || '/';
+    const pathname = canonicalRequestPath(rawPath);
+    if (!pathname) {
       res.writeHead(400, { 'cache-control': 'no-store' });
-      return res.end('Invalid request URL');
+      return res.end('Invalid or ambiguous request path');
     }
-    const pathname = requestUrl.pathname.replace(/\/+$/, '') || '/';
+    const rawPathNormalized = rawPath.replace(/\/+$/, '') || '/';
+    const protectedPath = pathname.split('/').map(segment => segment.split(';', 1)[0]).join('/');
+    if (isProtectedPath(pathname) &&
+        (rawPathNormalized !== pathname || pathname !== protectedPath.toLowerCase())) {
+      res.writeHead(400, { 'cache-control': 'no-store' });
+      return res.end('Non-canonical protected route');
+    }
 
     if (pathname === '/sales' || pathname.startsWith('/sales/')) {
       if (!dashboardToken) {
@@ -103,9 +135,18 @@ function createGateway({
       else req.pipe(proxy);
     }
 
-    // Buffer only Bitrix's bounded event body so it can be mirrored without
-    // consuming or altering the original request sent to the existing handler.
-    if (req.method === 'POST' && req.url === '/bitrix/events') {
+    // Never let the existing handler accept events when its shared token is
+    // absent; server.js intentionally preserves its legacy optional-token mode.
+    if (req.method === 'POST' && pathname === '/bitrix/events' && req.url !== '/bitrix/events') {
+      res.writeHead(400, { 'cache-control': 'no-store' });
+      return res.end('Non-canonical Bitrix event route');
+    }
+    if (req.method === 'POST' && pathname === '/bitrix/events') {
+      if (!bitrixToken) {
+        req.resume();
+        res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end('Bitrix event validation is not configured');
+      }
       const chunks = [];
       let size = 0;
       let rejected = false;
