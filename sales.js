@@ -384,7 +384,7 @@ async function snapshotDeal(deal, source = "event") {
   row.alerts = addAlert(row, previous);
 
   const changed = !previous || [
-    "title","managerId","sourceId","categoryId","stageId","semantic","amount",
+    "title","managerId","sourceId","categoryId","stageId","semantic","amount","sourceUpdatedAt",
     "prospectScore","riskScore","qualificationIssue","qualificationStatus",
     "clientType","lastActivityAt","nextActivityAt","hasNext","nextOverdue",
     "stageEnteredAt","nextStep"
