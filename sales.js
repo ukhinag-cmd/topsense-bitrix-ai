@@ -6,6 +6,7 @@ const SALES = {
   syncing: false,
   deals: new Map(),
   managers: new Map(),
+  managerLookupVersions: new Map(),
   stages: new Map(),
   dirty: new Set(),
   flushTimer: null,
@@ -174,17 +175,26 @@ async function managerName(id) {
   const key = String(id || "");
   if (!key) return "—";
   if (SALES.managers.has(key)) return SALES.managers.get(key);
+
+  // Concurrent event handlers can resolve user.get out of order. Only the
+  // most recently started lookup may populate the shared manager cache.
+  const lookupVersion = (SALES.managerLookupVersions.get(key) || 0) + 1;
+  SALES.managerLookupVersions.set(key, lookupVersion);
   try {
     const users = await bitrixCall("user.get", { ID: Number(key) });
     const user = Array.isArray(users) ? users[0] : null;
     const name = user
       ? [user.NAME, user.LAST_NAME].filter(Boolean).join(" ").trim() || user.EMAIL || ("#" + key)
       : ("#" + key);
-    SALES.managers.set(key, name);
+    if (SALES.managerLookupVersions.get(key) === lookupVersion) {
+      SALES.managers.set(key, name);
+    }
     return name;
   } catch {
     const fallback = "#" + key;
-    SALES.managers.set(key, fallback);
+    if (SALES.managerLookupVersions.get(key) === lookupVersion) {
+      SALES.managers.set(key, fallback);
+    }
     return fallback;
   }
 }
