@@ -326,7 +326,8 @@ async function snapshotDeal(deal, source = "event") {
   if (!deal?.ID) return null;
   const id = String(deal.ID);
   const initiallyObserved = SALES.deals.get(id) || null;
-  const incomingVersion = deal.DATE_MODIFY == null ? "" : String(deal.DATE_MODIFY).trim();
+  const rawVersion = deal.DATE_MODIFY == null ? "" : String(deal.DATE_MODIFY).trim();
+  const incomingVersion = rawVersion && Number.isFinite(Date.parse(rawVersion)) ? rawVersion : "";
   const manager = await managerName(deal.ASSIGNED_BY_ID);
 
   // Re-read after the asynchronous manager lookup. Another event or sync may
@@ -335,12 +336,15 @@ async function snapshotDeal(deal, source = "event") {
   const latestVersion = latest
     ? (Object.prototype.hasOwnProperty.call(latest, "sourceUpdatedAt") ? latest.sourceUpdatedAt : latest.updatedAt)
     : "";
-  if (latest && latestVersion) {
+  if (latest) {
+    // An unversioned or malformed response must never replace an existing row.
     if (!incomingVersion) return latest;
-    const order = compareBitrixTimestamp(incomingVersion, latestVersion);
-    // Fail closed when versions cannot be compared, and ignore duplicates as
-    // well as stale snapshots so they cannot roll back scores or history.
-    if (order === null || order <= 0) return latest;
+    if (latestVersion) {
+      const order = compareBitrixTimestamp(incomingVersion, latestVersion);
+      // Fail closed when versions cannot be compared, and ignore duplicates as
+      // well as stale snapshots so they cannot roll back scores or history.
+      if (order === null || order <= 0) return latest;
+    }
   }
 
   const previous = latest || initiallyObserved;
