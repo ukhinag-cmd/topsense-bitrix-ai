@@ -99,6 +99,29 @@ function isoOrNull(value) {
   return t ? new Date(t).toISOString() : null;
 }
 
+// Bitrix DATE_MODIFY can include precision finer than JavaScript Date's
+// millisecond resolution. Preserve that precision when ordering snapshots.
+function compareBitrixTimestamp(left, right) {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return null;
+  if (ta < tb) return -1;
+  if (ta > tb) return 1;
+
+  const subMillisecond = value => {
+    const match = value.match(/[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.(\\d+))?/i);
+    return (match?.[1] || "").slice(3).replace(/0+$/, "");
+  };
+  const fa = subMillisecond(a);
+  const fb = subMillisecond(b);
+  const width = Math.max(fa.length, fb.length);
+  const aa = fa.padEnd(width, "0");
+  const bb = fb.padEnd(width, "0");
+  return aa < bb ? -1 : aa > bb ? 1 : 0;
+}
+
 function stageSemantic(deal) {
   const direct = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
   if (direct) return direct;
@@ -302,10 +325,26 @@ function addAlert(snapshot, previous) {
 async function snapshotDeal(deal, source = "event") {
   if (!deal?.ID) return null;
   const id = String(deal.ID);
-  const previous = SALES.deals.get(id) || null;
-  const scored = scoreDeal(deal, previous);
+  const initiallyObserved = SALES.deals.get(id) || null;
+  const incomingVersion = deal.DATE_MODIFY == null ? "" : String(deal.DATE_MODIFY).trim();
   const manager = await managerName(deal.ASSIGNED_BY_ID);
 
+  // Re-read after the asynchronous manager lookup. Another event or sync may
+  // have stored a newer snapshot while this request was waiting.
+  const latest = SALES.deals.get(id) || null;
+  const latestVersion = latest
+    ? (Object.prototype.hasOwnProperty.call(latest, "sourceUpdatedAt") ? latest.sourceUpdatedAt : latest.updatedAt)
+    : "";
+  if (latest && latestVersion) {
+    if (!incomingVersion) return latest;
+    const order = compareBitrixTimestamp(incomingVersion, latestVersion);
+    // Fail closed when versions cannot be compared, and ignore duplicates as
+    // well as stale snapshots so they cannot roll back scores or history.
+    if (order === null || order <= 0) return latest;
+  }
+
+  const previous = latest || initiallyObserved;
+  const scored = scoreDeal(deal, previous);
   const row = {
     kind: "salesDeal",
     dealId: id,
@@ -316,7 +355,8 @@ async function snapshotDeal(deal, source = "event") {
     categoryId: String(deal.CATEGORY_ID || "0"),
     stageId: String(deal.STAGE_ID || ""),
     currency: String(deal.CURRENCY_ID || "RUB"),
-    updatedAt: isoOrNull(deal.DATE_MODIFY) || new Date().toISOString(),
+    updatedAt: isoOrNull(incomingVersion) || new Date().toISOString(),
+    sourceUpdatedAt: incomingVersion || null,
     observedAt: new Date().toISOString(),
     observedFrom: source,
     ...scored,
