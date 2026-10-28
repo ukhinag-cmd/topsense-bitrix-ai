@@ -53,6 +53,11 @@ test('a late older CRM response cannot roll back a newer sub-millisecond snapsho
     TITLE: 'Newer snapshot',
     DATE_MODIFY: '2026-10-29T00:00:00.123900Z',
   };
+  const latest = {
+    ...newer,
+    TITLE: 'Newest snapshot',
+    DATE_MODIFY: '2026-10-29T00:00:00.123950Z',
+  };
 
   let dealCalls = 0;
   let userCalls = 0;
@@ -63,7 +68,7 @@ test('a late older CRM response cannot roll back a newer sub-millisecond snapsho
     const path = new URL(String(input)).pathname;
     if (path.endsWith('/crm.deal.get.json')) {
       dealCalls += 1;
-      return bitrixResponse(dealCalls === 1 ? older : newer);
+      return bitrixResponse(dealCalls === 1 ? older : dealCalls === 2 ? newer : latest);
     }
     if (path.endsWith('/user.get.json')) {
       userCalls += 1;
@@ -86,4 +91,13 @@ test('a late older CRM response cannot roll back a newer sub-millisecond snapsho
   assert.equal(row.sourceUpdatedAt, newer.DATE_MODIFY);
   assert.equal(row.manager, 'Current manager');
   assert.equal(row.scoreHistory.length, 1, 'the stale response must not append a history entry');
+
+  // A later event reuses the manager cache. The stale first lookup must not
+  // have overwritten the name returned by the newer lookup.
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: '42' });
+  const finalRow = sales.status().prospects.find(item => item.dealId === '42');
+  assert.equal(finalRow.title, 'Newest snapshot');
+  assert.equal(finalRow.sourceUpdatedAt, latest.DATE_MODIFY);
+  assert.equal(finalRow.manager, 'Current manager', 'stale user.get completion must not poison the shared manager cache');
+  assert.equal(finalRow.scoreHistory.length, 1, 'title-only changes must not create a score-history entry');
 });
