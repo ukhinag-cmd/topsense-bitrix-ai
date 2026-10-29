@@ -209,11 +209,16 @@ async function loadStages() {
     if (!Array.isArray(result)) throw new Error("Invalid Bitrix stage list response");
     const stages = new Map();
     for (const row of result) {
-      if (!row || typeof row !== "object") {
+      // A list may be an array but still contain malformed stage records.
+      // Validate every ID before replacing the known-good cache atomically.
+      if (!row || typeof row !== "object" || Array.isArray(row) ||
+          typeof row.STATUS_ID !== "string" || !row.STATUS_ID.trim()) {
         throw new Error("Invalid Bitrix stage metadata row");
       }
-      stages.set(String(row.STATUS_ID || ""), {
-        name: row.NAME || row.STATUS_ID || "",
+      const stageId = row.STATUS_ID.trim();
+      if (stages.has(stageId)) throw new Error("Duplicate Bitrix stage metadata ID");
+      stages.set(stageId, {
+        name: row.NAME || stageId,
         semantics: row.SEMANTICS || "",
       });
     }
