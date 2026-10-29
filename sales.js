@@ -29,7 +29,20 @@ function bitrixOrigin() {
   try { return new URL(bitrixBaseUrl()).origin; } catch { return "https://topsense.bitrix24.ru"; }
 }
 
+const READ_ONLY_BITRIX_METHODS = new Set([
+  "crm.status.list",
+  "user.get",
+  "crm.deal.get",
+  "crm.activity.get",
+  "crm.deal.list",
+]);
+
 async function bitrixRaw(method, params = {}) {
+  // POST is the Bitrix REST transport; the REST method itself must be read-only.
+  // Prevent accidental CRM writes if a future caller adds a mutating method.
+  if (!READ_ONLY_BITRIX_METHODS.has(method)) {
+    throw new Error("Read-only Bitrix method blocked");
+  }
   const url = new URL(method + ".json", bitrixBaseUrl());
   const response = await fetch(url, {
     method: "POST",
