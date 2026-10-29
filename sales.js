@@ -235,6 +235,9 @@ function scoreDeal(deal, previous) {
   const hasNext = Boolean(nextTs && nextTs > Date.now() - 5 * 60 * 1000);
   const nextOverdue = Boolean(nextTs && nextTs < Date.now() - 5 * 60 * 1000);
   const qual = qualificationStatus(deal);
+  // Only an affirmative qualification status earns the full scoring bonus.
+  // A status such as "Не квалифицировано" must not match a substring search.
+  const qualificationConfirmed = /^квалифицировано$/i.test(qual);
   const type = clientType(deal);
   const stageId = String(deal.STAGE_ID || "");
   const nowIso = new Date().toISOString();
@@ -252,7 +255,7 @@ function scoreDeal(deal, previous) {
   if (amountIsRub && amount >= 200000) prospect += 10;
   if (amountIsRub && amount >= 1000000) prospect += 5;
   if (type) prospect += 10;
-  if (/квалифицировано/i.test(qual)) prospect += 20;
+  if (qualificationConfirmed) prospect += 20;
   else if (qual) prospect += 8;
   if (hasNext) prospect += 15;
   if (lastAge !== null && lastAge <= 3) prospect += 10;
@@ -280,7 +283,7 @@ function scoreDeal(deal, previous) {
 
   const qualificationIssue = open && (
     (prospect >= 60 && !qual) ||
-    (prospect >= 65 && /нужно|не определено/i.test(qual)) ||
+    (prospect >= 65 && !qualificationConfirmed) ||
     (amountIsRub && amount >= 100000 && !type)
   );
 
