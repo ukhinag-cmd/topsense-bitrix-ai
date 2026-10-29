@@ -88,11 +88,15 @@ async function storeRequest(action, rows = null) {
   // HTTP 200 alone is not an acknowledgement: redirects, login pages or
   // malformed JSON must never cause pending score history to be discarded.
   if (!response.ok || !payload || typeof payload !== "object" ||
-      Array.isArray(payload) || payload.ok !== true) {
-    throw new Error(typeof payload?.error === "string" ? payload.error : "Sales store request was not acknowledged");
+      Array.isArray(payload) || payload.ok === false) {
+    throw new Error(typeof payload?.error === "string" ? payload.error : "Sales store response failed");
   }
-  if (action === "load" && !Array.isArray(payload.rows)) {
-    throw new Error("Invalid Sales store load response");
+  // Existing read-only load responses may have rows without an ok flag.
+  // Writes are different: never clear dirty history without explicit ok:true.
+  if (action === "load") {
+    if (!Array.isArray(payload.rows)) throw new Error("Invalid Sales store load response");
+  } else if (payload.ok !== true) {
+    throw new Error("Sales store write was not acknowledged");
   }
   return payload;
 }
