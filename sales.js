@@ -439,7 +439,10 @@ async function snapshotDeal(deal, source = "event") {
       DATE_CREATE: latest.createdAt,
       DATE_MODIFY: incomingVersion,
       LAST_ACTIVITY_TIME: deal.LAST_ACTIVITY_TIME,
-      ACTIVITY_TIME: deal.ACTIVITY_TIME ?? deal.NEXT_ACTIVITY_TIME ?? null,
+      // A contact-only change at the same DATE_MODIFY is not proof that the
+      // previously scheduled Next Step has been removed. Preserve the known
+      // action when Bitrix omits or blanks both next-activity fields.
+      ACTIVITY_TIME: deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME || latest.nextActivityAt || null,
       UF_CRM_AI_CLIENT_TYPE: latest.clientType,
       UF_CRM_AI_QUAL_STATUS: latest.qualificationStatus,
     };
