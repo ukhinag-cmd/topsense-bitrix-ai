@@ -28,7 +28,12 @@ test("Expired, malformed or transient records are never treated as proof",()=>{
  const e=entry(),old={...e,checkedAt:"2025-01-01T00:00:00.000Z"};
  assert.equal(store.fresh(old),false);
  assert.equal(store.fresh({...e,fingerprint:"short"}),false);
- assert.equal(store.fresh({...e,profile:{status:"site_unavailable"}}),false);
+ // Failure is a short-lived NEGATIVE cache, never a confirmed type.
+ assert.equal(store.fresh({...e,profile:{status:"site_unavailable"}}),true);
+ assert.equal(store.fresh({...e,
+  checkedAt:new Date(Date.now()-7*60*60*1000).toISOString(),
+  profile:{status:"site_unavailable"}}),false);
+ assert.equal(store.restored(source,{...e,profile:{status:"site_unavailable"}}).siteType,undefined);
  assert.equal(store.fresh({...e,profile:{status:"site_profiled",siteType:""}}),false);
 });
 test("The checkpoint contains only public website evidence, never CRM contacts",async()=>{
