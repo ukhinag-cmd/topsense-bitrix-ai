@@ -52,14 +52,14 @@ test('activity webhook refreshes contact and Next Step without a deal DATE_MODIF
     ACTIVITY_TIME: newNext,
   };
   let reads = 0;
-  global.fetch = async input => {
+  global.fetch = async (input, options = {}) => {
     const path = new URL(String(input)).pathname;
     let result;
     if (path.endsWith('/crm.deal.get.json')) {
       reads += 1;
       result = reads === 2 ? activityChanged : base;
     } else if (path.endsWith('/crm.activity.get.json')) {
-      result = { OWNER_TYPE_ID: 2, OWNER_ID: id };
+      result = { ID: JSON.parse(options.body).id, OWNER_TYPE_ID: 2, OWNER_ID: id };
     } else if (path.endsWith('/user.get.json')) {
       result = [{ ID: 7, NAME: 'Sales', LAST_NAME: 'Manager' }];
     } else {
