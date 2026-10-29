@@ -712,7 +712,7 @@ function html() {
   const prospectRows = s.prospects.map(x => `<tr>
     <td><a href="${escapeHtml(dealLink(x.dealId))}" target="_blank" rel="noopener">#${escapeHtml(x.dealId)} · ${escapeHtml(x.title)}</a></td>
     <td>${escapeHtml(x.manager)}</td>
-    <td>${money(x.amount, x.currency)}</td>
+    <td>${escapeHtml(money(x.amount, x.currency))}</td>
     <td><span class="score good">${x.prospectScore}</span></td>
     <td>${escapeHtml(x.stageName)}</td>
     <td>${shortDate(x.lastActivityAt)}</td>
@@ -723,7 +723,7 @@ function html() {
   const attentionRows = s.attention.map(x => `<tr>
     <td><a href="${escapeHtml(dealLink(x.dealId))}" target="_blank" rel="noopener">#${escapeHtml(x.dealId)} · ${escapeHtml(x.title)}</a></td>
     <td>${escapeHtml(x.manager)}</td>
-    <td>${money(x.amount, x.currency)}</td>
+    <td>${escapeHtml(money(x.amount, x.currency))}</td>
     <td><span class="score ${x.riskScore >= 60 ? "bad" : "warn"}">${x.riskScore}</span></td>
     <td>${x.hasNext ? "есть" : '<span class="red">нет</span>'}</td>
     <td>${x.qualificationIssue ? '<span class="red">проверить</span>' : "—"}</td>
@@ -732,7 +732,7 @@ function html() {
 
   const alertRows = s.alerts.slice(0,12).map(a => `<div class="alert">
     <span class="dot ${badgeClass(a.type)}"></span>
-    <div><b>${escapeHtml(a.title)}</b><br><a href="${escapeHtml(dealLink(a.dealId))}" target="_blank" rel="noopener">${escapeHtml(a.titleDeal)}</a><br><small>${escapeHtml(a.manager)} · ${money(a.amount, a.currency)} · ${shortDate(a.at)}</small></div>
+    <div><b>${escapeHtml(a.title)}</b><br><a href="${escapeHtml(dealLink(a.dealId))}" target="_blank" rel="noopener">${escapeHtml(a.titleDeal)}</a><br><small>${escapeHtml(a.manager)} · ${escapeHtml(money(a.amount, a.currency))} · ${shortDate(a.at)}</small></div>
   </div>`).join("");
 
   return `<!doctype html>
