@@ -587,13 +587,28 @@ async function syncRecentDeals(limitPages = 4) {
         ],
         start,
       });
-      const rows = Array.isArray(payload.result) ? payload.result : [];
+      // A malformed list response must not make the Dashboard claim that
+      // a successful Bitrix sync occurred. Likewise, never silently accept
+      // an invalid or non-advancing pagination cursor as the final page.
+      const rows = payload?.result;
+      if (!Array.isArray(rows)) {
+        throw new Error("Invalid Bitrix deal list response");
+      }
       for (const deal of rows) {
         await snapshotDeal(deal, "sync");
       }
 
       pages += 1;
-      start = Number.isFinite(Number(payload.next)) ? Number(payload.next) : -1;
+      if (payload.next === undefined || payload.next === null) {
+        start = -1;
+      } else {
+        const cursorText = String(payload.next).trim();
+        const next = Number(cursorText);
+        if (!/^[1-9]\d*$/.test(cursorText) || !Number.isSafeInteger(next) || next <= start) {
+          throw new Error("Invalid Bitrix pagination cursor");
+        }
+        start = next;
+      }
 
       if (start >= 0 && pages < limitPages) {
         await new Promise(resolve => setTimeout(resolve, 1400));
