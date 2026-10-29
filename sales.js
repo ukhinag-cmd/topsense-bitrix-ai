@@ -240,20 +240,25 @@ async function managerName(id) {
   SALES.managerLookupVersions.set(key, lookupVersion);
   try {
     const users = await bitrixCall("user.get", { ID: Number(key) });
-    const user = Array.isArray(users) ? users[0] : null;
+    // Bitrix may return a malformed/partial user list. A different user's
+    // name must never be attributed to the deal's assigned manager.
+    const user = Array.isArray(users)
+      ? users.find(candidate => candidate && typeof candidate === "object" &&
+          String(candidate.ID ?? "") === key)
+      : null;
     const name = user
-      ? [user.NAME, user.LAST_NAME].filter(Boolean).join(" ").trim() || user.EMAIL || ("#" + key)
-      : ("#" + key);
+      ? [user.NAME, user.LAST_NAME].filter(Boolean).join(" ").trim() || String(user.EMAIL || "").trim()
+      : "";
+    // Do not cache an error or a missing/mismatched user as "#id".
+    // Otherwise a temporary user.get failure poisons the dashboard forever.
+    if (!name) return "#" + key;
     if (SALES.managerLookupVersions.get(key) === lookupVersion) {
       SALES.managers.set(key, name);
     }
-    return name;
+    // A slow older lookup must not overwrite a newer lookup's name.
+    return SALES.managers.get(key) || name;
   } catch {
-    const fallback = "#" + key;
-    if (SALES.managerLookupVersions.get(key) === lookupVersion) {
-      SALES.managers.set(key, fallback);
-    }
-    return fallback;
+    return "#" + key;
   }
 }
 
@@ -454,6 +459,19 @@ async function snapshotDeal(deal, source = "event") {
   const latestVersion = latest
     ? (Object.prototype.hasOwnProperty.call(latest, "sourceUpdatedAt") ? latest.sourceUpdatedAt : latest.updatedAt)
     : "";
+  // A resolved user name is independent of a deal's DATE_MODIFY version.
+  // Permit an identity-checked metadata correction without applying any
+  // other fields from an equal-version (possibly stale) deal response.
+  const trustedManagerName = latest &&
+    String(deal.ASSIGNED_BY_ID || "") === latest.managerId &&
+    SALES.managers.get(latest.managerId) === manager;
+  const refreshManagerLabel = () => {
+    if (!trustedManagerName || manager === latest.manager) return latest;
+    const updated = { ...latest, manager };
+    SALES.deals.set(id, updated);
+    markDirty(id);
+    return updated;
+  };
   let activityOnlyRefresh = false;
   let activityContactAdvanced = false;
   let activityNextAdvanced = false;
@@ -478,10 +496,12 @@ async function snapshotDeal(deal, source = "event") {
         if (activityContactAdvanced || activityNextAdvanced) {
           activityOnlyRefresh = true;
         } else {
-          return latest;
+          return refreshManagerLabel();
         }
-      } else if (order === null || order <= 0) {
-        // Other equal-version, incomparable or stale CRM responses are ignored.
+      } else if (order === 0) {
+        return refreshManagerLabel();
+      } else if (order === null || order < 0) {
+        // Incomparable or stale CRM deal fields must never overwrite a row.
         return latest;
       }
     }
@@ -521,7 +541,7 @@ async function snapshotDeal(deal, source = "event") {
     dealId: id,
     title: String(deal.TITLE || ("Сделка #" + id)),
     managerId: String(deal.ASSIGNED_BY_ID || ""),
-    manager: activityOnlyRefresh ? latest.manager : manager,
+    manager: activityOnlyRefresh && !trustedManagerName ? latest.manager : manager,
     sourceId: String(deal.SOURCE_ID || ""),
     categoryId: String(deal.CATEGORY_ID || "0"),
     stageId: String(deal.STAGE_ID || ""),
