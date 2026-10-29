@@ -61,13 +61,13 @@ async function fixture(t, { bitrixToken = appToken } = {}) {
   return {gatewayPort,upstreamRequests,handled,handledPromise};
 }
 
-test('mirrors only a valid authenticated deal event after the existing handler accepts it', async t=>{
+test('authenticated Bitrix events are processed locally without invoking legacy CRM writes', async t=>{
   const f=await fixture(t);
   const body='event=ONCRMDEALUPDATE&data%5BFIELDS%5D%5BID%5D=38742&auth%5Bapplication_token%5D='+appToken;
   const response=await request(f.gatewayPort,{method:'POST',path:'/bitrix/events',headers:{'content-type':'application/x-www-form-urlencoded'},body});
   assert.equal(response.status,200);
   await f.handledPromise;
-  assert.equal(f.upstreamRequests[0].body,body);
+  assert.equal(f.upstreamRequests.length,0,'legacy Bitrix event handler must never be called');
   assert.deepEqual(f.handled[0],{event:'ONCRMDEALUPDATE',dealId:'38742',activityId:null});
 });
 
@@ -96,6 +96,7 @@ test('does not mirror a rejected Bitrix event', async t=>{
   const body='event=ONCRMDEALUPDATE&data%5BFIELDS%5D%5BID%5D=38742&auth%5Bapplication_token%5D=wrong';
   const response=await request(f.gatewayPort,{method:'POST',path:'/bitrix/events',headers:{'content-type':'application/x-www-form-urlencoded'},body});
   assert.equal(response.status,401);
+  assert.equal(f.upstreamRequests.length,0);
   assert.equal(f.handled.length,0);
 });
 
@@ -119,4 +120,37 @@ test('rejects oversized Bitrix event bodies before forwarding', async t=>{
   const response=await request(f.gatewayPort,{method:'POST',path:'/bitrix/events',headers:{'content-type':'application/x-www-form-urlencoded'},body:'x'.repeat(1024*1024+1)});
   assert.equal(response.status,413);
   assert.equal(f.upstreamRequests.length,0);
+});
+
+
+test('read-only Sales routes reject POST and PUT rather than proxying to legacy routes', async t=>{
+  const f=await fixture(t);
+  for(const method of ['POST','PUT','DELETE']) {
+    const response=await request(f.gatewayPort,{
+      method,path:'/sales/status',
+      headers:{authorization:basic('sales:'+dashboardToken)},
+    });
+    assert.equal(response.status,405,method);
+  }
+  assert.equal(f.upstreamRequests.length,0);
+});
+
+test('unsupported authenticated webhook never reaches the legacy handler', async t=>{
+  const f=await fixture(t);
+  const body='event=ONCRMDEALDELETE&data%5BFIELDS%5D%5BID%5D=38742&auth%5Bapplication_token%5D='+appToken;
+  const response=await request(f.gatewayPort,{method:'POST',path:'/bitrix/events',
+    headers:{'content-type':'application/x-www-form-urlencoded'},body});
+  assert.equal(response.status,401);
+  assert.equal(f.upstreamRequests.length,0);
+  assert.equal(f.handled.length,0);
+});
+
+test('gateway with no upstream port is isolated from the legacy server', async t=>{
+  const sales={html:()=>'<h1>safe</h1>',status:()=>({ok:true}),handleEvent:async()=>{}};
+  const gateway=createGateway({salesModule:sales,dashboardToken,bitrixToken:appToken});
+  const port=await listen(gateway);
+  t.after(async()=>close(gateway));
+  const unknown=await request(port,{path:'/health'});
+  assert.equal(unknown.status,404);
+  assert.equal((await request(port,{path:'/sales/status',headers:{authorization:basic('sales:'+dashboardToken)}})).status,200);
 });
