@@ -666,6 +666,10 @@ async function loadPersisted() {
       if (!key.startsWith(SALES_PREFIX) || !row?.dealId) continue;
 
       const id = String(row.dealId);
+      // A storage row is not an authoritative CRM event. Reject mismatched
+      // key/payload identities and malformed IDs before hydrating the
+      // dashboard, otherwise a corrupt store row can invent a phantom deal.
+      if (!validDealId(id) || key !== SALES_PREFIX + id) continue;
       const current = SALES.deals.get(id);
       if (current) {
         // A webhook can finish while the startup store read is in flight.
