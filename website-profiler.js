@@ -289,8 +289,25 @@ function hydrateFromArchive(rows){
   if(current&&Date.parse(current.checkedAt||0)>=Date.parse(row.checkedAt||0))continue;
   persistedProfiles.set(id,row);count++;
  }
- if(count)console.log(JSON.stringify({component:"site-profiler",
-  event:"full-archive-hydrated",recovered:count,available:persistedProfiles.size}));
+ // The full checkpoint already contains website rows. Restore queued sites
+ // immediately from it rather than waiting on a SECOND large store load.
+ let skipped=0;
+ for(let i=queue.length-1;i>=0;i--){
+  const c=queue[i],cached=evidenceStore.restored(c,persistedProfiles.get(String(c.id)));
+  if(!cached)continue;
+  queue.splice(i,1);profiles.set(String(c.id),cached);
+  restoredProfiles++;skipped++;
+ }
+ if(count||skipped)console.log(JSON.stringify({component:"site-profiler",
+  event:"full-archive-hydrated",recovered:count,skippedRepeatedCrawls:skipped,
+  available:persistedProfiles.size}));
+ if(!restored&&recovered.size){
+  restored=true;
+  const buffered=deferredCompanies.splice(0);
+  console.log(JSON.stringify({component:"site-profiler",event:"full-archive-restore-ready",
+   buffered:buffered.length,available:persistedProfiles.size}));
+  if(buffered.length)enqueue(buffered);
+ }
  return count;
 }
 function enqueue(companies){
@@ -301,9 +318,15 @@ function enqueue(companies){
   if(!restoring){
    restoring=true;
    evidenceStore.load().then(map=>{
-    for(const [id,row] of map)persistedProfiles.set(id,row);
+    for(const [id,row] of map){
+     const old=persistedProfiles.get(id);
+     if(old&&Date.parse(old.checkedAt||0)>=Date.parse(row.checkedAt||0))continue;
+     persistedProfiles.set(id,row);
+    }
    }).catch(()=>{}).finally(()=>{
-    restored=true;restoring=false;
+    restoring=false;
+    if(restored)return; // already populated from the full archival snapshot
+    restored=true;
     const buffered=deferredCompanies.splice(0);
     console.log(JSON.stringify({component:"site-profiler",event:"cache-loaded",rows:persistedProfiles.size}));
     enqueue(buffered);
