@@ -282,6 +282,25 @@ function validateDealRow(deal, expectedId = null) {
   return deal;
 }
 
+// A successful REST envelope is not proof that crm.activity.get returned
+// the requested activity. Reject malformed/mismatched owners rather than
+// silently losing a webhook or reading an unrelated deal.
+function validateActivityRow(activity, expectedId) {
+  if (!activity || typeof activity !== "object" || Array.isArray(activity) ||
+      (activity.ID != null &&
+       (!validDealId(activity.ID) || String(activity.ID) !== String(expectedId)))) {
+    throw new Error("Invalid Bitrix activity record");
+  }
+  const ownerType = String(activity.OWNER_TYPE_ID ?? "").trim();
+  if (!/^[1-9]\d*$/.test(ownerType) || !Number.isSafeInteger(Number(ownerType))) {
+    throw new Error("Invalid Bitrix activity owner type");
+  }
+  if (ownerType === "2" && !validDealId(activity.OWNER_ID)) {
+    throw new Error("Invalid Bitrix activity deal owner");
+  }
+  return activity;
+}
+
 function scoreDeal(deal, previous) {
   const semantic = stageSemantic(deal);
   const stageSemanticKnown = semantic === "P" || semantic === "S" || semantic === "F";
@@ -655,9 +674,12 @@ async function processDealId(dealId, source = "event") {
 }
 
 async function processActivityId(activityId) {
-  if (!activityId) return null;
-  const activity = await bitrixCall("crm.activity.get", { id: Number(activityId) });
-  if (String(activity?.OWNER_TYPE_ID || "") !== "2" || !activity?.OWNER_ID) return null;
+  if (!validDealId(activityId)) throw new Error("Invalid Bitrix activity ID");
+  const activity = validateActivityRow(
+    await bitrixCall("crm.activity.get", { id: Number(activityId) }),
+    activityId
+  );
+  if (String(activity.OWNER_TYPE_ID) !== "2") return null;
   return processDealId(activity.OWNER_ID, "activity");
 }
 
