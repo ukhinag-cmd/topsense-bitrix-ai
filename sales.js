@@ -215,7 +215,7 @@ function scoreDeal(deal, previous) {
   const amount = num(deal.OPPORTUNITY);
   const createdAt = deal.DATE_CREATE || deal.BEGINDATE || null;
   const modifiedAt = deal.DATE_MODIFY || null;
-  const lastActivityAt = deal.LAST_ACTIVITY_TIME || modifiedAt || createdAt;
+  const lastActivityAt = deal.LAST_ACTIVITY_TIME || null;
   const nextActivityAt = deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME || null;
   const lastAge = daysSince(lastActivityAt);
   const dealAge = daysSince(createdAt);
