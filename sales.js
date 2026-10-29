@@ -631,7 +631,52 @@ function sortedDeals() {
   );
 }
 
+// Read-only CRM records can stay unchanged for days. Their next activity can
+// become overdue and their last contact can become stale without any webhook
+// or DATE_MODIFY update. Re-evaluate time-dependent scores when serving the
+// dashboard, preserving the last CRM source version and observations.
+function refreshTimedScores() {
+  for (const [id, previous] of SALES.deals) {
+    if (!previous || !previous.dealId) continue;
+    const deal = {
+      STAGE_SEMANTIC_ID: previous.semantic,
+      STAGE_ID: previous.stageId,
+      OPPORTUNITY: previous.amount,
+      CURRENCY_ID: previous.currency,
+      DATE_CREATE: previous.createdAt,
+      DATE_MODIFY: previous.sourceUpdatedAt || previous.modifiedAt || previous.updatedAt,
+      LAST_ACTIVITY_TIME: previous.lastActivityAt,
+      ACTIVITY_TIME: previous.nextActivityAt,
+      UF_CRM_AI_QUAL_STATUS: previous.qualificationStatus,
+      UF_CRM_AI_CLIENT_TYPE: previous.clientType,
+    };
+    const scored = scoreDeal(deal, previous);
+    const keys = ["prospectScore", "riskScore", "hasNext", "nextOverdue", "qualificationIssue", "nextStep"];
+    if (keys.every(key => scored[key] === previous[key])) continue;
+
+    const row = { ...previous, ...scored };
+    const history = Array.isArray(previous.scoreHistory) ? previous.scoreHistory.slice(-MAX_HISTORY) : [];
+    const last = history[history.length - 1];
+    if (!last || last.prospectScore !== row.prospectScore || last.riskScore !== row.riskScore) {
+      history.push({
+        at: new Date().toISOString(),
+        stageId: row.stageId,
+        stageName: row.stageName,
+        amount: row.amount,
+        currency: row.currency,
+        prospectScore: row.prospectScore,
+        riskScore: row.riskScore,
+      });
+    }
+    row.scoreHistory = history.slice(-MAX_HISTORY);
+    row.alerts = addAlert(row, previous);
+    SALES.deals.set(id, row);
+    markDirty(id);
+  }
+}
+
 function status() {
+  refreshTimedScores();
   const all = sortedDeals();
   const open = all.filter(x => x.open);
   const prospects = open.filter(x => x.prospectScore >= 60);
