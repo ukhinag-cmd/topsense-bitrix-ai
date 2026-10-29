@@ -66,5 +66,5 @@ test('Dashboard escapes untrusted currency identifiers in rows and alerts', asyn
   const html = sales.html();
   assert.equal(html.toLowerCase().includes('<img src=x onerror='), false, 'HTML markup from CRM data must not execute');
   const escaped = html.split('&lt;IMG SRC=X ONERROR=ALERT(1)&gt;').length - 1;
-  assert.ok(escaped.length >= 2, 'both prospect row and alert must HTML-escape the currency label');
+  assert.ok(escaped >= 2, 'both prospect row and alert must HTML-escape the currency label');
 });
