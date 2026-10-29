@@ -211,6 +211,7 @@ function clientType(deal) {
 
 function scoreDeal(deal, previous) {
   const semantic = stageSemantic(deal);
+  const stageSemanticKnown = semantic === "P" || semantic === "S" || semantic === "F";
   const open = isOpenSemantic(semantic);
   const amount = num(deal.OPPORTUNITY);
   const createdAt = deal.DATE_CREATE || deal.BEGINDATE || null;
@@ -232,7 +233,7 @@ function scoreDeal(deal, previous) {
   const stageAge = daysSince(stageEnteredAt);
 
   let prospect = 0;
-  if (open) prospect += 10;
+  if (open && stageSemanticKnown) prospect += 10;
   if (amount > 0) prospect += 15;
   if (amount >= 50000) prospect += 10;
   if (amount >= 200000) prospect += 10;
@@ -248,6 +249,8 @@ function scoreDeal(deal, previous) {
 
   let risk = 0;
   if (open) {
+    // Missing stage semantics must not make the deal look safer or more promising.
+    if (!stageSemanticKnown) risk += 20;
     if (!hasNext) risk += 30;
     if (nextOverdue) risk += 15;
     if (lastAge === null) risk += 15;
@@ -269,7 +272,9 @@ function scoreDeal(deal, previous) {
   );
 
   let nextStep = "";
-  if (!open) {
+  if (!stageSemanticKnown) {
+    nextStep = "Проверить стадию — семантика Bitrix не определена";
+  } else if (!open) {
     nextStep = semantic === "S" ? "Сделка завершена успешно" : "Сделка закрыта без продажи";
   } else if (nextOverdue) {
     nextStep = "Просрочено следующее действие — перепланировать";
@@ -284,6 +289,7 @@ function scoreDeal(deal, previous) {
   const stage = SALES.stages.get(stageId);
   return {
     semantic,
+    stageSemanticKnown,
     open,
     amount,
     createdAt: isoOrNull(createdAt),
@@ -400,7 +406,7 @@ async function snapshotDeal(deal, source = "event") {
   row.alerts = addAlert(row, previous);
 
   const changed = !previous || [
-    "title","managerId","sourceId","categoryId","stageId","semantic","amount","sourceUpdatedAt",
+    "title","managerId","sourceId","categoryId","stageId","semantic","stageSemanticKnown","amount","sourceUpdatedAt",
     "prospectScore","riskScore","qualificationIssue","qualificationStatus",
     "clientType","lastActivityAt","nextActivityAt","hasNext","nextOverdue",
     "stageEnteredAt","nextStep"
