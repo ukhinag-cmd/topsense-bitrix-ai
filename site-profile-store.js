@@ -4,7 +4,7 @@
 const crypto=require("crypto");
 const PREFIX="site-profile:v1:";
 const TTL_MS=21*24*60*60*1000;
-const statuses=new Set(["site_profiled","site_preliminary_profiled","site_read_no_clear_type","site_read_ambiguous_type","site_identity_unclear"]);
+const statuses=new Set(["site_profiled","site_preliminary_profiled","site_read_no_clear_type","site_read_ambiguous_type","site_identity_unclear","site_unavailable"]);
 const pending=new Map();
 let timer=null,writing=false,loadedRows=0,storedRows=0,writeErrors=0,lastError="",batchLimit=4,consecutiveSuccesses=0;
 
@@ -43,7 +43,9 @@ function acceptable(profile){
 function fresh(row,now=Date.now()){
  if(!row||row.recordType!=="topsense-site-profile"||!acceptable(row.profile))return false;
  const timestamp=Date.parse(String(row.checkedAt||""));
- return Number.isFinite(timestamp)&&timestamp<=now&&now-timestamp<=TTL_MS&&
+ const ageLimit=row.profile?.status==="site_unavailable"?
+  6*60*60*1000:TTL_MS;
+ return Number.isFinite(timestamp)&&timestamp<=now&&now-timestamp<=ageLimit&&
   /^[0-9a-f]{64}$/.test(String(row.fingerprint||""));
 }
 async function request(action,rows){
@@ -130,6 +132,7 @@ function serialise(profile){
   emailSenderDomain:String(profile.emailSenderDomain||"").slice(0,180),
   siteType:profile.siteType||null,
   siteConfidence:String(profile.siteConfidence||"").slice(0,160),
+  error:profile.status==="site_unavailable"?String(profile.error||"").slice(0,100):"",
   staffEvidence:profile.staffEvidence?.count>0?{
    count:Number(profile.staffEvidence.count),year:Number(profile.staffEvidence.year)||null,
    approximate:Boolean(profile.staffEvidence.approximate),
