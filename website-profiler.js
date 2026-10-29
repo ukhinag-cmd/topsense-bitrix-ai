@@ -317,20 +317,28 @@ function enqueue(companies){
   deferredCompanies.push(...(companies||[]));
   if(!restoring){
    restoring=true;
-   evidenceStore.load().then(map=>{
-    for(const [id,row] of map){
-     const old=persistedProfiles.get(id);
-     if(old&&Date.parse(old.checkedAt||0)>=Date.parse(row.checkedAt||0))continue;
-     persistedProfiles.set(id,row);
-    }
-   }).catch(()=>{}).finally(()=>{
-    restoring=false;
-    if(restored)return; // already populated from the full archival snapshot
-    restored=true;
-    const buffered=deferredCompanies.splice(0);
-    console.log(JSON.stringify({component:"site-profiler",event:"cache-loaded",rows:persistedProfiles.size}));
-    enqueue(buffered);
-   });
+   // The dashboard already fetches the COMPLETE private archive at startup.
+   // Give that restore time to populate site profiles, avoiding two simultaneous
+   // large JSON responses that have repeatedly exhausted the web heap.
+   const fallback=setTimeout(()=>{
+    if(restored){restoring=false;return;}
+    evidenceStore.load().then(map=>{
+     for(const [id,row] of map){
+      const old=persistedProfiles.get(id);
+      if(old&&Date.parse(old.checkedAt||0)>=Date.parse(row.checkedAt||0))continue;
+      persistedProfiles.set(id,row);
+     }
+    }).catch(()=>{}).finally(()=>{
+     restoring=false;
+     if(restored)return;
+     restored=true;
+     const buffered=deferredCompanies.splice(0);
+     console.log(JSON.stringify({component:"site-profiler",event:"cache-loaded-fallback",
+      rows:persistedProfiles.size,buffered:buffered.length}));
+     enqueue(buffered);
+    });
+   },45000);
+   fallback.unref?.();
   }
   return;
  }
