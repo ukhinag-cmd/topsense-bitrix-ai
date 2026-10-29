@@ -5,7 +5,7 @@
 const mail=require("./company-email-domains");
 const state={status:"not_started",attempted:0,inspected:0,errors:0,withEmail:0,
  withAttachments:0,withNeeds:0,updatedAt:null,lastError:"",queued:0};
-const queue=[],pending=new Set(),visited=new Set(),profiles=new Map();
+const queue=[],pending=new Set(),visited=new Set(),profiles=new Map(),profilesByCompany=new Map();
 let working=false,nextBatchTimer=null;
 function scheduleNextBatch(){
  if(nextBatchTimer||working||!queue.length)return;
@@ -279,7 +279,20 @@ async function pump(){
    visited.add(id);state.attempted++;cycle++;
    try{
     const item=await inspect(d);
-    profiles.set(id,item);state.inspected++;
+    const previous=profiles.get(id);
+    if(previous?.companyId&&profilesByCompany.has(previous.companyId)){
+     const list=profilesByCompany.get(previous.companyId).filter(x=>x.id!==id);
+     if(list.length)profilesByCompany.set(previous.companyId,list);else profilesByCompany.delete(previous.companyId);
+    }
+    profiles.set(id,item);
+    if(item.companyId){
+     const list=profilesByCompany.get(item.companyId)||[];
+     list.push(item);
+     list.sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
+     if(list.length>40)list.length=40;
+     profilesByCompany.set(item.companyId,list);
+    }
+    state.inspected++;
     if(item.incomingEmails)state.withEmail++;
     if(item.attachmentCount)state.withAttachments++;
     if(item.signals.gases.length||item.signals.portable||item.signals.fixed||item.signals.service)state.withNeeds++;
@@ -302,8 +315,8 @@ async function pump(){
 }
 function get(id){return profiles.get(text(id))||null}
 function forCompany(id){
- return [...profiles.values()].filter(x=>x.companyId&&x.companyId===text(id))
-  .sort((a,b)=>Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0)).slice(0,15);
+ const list=profilesByCompany.get(text(id));
+ return list?list.slice(0,15):[];
 }
 function stats(){return {...state}}
 module.exports={queueDeals,get,forCompany,stats,signals,summarizeActivities,extractLegalNameCandidates,explicitTopLevelFrom};
