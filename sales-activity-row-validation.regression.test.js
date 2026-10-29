@@ -60,6 +60,7 @@ test('malformed activity reads cannot silently acknowledge events or load an unr
     null,
     {},
     [],
+    { OWNER_TYPE_ID: '2', OWNER_ID: dealId }, // no ID: cannot prove which activity was returned
     { ID: '71246', OWNER_TYPE_ID: '2', OWNER_ID: dealId },
     { ID: activityId, OWNER_TYPE_ID: 'unknown', OWNER_ID: dealId },
   ]) {
@@ -73,7 +74,7 @@ test('malformed activity reads cannot silently acknowledge events or load an unr
 
   activityResponse = { ID: activityId, OWNER_TYPE_ID: 2, OWNER_ID: dealId };
   await sales.handleEvent({ event: 'ONCRMACTIVITYADD', activityId: 'not-an-id' });
-  assert.equal(activityReads, 5, 'invalid inbound activity ID is rejected before any REST request');
+  assert.equal(activityReads, 6, 'invalid inbound activity ID is rejected before any REST request');
   assert.equal(sales.status().lastError?.source, 'sales-event');
 
   await sales.handleEvent({ event: 'ONCRMACTIVITYADD', activityId });
