@@ -10,8 +10,11 @@ const persistedProfiles=new Map(),deferredCompanies=[];
 let restoring=false,restored=false,restoredProfiles=0;
 let pagesScanned=0,checkedSites=0,lastProgressLogged=0;
 let active=0,lastAt=0;
-const MAX_ACTIVE=Math.max(2,Math.min(8,Number(process.env.TOPSENSE_SITE_WORKERS||6)));
-const START_GAP_MS=Math.max(180,Math.min(1200,Number(process.env.TOPSENSE_SITE_START_GAP_MS||250)));
+// The one-CPU web process has repeatedly OOM-crashed at six active
+// crawls. Keep a maximum of two until a dedicated crawler is provisioned.
+// A configured higher value cannot override the safety ceiling.
+const MAX_ACTIVE=Math.max(1,Math.min(2,Number(process.env.TOPSENSE_SITE_WORKERS||2)));
+const START_GAP_MS=Math.max(700,Math.min(1600,Number(process.env.TOPSENSE_SITE_START_GAP_MS||900)));
 function publicIPv4(ip){
  const x=ip.split(".").map(Number);
  if(x.length!==4||x.some(z=>!Number.isInteger(z)||z<0||z>255))return false;
@@ -226,7 +229,17 @@ async function one(c){
    siteType:trusted&&!ambiguous?(found?.type||null):null,siteConfidence:trusted&&found&&!ambiguous?(provisionalLegalNameSearch?"Предварительная — совпали полное наименование и ОПФ, реквизиты пока не сверены":"Предварительная по нескольким страницам"):"Не определена",checkedAt:new Date().toISOString()};
   profiles.set(c.id,profile);
   evidenceStore.queue(c,profile);
- }catch(error){if(evidenceRank(candidates[0].origin)<(sourcePriority.get(String(c.id))||0))return;checkedSites++;profiles.set(c.id,{status:"site_unavailable",source:candidates[0].origin,url:candidates[0].url,error:String(error.message||error).slice(0,90),checkedAt:new Date().toISOString()})}
+ }catch(error){
+  if(evidenceRank(candidates[0].origin)<(sourcePriority.get(String(c.id))||0))return;
+  checkedSites++;
+  const unavailable={status:"site_unavailable",source:candidates[0].origin,
+   url:candidates[0].url,error:String(error.message||error).slice(0,90),
+   checkedAt:new Date().toISOString()};
+  profiles.set(c.id,unavailable);
+  // Cache NEGATIVE fetch evidence for six hours, not a positive company type.
+  // New sender-domain or legal-identity evidence changes the fingerprint.
+  evidenceStore.queue(c,unavailable);
+ }
 }
 function pump(){
  while(active<MAX_ACTIVE&&queue.length){
