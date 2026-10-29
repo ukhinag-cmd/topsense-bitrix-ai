@@ -1,7 +1,6 @@
 'use strict';
 
 const http = require('http');
-const { fork } = require('child_process');
 const {
   MAX_EVENT_BODY,
   decodeBasicCredentials,
@@ -10,7 +9,6 @@ const {
 } = require('./sales-gateway-helpers');
 
 const PUBLIC_PORT = Number(process.env.PORT || 10000);
-const APP_PORT = PUBLIC_PORT + 1;
 
 function dashboardAuthorized(req, expectedToken) {
   if (!expectedToken) return false;
@@ -49,7 +47,7 @@ function isProtectedPath(pathname) {
 }
 
 function createGateway({
-  upstreamPort = APP_PORT,
+  upstreamPort = null,
   dashboardToken = String(process.env.SALES_DASHBOARD_TOKEN || ''),
   bitrixToken = String(process.env.BITRIX_OUTBOUND_TOKEN || ''),
   salesModule,
@@ -81,6 +79,12 @@ function createGateway({
       }
     }
 
+    // Never proxy writes or unknown methods under the read-only dashboard.
+    if ((pathname === '/sales' || pathname.startsWith('/sales/')) && req.method !== 'GET') {
+      res.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' });
+      return res.end('Method not allowed');
+    }
+
     if (req.method === 'GET' && pathname === '/sales') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(salesApi.html());
@@ -96,7 +100,13 @@ function createGateway({
       return res.end(body);
     }
 
-    function forward(bodyBuffer, mirroredEvent) {
+    function forward(bodyBuffer) {
+      // The Sales process is isolated by default: no legacy server is started.
+      // Only tests or an explicitly constructed gateway may provide upstreamPort.
+      if (!upstreamPort) {
+        res.writeHead(404, { 'cache-control': 'no-store' });
+        return res.end('Route unavailable in read-only Sales gateway');
+      }
       const headers = sanitizeProxyHeaders(req.headers, dashboardToken);
       if (bodyBuffer) {
         delete headers['transfer-encoding'];
@@ -109,16 +119,6 @@ function createGateway({
         method: req.method,
         headers,
       }, upstream => {
-        upstream.on('end', () => {
-          if (mirroredEvent && upstream.statusCode >= 200 && upstream.statusCode < 300) {
-            Promise.resolve(salesApi.handleEvent(mirroredEvent)).catch(error => {
-              console.warn(JSON.stringify({
-                source: 'sales-mvp', action: 'event-mirror-failed',
-                error: error instanceof Error ? error.message : String(error),
-              }));
-            });
-          }
-        });
         res.writeHead(upstream.statusCode || 502, upstream.headers);
         upstream.pipe(res);
       });
@@ -166,22 +166,32 @@ function createGateway({
         if (rejected) return;
         const body = Buffer.concat(chunks, size);
         const event = parseBitrixEvent(body, req.headers['content-type'], bitrixToken);
-        forward(body, event);
+        if (!event) {
+          res.writeHead(401, { 'cache-control': 'no-store' });
+          return res.end('Invalid or unsupported Bitrix event');
+        }
+
+        // Acknowledged authenticated events are processed by the read-only
+        // Sales module only. NEVER pass events to the legacy server.js, whose
+        // activity/deal handlers may create or modify Bitrix CRM records.
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, event: event.event, dealId: event.dealId, activityId: event.activityId }));
+        Promise.resolve().then(() => salesApi.handleEvent(event)).catch(error => {
+          console.warn(JSON.stringify({
+            source: 'sales-mvp', action: 'event-processing-failed',
+            error: error instanceof Error ? error.message : String(error),
+          }));
+        });
       });
       return;
     }
 
-    forward(null, null);
+    forward(null);
   });
 }
 
 function start() {
   const sales = require('./sales');
-  const child = fork(require.resolve('./server.js'), [], {
-    env: Object.fromEntries(Object.entries({ ...process.env, PORT: String(APP_PORT) }).filter(([key]) => !key.startsWith('SALES_'))),
-    stdio: 'inherit',
-  });
-
   sales.start().catch(error => {
     console.error(JSON.stringify({
       source: 'sales-mvp', action: 'startup-error',
@@ -194,11 +204,8 @@ function start() {
     console.log('TOP-SENSE Sales gateway listening on port ' + PUBLIC_PORT);
   });
 
-  process.on('SIGTERM', () => {
-    child.kill('SIGTERM');
-    gateway.close();
-  });
-  return { gateway, child };
+  process.on('SIGTERM', () => gateway.close());
+  return { gateway, child: null };
 }
 
 if (require.main === module) start();
