@@ -55,8 +55,14 @@ async function bitrixRaw(method, params = {}) {
     signal: AbortSignal.timeout(15000),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.error) {
-    throw new Error(payload.error_description || payload.error || ("HTTP " + response.status));
+  if (!response.ok || payload?.error) {
+    throw new Error(payload?.error_description || payload?.error || ("HTTP " + response.status));
+  }
+  // HTTP 200 with an HTML/JSON intermediary response is not a successful
+  // Bitrix REST read. Treat a missing result as an error, not as an empty deal.
+  if (!payload || typeof payload !== "object" ||
+      !Object.prototype.hasOwnProperty.call(payload, "result")) {
+    throw new Error("Invalid Bitrix REST response (missing result)");
   }
   return payload;
 }
@@ -197,13 +203,22 @@ async function loadStages() {
       filter: { ENTITY_ID: "DEAL_STAGE" },
       order: { SORT: "ASC" },
     });
-    SALES.stages.clear();
-    for (const row of Array.isArray(result) ? result : []) {
-      SALES.stages.set(String(row.STATUS_ID || ""), {
+    // Keep the last known-good stage semantics on partial/malformed reads.
+    // Clearing the live cache before validating the response could make a
+    // new deal appear less qualified or more risky for no CRM reason.
+    if (!Array.isArray(result)) throw new Error("Invalid Bitrix stage list response");
+    const stages = new Map();
+    for (const row of result) {
+      if (!row || typeof row !== "object") {
+        throw new Error("Invalid Bitrix stage metadata row");
+      }
+      stages.set(String(row.STATUS_ID || ""), {
         name: row.NAME || row.STATUS_ID || "",
         semantics: row.SEMANTICS || "",
       });
     }
+    SALES.stages = stages;
+    if (SALES.lastError?.source === "stages") SALES.lastError = null;
   } catch (error) {
     SALES.lastError = { at: new Date().toISOString(), source: "stages", message: String(error.message || error) };
   }
