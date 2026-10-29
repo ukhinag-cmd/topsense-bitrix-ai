@@ -548,6 +548,10 @@ async function flushDirty() {
     }
 
     await storeRequest("upsert", rows);
+    // A transient store failure must not leave Dashboard health permanently red
+    // once an explicitly acknowledged retry has persisted the pending history.
+    // Do not mask errors from other independent Sales operations.
+    if (SALES.lastError?.source === "sales-store") SALES.lastError = null;
     ids.forEach(id => {
       // A new event may dirty the same deal while this request is in flight.
       // Clear only the exact version that was successfully persisted.
@@ -613,13 +617,16 @@ async function handleEvent(evt) {
   SALES.lastEventAt = new Date().toISOString();
   const upper = String(evt?.event || "").toUpperCase();
   try {
+    let result = null;
     if (upper.includes("CRMACTIVITY")) {
-      return await processActivityId(evt.activityId);
+      result = await processActivityId(evt.activityId);
+    } else if (upper.includes("CRMDEAL") && evt.dealId) {
+      result = await processDealId(evt.dealId, "deal-event");
     }
-    if (upper.includes("CRMDEAL") && evt.dealId) {
-      return await processDealId(evt.dealId, "deal-event");
-    }
-    return null;
+    // Clear an earlier event-processing error only after a real successful
+    // read. Ignored events and errors from sync/store must not be hidden.
+    if (result && SALES.lastError?.source === "sales-event") SALES.lastError = null;
+    return result;
   } catch (error) {
     SALES.lastError = { at: new Date().toISOString(), source: "sales-event", message: String(error.message || error) };
     console.warn(JSON.stringify({
