@@ -136,8 +136,17 @@ function isOpenSemantic(semantic) {
   return semantic !== "S" && semantic !== "F";
 }
 
-function money(value) {
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(num(value)) + " ₽";
+function money(value, currency = "RUB") {
+  const code = String(currency || "RUB").trim().toUpperCase();
+  const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(num(value));
+  if (!/^[A-Z]{3}$/.test(code)) return formatted + " " + code;
+  try {
+    return new Intl.NumberFormat("ru-RU", {
+      style: "currency", currency: code, maximumFractionDigits: 0,
+    }).format(num(value));
+  } catch {
+    return formatted + " " + code;
+  }
 }
 
 function shortDate(value) {
@@ -214,6 +223,8 @@ function scoreDeal(deal, previous) {
   const stageSemanticKnown = semantic === "P" || semantic === "S" || semantic === "F";
   const open = isOpenSemantic(semantic);
   const amount = num(deal.OPPORTUNITY);
+  const currency = String(deal.CURRENCY_ID || "RUB").trim().toUpperCase();
+  const amountIsRub = currency === "RUB";
   const createdAt = deal.DATE_CREATE || deal.BEGINDATE || null;
   const modifiedAt = deal.DATE_MODIFY || null;
   const lastActivityAt = deal.LAST_ACTIVITY_TIME || null;
@@ -235,9 +246,11 @@ function scoreDeal(deal, previous) {
   let prospect = 0;
   if (open && stageSemanticKnown) prospect += 10;
   if (amount > 0) prospect += 15;
-  if (amount >= 50000) prospect += 10;
-  if (amount >= 200000) prospect += 10;
-  if (amount >= 1000000) prospect += 5;
+  // Monetary thresholds are calibrated in RUB. Never compare a foreign-currency
+  // nominal amount to RUB thresholds without an explicit exchange-rate source.
+  if (amountIsRub && amount >= 50000) prospect += 10;
+  if (amountIsRub && amount >= 200000) prospect += 10;
+  if (amountIsRub && amount >= 1000000) prospect += 5;
   if (type) prospect += 10;
   if (/квалифицировано/i.test(qual)) prospect += 20;
   else if (qual) prospect += 8;
@@ -261,14 +274,14 @@ function scoreDeal(deal, previous) {
     else if (dealAge !== null && dealAge > 30) risk += 10;
     if (stageAge !== null && stageAge > 20) risk += 25;
     else if (stageAge !== null && stageAge > 10) risk += 15;
-    if (amount >= 500000) risk += 8;
+    if (amountIsRub && amount >= 500000) risk += 8;
   }
   risk = clamp(risk);
 
   const qualificationIssue = open && (
     (prospect >= 60 && !qual) ||
     (prospect >= 65 && /нужно|не определено/i.test(qual)) ||
-    (amount >= 100000 && !type)
+    (amountIsRub && amount >= 100000 && !type)
   );
 
   let nextStep = "";
@@ -322,10 +335,10 @@ function addAlert(snapshot, previous) {
   };
 
   if (snapshot.semantic === "S" && previous?.semantic !== "S") {
-    push("success", "Сделка успешно закрыта", money(snapshot.amount));
+    push("success", "Сделка успешно закрыта", money(snapshot.amount, snapshot.currency));
   }
   if (snapshot.open && snapshot.prospectScore >= 70 && num(previous?.prospectScore) < 70) {
-    push("prospect", "Перспективная сделка", "Score " + snapshot.prospectScore + " · " + money(snapshot.amount));
+    push("prospect", "Перспективная сделка", "Score " + snapshot.prospectScore + " · " + money(snapshot.amount, snapshot.currency));
   }
   if (snapshot.open && snapshot.riskScore >= 60 && num(previous?.riskScore) < 60) {
     push("risk", "Сделка вошла в красную зону", "Risk " + snapshot.riskScore + " · " + snapshot.nextStep);
@@ -376,7 +389,7 @@ async function snapshotDeal(deal, source = "event") {
     sourceId: String(deal.SOURCE_ID || ""),
     categoryId: String(deal.CATEGORY_ID || "0"),
     stageId: String(deal.STAGE_ID || ""),
-    currency: String(deal.CURRENCY_ID || "RUB"),
+    currency: String(deal.CURRENCY_ID || "RUB").trim().toUpperCase(),
     updatedAt: isoOrNull(incomingVersion) || new Date().toISOString(),
     sourceUpdatedAt: incomingVersion || null,
     observedAt: new Date().toISOString(),
@@ -391,13 +404,15 @@ async function snapshotDeal(deal, source = "event") {
     last.stageId !== row.stageId ||
     last.prospectScore !== row.prospectScore ||
     last.riskScore !== row.riskScore ||
-    num(last.amount) !== row.amount
+    num(last.amount) !== row.amount ||
+    last.currency !== row.currency
   ) {
     history.push({
       at: row.updatedAt,
       stageId: row.stageId,
       stageName: row.stageName,
       amount: row.amount,
+      currency: row.currency,
       prospectScore: row.prospectScore,
       riskScore: row.riskScore,
     });
@@ -406,7 +421,7 @@ async function snapshotDeal(deal, source = "event") {
   row.alerts = addAlert(row, previous);
 
   const changed = !previous || [
-    "title","managerId","sourceId","categoryId","stageId","semantic","stageSemanticKnown","amount","sourceUpdatedAt",
+    "title","managerId","sourceId","categoryId","stageId","semantic","stageSemanticKnown","amount","currency","sourceUpdatedAt",
     "prospectScore","riskScore","qualificationIssue","qualificationStatus",
     "clientType","lastActivityAt","nextActivityAt","hasNext","nextOverdue",
     "stageEnteredAt","nextStep"
@@ -623,11 +638,17 @@ function status() {
   const qualIssues = open.filter(x => x.qualificationIssue);
   const won = all.filter(x => x.semantic === "S");
   const alerts = all
-    .flatMap(x => (x.alerts || []).map(a => ({ ...a, dealId: x.dealId, titleDeal: x.title, manager: x.manager, amount: x.amount })))
+    .flatMap(x => (x.alerts || []).map(a => ({ ...a, dealId: x.dealId, titleDeal: x.title, manager: x.manager, amount: x.amount, currency: x.currency })))
     .sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0))
     .slice(0, 30);
 
-  const sum = rows => rows.reduce((acc, x) => acc + num(x.amount), 0);
+  // Dashboard totals are deliberately RUB-only. Other currencies are shown
+  // per deal and counted separately; no implicit FX conversion is performed.
+  const sumRub = rows => rows.reduce((acc, x) =>
+    acc + (String(x.currency || "").toUpperCase() === "RUB" ? num(x.amount) : 0), 0);
+  const excludedCurrencyCount = rows =>
+    rows.filter(x => String(x.currency || "").toUpperCase() !== "RUB").length;
+  const rubAmount = row => String(row.currency || "").toUpperCase() === "RUB" ? num(row.amount) : -1;
   return {
     service: "topsense-sales-mvp",
     startedAt: SALES.startedAt,
@@ -645,18 +666,25 @@ function status() {
       won: won.length,
     },
     sums: {
-      open: sum(open),
-      prospects: sum(prospects),
-      highProspects: sum(high),
-      risk: sum(risk),
-      won: sum(won),
+      open: sumRub(open),
+      prospects: sumRub(prospects),
+      highProspects: sumRub(high),
+      risk: sumRub(risk),
+      won: sumRub(won),
+    },
+    excludedCurrencyCounts: {
+      open: excludedCurrencyCount(open),
+      prospects: excludedCurrencyCount(prospects),
+      highProspects: excludedCurrencyCount(high),
+      risk: excludedCurrencyCount(risk),
+      won: excludedCurrencyCount(won),
     },
     prospects: prospects
-      .sort((a,b) => b.prospectScore - a.prospectScore || b.amount - a.amount)
+      .sort((a,b) => b.prospectScore - a.prospectScore || rubAmount(b) - rubAmount(a))
       .slice(0, 25),
     attention: open
       .filter(x => x.riskScore >= 45 || !x.hasNext || x.qualificationIssue)
-      .sort((a,b) => b.riskScore - a.riskScore || b.amount - a.amount)
+      .sort((a,b) => b.riskScore - a.riskScore || rubAmount(b) - rubAmount(a))
       .slice(0, 30),
     wins: won.slice(0, 20),
     alerts,
@@ -679,10 +707,12 @@ function html() {
   const syncAge = s.lastSyncAt ? Date.now() - Date.parse(s.lastSyncAt) : Infinity;
   const syncState = s.lastError ? "bad" : !s.lastSyncAt ? "pending" : syncAge <= 5 * 60 * 1000 ? "ok" : "stale";
   const syncLabel = s.lastError ? "Ошибка последней операции" : !s.lastSyncAt ? "Ожидание первой синхронизации" : syncAge <= 5 * 60 * 1000 ? "Синхронизация актуальна" : "Синхронизация устарела";
+  const sumHint = key => money(s.sums[key], "RUB") + " · только RUB" +
+    (s.excludedCurrencyCounts[key] ? " · " + s.excludedCurrencyCounts[key] + " вне суммы" : "");
   const prospectRows = s.prospects.map(x => `<tr>
     <td><a href="${escapeHtml(dealLink(x.dealId))}" target="_blank" rel="noopener">#${escapeHtml(x.dealId)} · ${escapeHtml(x.title)}</a></td>
     <td>${escapeHtml(x.manager)}</td>
-    <td>${money(x.amount)}</td>
+    <td>${money(x.amount, x.currency)}</td>
     <td><span class="score good">${x.prospectScore}</span></td>
     <td>${escapeHtml(x.stageName)}</td>
     <td>${shortDate(x.lastActivityAt)}</td>
@@ -693,7 +723,7 @@ function html() {
   const attentionRows = s.attention.map(x => `<tr>
     <td><a href="${escapeHtml(dealLink(x.dealId))}" target="_blank" rel="noopener">#${escapeHtml(x.dealId)} · ${escapeHtml(x.title)}</a></td>
     <td>${escapeHtml(x.manager)}</td>
-    <td>${money(x.amount)}</td>
+    <td>${money(x.amount, x.currency)}</td>
     <td><span class="score ${x.riskScore >= 60 ? "bad" : "warn"}">${x.riskScore}</span></td>
     <td>${x.hasNext ? "есть" : '<span class="red">нет</span>'}</td>
     <td>${x.qualificationIssue ? '<span class="red">проверить</span>' : "—"}</td>
@@ -702,7 +732,7 @@ function html() {
 
   const alertRows = s.alerts.slice(0,12).map(a => `<div class="alert">
     <span class="dot ${badgeClass(a.type)}"></span>
-    <div><b>${escapeHtml(a.title)}</b><br><a href="${escapeHtml(dealLink(a.dealId))}" target="_blank" rel="noopener">${escapeHtml(a.titleDeal)}</a><br><small>${escapeHtml(a.manager)} · ${money(a.amount)} · ${shortDate(a.at)}</small></div>
+    <div><b>${escapeHtml(a.title)}</b><br><a href="${escapeHtml(dealLink(a.dealId))}" target="_blank" rel="noopener">${escapeHtml(a.titleDeal)}</a><br><small>${escapeHtml(a.manager)} · ${money(a.amount, a.currency)} · ${shortDate(a.at)}</small></div>
   </div>`).join("");
 
   return `<!doctype html>
@@ -721,10 +751,10 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 </style></head><body><div class="wrap">
 <div class="top"><div><h1>TOP-SENS · Sales Control</h1><div class="sub">MVP контроля перспективных и проблемных сделок из Bitrix24</div></div><div class="live ${syncState}">${syncState === "ok" ? "● " : "○ "}${escapeHtml(syncLabel)} · автообновление 20 сек</div></div>
 <div class="cards">
-<div class="card"><div class="k">Открытые</div><div class="v">${s.counts.open}</div><div class="hint">${money(s.sums.open)}</div></div>
-<div class="card"><div class="k">Перспективные</div><div class="v">${s.counts.prospects}</div><div class="hint">${money(s.sums.prospects)}</div></div>
-<div class="card"><div class="k">Горячие ≥75</div><div class="v">${s.counts.highProspects}</div><div class="hint">${money(s.sums.highProspects)}</div></div>
-<div class="card"><div class="k">Красная зона</div><div class="v">${s.counts.risk}</div><div class="hint">${money(s.sums.risk)}</div></div>
+<div class="card"><div class="k">Открытые</div><div class="v">${s.counts.open}</div><div class="hint">${escapeHtml(sumHint("open"))}</div></div>
+<div class="card"><div class="k">Перспективные</div><div class="v">${s.counts.prospects}</div><div class="hint">${escapeHtml(sumHint("prospects"))}</div></div>
+<div class="card"><div class="k">Горячие ≥75</div><div class="v">${s.counts.highProspects}</div><div class="hint">${escapeHtml(sumHint("highProspects"))}</div></div>
+<div class="card"><div class="k">Красная зона</div><div class="v">${s.counts.risk}</div><div class="hint">${escapeHtml(sumHint("risk"))}</div></div>
 <div class="card"><div class="k">Без Next Step</div><div class="v">${s.counts.noNext}</div><div class="hint">нужно назначить действие</div></div>
 <div class="card"><div class="k">Квалификация</div><div class="v">${s.counts.qualificationIssues}</div><div class="hint">нужна проверка</div></div>
 </div>
