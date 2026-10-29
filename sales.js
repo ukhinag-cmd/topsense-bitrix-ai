@@ -260,6 +260,23 @@ function clientType(deal) {
   return String(deal.UF_CRM_AI_CLIENT_TYPE || "").trim();
 }
 
+// A valid REST envelope may still contain a malformed or unrelated deal.
+// Never silently acknowledge a webhook or mark a paginated scan complete
+// if a row lacks a usable ID (or crm.deal.get returned a different deal).
+function validDealId(value) {
+  const id = String(value ?? "").trim();
+  return /^[1-9]\d{0,14}$/.test(id) && Number.isSafeInteger(Number(id));
+}
+
+function validateDealRow(deal, expectedId = null) {
+  if (!deal || typeof deal !== "object" || Array.isArray(deal) ||
+      !validDealId(deal.ID) ||
+      (expectedId !== null && String(deal.ID) !== String(expectedId))) {
+    throw new Error("Invalid Bitrix deal record");
+  }
+  return deal;
+}
+
 function scoreDeal(deal, previous) {
   const semantic = stageSemantic(deal);
   const stageSemanticKnown = semantic === "P" || semantic === "S" || semantic === "F";
@@ -627,9 +644,9 @@ async function loadPersisted() {
 }
 
 async function processDealId(dealId, source = "event") {
-  if (!dealId) return null;
+  if (!validDealId(dealId)) throw new Error("Invalid Bitrix deal ID");
   const deal = await bitrixCall("crm.deal.get", { ID: Number(dealId) });
-  return snapshotDeal(deal, source);
+  return snapshotDeal(validateDealRow(deal, String(dealId)), source);
 }
 
 async function processActivityId(activityId) {
@@ -698,7 +715,7 @@ async function syncRecentDeals(limitPages = 4) {
         throw new Error("Invalid Bitrix deal list response");
       }
       for (const deal of rows) {
-        await snapshotDeal(deal, "sync");
+        await snapshotDeal(validateDealRow(deal), "sync");
       }
 
       pages += 1;
