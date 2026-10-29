@@ -397,25 +397,60 @@ async function snapshotDeal(deal, source = "event") {
   const latestVersion = latest
     ? (Object.prototype.hasOwnProperty.call(latest, "sourceUpdatedAt") ? latest.sourceUpdatedAt : latest.updatedAt)
     : "";
+  let activityOnlyRefresh = false;
   if (latest) {
     // An unversioned or malformed response must never replace an existing row.
     if (!incomingVersion) return latest;
     if (latestVersion) {
       const order = compareBitrixTimestamp(incomingVersion, latestVersion);
-      // Fail closed when versions cannot be compared, and ignore duplicates as
-      // well as stale snapshots so they cannot roll back scores or history.
-      if (order === null || order <= 0) return latest;
+      if (order === 0 && source === "activity") {
+        // An activity can advance the contact timestamp without changing the
+        // deal's DATE_MODIFY. Accept only a strictly newer contact timestamp:
+        // a late activity fetch must not roll back a fresher snapshot.
+        const incomingLast = dateValue(deal.LAST_ACTIVITY_TIME);
+        const currentLast = dateValue(latest.lastActivityAt);
+        if (incomingLast !== null && (currentLast === null || incomingLast > currentLast)) {
+          activityOnlyRefresh = true;
+        } else {
+          return latest;
+        }
+      } else if (order === null || order <= 0) {
+        // Other equal-version, incomparable or stale CRM responses are ignored.
+        return latest;
+      }
     }
   }
 
   const previous = latest || initiallyObserved;
+  if (activityOnlyRefresh) {
+    // Only the activity fields may change at this source version. Preserve
+    // the authoritative deal fields from the existing snapshot, even if the
+    // asynchronous activity fetch returns stale title, amount or stage data.
+    deal = {
+      ID: latest.dealId,
+      TITLE: latest.title,
+      ASSIGNED_BY_ID: latest.managerId,
+      SOURCE_ID: latest.sourceId,
+      CATEGORY_ID: latest.categoryId,
+      STAGE_ID: latest.stageId,
+      STAGE_SEMANTIC_ID: latest.semantic,
+      OPPORTUNITY: latest.amount,
+      CURRENCY_ID: latest.currency,
+      DATE_CREATE: latest.createdAt,
+      DATE_MODIFY: incomingVersion,
+      LAST_ACTIVITY_TIME: deal.LAST_ACTIVITY_TIME,
+      ACTIVITY_TIME: deal.ACTIVITY_TIME ?? deal.NEXT_ACTIVITY_TIME ?? null,
+      UF_CRM_AI_CLIENT_TYPE: latest.clientType,
+      UF_CRM_AI_QUAL_STATUS: latest.qualificationStatus,
+    };
+  }
   const scored = scoreDeal(deal, previous);
   const row = {
     kind: "salesDeal",
     dealId: id,
     title: String(deal.TITLE || ("Сделка #" + id)),
     managerId: String(deal.ASSIGNED_BY_ID || ""),
-    manager,
+    manager: activityOnlyRefresh ? latest.manager : manager,
     sourceId: String(deal.SOURCE_ID || ""),
     categoryId: String(deal.CATEGORY_ID || "0"),
     stageId: String(deal.STAGE_ID || ""),
@@ -438,7 +473,9 @@ async function snapshotDeal(deal, source = "event") {
     last.currency !== row.currency
   ) {
     history.push({
-      at: row.updatedAt,
+      // For an activity-only refresh the CRM DATE_MODIFY is unchanged; use
+      // observation time for this new history entry, not the old deal version.
+      at: activityOnlyRefresh ? row.observedAt : row.updatedAt,
       stageId: row.stageId,
       stageName: row.stageName,
       amount: row.amount,
