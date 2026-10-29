@@ -147,3 +147,113 @@ test('a deal changed during an in-flight history write remains dirty and is pers
   assert.equal(latestRows[0].payload.sourceUpdatedAt, newer.DATE_MODIFY);
   await secondStoreFinished.promise;
 });
+
+test('a persisted startup snapshot cannot roll back a newer webhook received during store load', async t => {
+  const originalSetInterval = global.setInterval;
+  const originalEnvNow = {
+    BITRIX_WEBHOOK_BASE: process.env.BITRIX_WEBHOOK_BASE,
+    GOOGLE_SHEET_STORE_URL: process.env.GOOGLE_SHEET_STORE_URL,
+    GOOGLE_SHEET_STORE_SECRET: process.env.GOOGLE_SHEET_STORE_SECRET,
+  };
+  process.env.BITRIX_WEBHOOK_BASE = 'https://bitrix.example/rest/test/';
+  process.env.GOOGLE_SHEET_STORE_URL = storeUrl;
+  process.env.GOOGLE_SHEET_STORE_SECRET = 'test-store-secret';
+
+  global.setTimeout = (fn, ms, ...args) => {
+    if (ms === 2500 || ms === 5000) return { fn: () => fn(...args), ms };
+    return originalSetTimeout(fn, ms, ...args);
+  };
+  global.setInterval = (fn, ms, ...args) => {
+    if (ms === 120000) return { fn, ms };
+    return originalSetInterval(fn, ms, ...args);
+  };
+
+  t.after(() => {
+    global.fetch = originalFetch;
+    global.setTimeout = originalSetTimeout;
+    global.setInterval = originalSetInterval;
+    for (const [key, value] of Object.entries(originalEnvNow)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const id = '987654321';
+  const newer = {
+    ID: id,
+    TITLE: 'Newer webhook snapshot',
+    ASSIGNED_BY_ID: '7',
+    SOURCE_ID: 'WEB',
+    CATEGORY_ID: '0',
+    STAGE_ID: 'C1:NEW',
+    STAGE_SEMANTIC_ID: 'P',
+    OPPORTUNITY: '1000000',
+    CURRENCY_ID: 'RUB',
+    DATE_CREATE: '2026-10-01T00:00:00Z',
+    DATE_MODIFY: '2026-10-29T00:00:00.200000Z',
+    LAST_ACTIVITY_TIME: '2026-10-29T00:00:00Z',
+    ACTIVITY_TIME: '2026-10-29T01:00:00Z',
+    UF_CRM_AI_CLIENT_TYPE: 'dealer',
+    UF_CRM_AI_QUAL_STATUS: 'Квалифицировано',
+  };
+  const stale = {
+    dealId: id,
+    title: 'Stale persisted snapshot',
+    managerId: '7',
+    manager: 'Old manager',
+    sourceUpdatedAt: '2026-10-29T00:00:00.100000Z',
+    updatedAt: '2026-10-29T00:00:00.100000Z',
+    semantic: 'P',
+    open: true,
+    amount: 1000000,
+    prospectScore: 90,
+    riskScore: 10,
+    hasNext: true,
+    qualificationIssue: false,
+    scoreHistory: [],
+    alerts: [],
+  };
+
+  const loadStarted = deferred();
+  let releaseLoad;
+  global.fetch = async (input, options = {}) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/crm.status.list.json')) {
+      return bitrixResponse([{ STATUS_ID: 'C1:NEW', NAME: 'Новая', SEMANTICS: 'P' }]);
+    }
+    if (url.pathname.endsWith('/crm.deal.get.json')) return bitrixResponse(newer);
+    if (url.pathname.endsWith('/user.get.json')) {
+      return bitrixResponse([{ ID: '7', NAME: 'Current', LAST_NAME: 'Manager' }]);
+    }
+    if (String(input) === storeUrl) {
+      const body = JSON.parse(options.body);
+      if (body.action === 'load') {
+        loadStarted.resolve();
+        return new Promise(resolve => {
+          releaseLoad = () => resolve({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ rows: [{ key: 'sales:deal:' + id, payload: stale }] }),
+          });
+        });
+      }
+      return { ok: true, status: 200, text: async () => '{"ok":true}' };
+    }
+    throw new Error('Unexpected mocked URL: ' + String(input));
+  };
+
+  const starting = sales.start();
+  await loadStarted.promise;
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: id });
+
+  const live = sales.status().prospects.find(item => item.dealId === id);
+  assert.ok(live, 'the live deal should be present before the persisted load finishes');
+  assert.equal(live.title, 'Newer webhook snapshot');
+
+  releaseLoad();
+  await starting;
+
+  const finalRow = sales.status().prospects.find(item => item.dealId === id);
+  assert.equal(finalRow.title, 'Newer webhook snapshot');
+  assert.equal(finalRow.sourceUpdatedAt, newer.DATE_MODIFY);
+});
