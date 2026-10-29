@@ -2,6 +2,10 @@ const SALES = {
   startedAt: new Date().toISOString(),
   lastEventAt: null,
   lastSyncAt: null,
+  // A bounded page scan is incomplete until Bitrix stops returning next.
+  syncPartial: false,
+  syncCursor: 0,
+  syncSince: null,
   lastError: null,
   syncing: false,
   deals: new Map(),
@@ -594,9 +598,12 @@ async function syncRecentDeals(limitPages = 4) {
   if (SALES.syncing) return;
   SALES.syncing = true;
   try {
-    let start = 0;
+    // Continue bounded scans instead of restarting at page zero forever.
+    // Keep the same cutoff throughout the scan, including across timer ticks.
+    const resume = SALES.syncPartial && SALES.syncCursor > 0 && SALES.syncSince;
+    let start = resume ? SALES.syncCursor : 0;
     let pages = 0;
-    const since = new Date(Date.now() - 45 * 86400000).toISOString();
+    const since = resume ? SALES.syncSince : new Date(Date.now() - 45 * 86400000).toISOString();
 
     do {
       const payload = await bitrixRaw("crm.deal.list", {
@@ -638,6 +645,23 @@ async function syncRecentDeals(limitPages = 4) {
       }
     } while (start >= 0 && pages < limitPages);
 
+    if (start >= 0) {
+      // More pages remain; never report a complete/healthy sync yet.
+      SALES.syncPartial = true;
+      SALES.syncCursor = start;
+      SALES.syncSince = since;
+      console.log(JSON.stringify({
+        source: "sales-mvp",
+        action: "sync-partial",
+        pages,
+        nextStart: start,
+        trackedDeals: SALES.deals.size,
+      }));
+      return;
+    }
+    SALES.syncPartial = false;
+    SALES.syncCursor = 0;
+    SALES.syncSince = null;
     SALES.lastSyncAt = new Date().toISOString();
     if (SALES.lastError?.source === "sales-sync") SALES.lastError = null;
     console.log(JSON.stringify({
@@ -740,6 +764,7 @@ function status() {
     startedAt: SALES.startedAt,
     lastEventAt: SALES.lastEventAt,
     lastSyncAt: SALES.lastSyncAt,
+    syncPartial: SALES.syncPartial,
     lastError: SALES.lastError,
     counts: {
       tracked: all.length,
@@ -791,8 +816,8 @@ function dealLink(id) {
 function html() {
   const s = status();
   const syncAge = s.lastSyncAt ? Date.now() - Date.parse(s.lastSyncAt) : Infinity;
-  const syncState = s.lastError ? "bad" : !s.lastSyncAt ? "pending" : syncAge <= 5 * 60 * 1000 ? "ok" : "stale";
-  const syncLabel = s.lastError ? "Ошибка последней операции" : !s.lastSyncAt ? "Ожидание первой синхронизации" : syncAge <= 5 * 60 * 1000 ? "Синхронизация актуальна" : "Синхронизация устарела";
+  const syncState = s.lastError ? "bad" : s.syncPartial ? "partial" : !s.lastSyncAt ? "pending" : syncAge <= 5 * 60 * 1000 ? "ok" : "stale";
+  const syncLabel = s.lastError ? "Ошибка последней операции" : s.syncPartial ? "Частичная синхронизация — загрузка продолжается" : !s.lastSyncAt ? "Ожидание первой синхронизации" : syncAge <= 5 * 60 * 1000 ? "Синхронизация актуальна" : "Синхронизация устарела";
   const sumHint = key => money(s.sums[key], "RUB") + " · только RUB" +
     (s.excludedCurrencyCounts[key] ? " · " + s.excludedCurrencyCounts[key] + " вне суммы" : "");
   const prospectRows = s.prospects.map(x => `<tr>
@@ -827,7 +852,7 @@ function html() {
 <title>TOP-SENS · Sales Control MVP</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,Arial,sans-serif;background:#07111f;color:#e8eef8}*{box-sizing:border-box}
-body{margin:0;background:#07111f}.wrap{padding:18px;max-width:1900px;margin:auto}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.top h1{margin:0;font-size:28px}.sub{color:#8ea0b8;margin-top:5px}.live{padding:7px 10px;border:1px solid #29405d;border-radius:999px;color:#8fd0a7;background:#0f2630;font-size:13px}.live.bad{color:#ff9ea9;background:#321c25;border-color:#5b2a34}.live.pending,.live.stale{color:#b9c4d4;background:#182335;border-color:#35435a}
+body{margin:0;background:#07111f}.wrap{padding:18px;max-width:1900px;margin:auto}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.top h1{margin:0;font-size:28px}.sub{color:#8ea0b8;margin-top:5px}.live{padding:7px 10px;border:1px solid #29405d;border-radius:999px;color:#8fd0a7;background:#0f2630;font-size:13px}.live.bad{color:#ff9ea9;background:#321c25;border-color:#5b2a34}.live.pending,.live.stale,.live.partial{color:#b9c4d4;background:#182335;border-color:#35435a}
 .cards{display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:10px;margin:16px 0}.card{background:#101d30;border:1px solid #21344d;border-radius:13px;padding:14px}.k{color:#8ea0b8;font-size:12px;text-transform:uppercase}.v{font-size:27px;font-weight:800;margin-top:6px}.hint{font-size:12px;color:#9dafc4;margin-top:4px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}.panel{background:#0e1a2b;border:1px solid #21344d;border-radius:13px;padding:12px;margin-bottom:12px}.panel h2{margin:3px 0 10px;font-size:19px}
 table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-align:left;font-size:11px;text-transform:uppercase;border-bottom:1px solid #263a53;padding:8px}td{padding:9px 8px;border-bottom:1px solid #1b2c42;vertical-align:top}a{color:#d8e8ff;text-decoration:none}a:hover{text-decoration:underline}
