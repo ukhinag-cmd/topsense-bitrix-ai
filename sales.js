@@ -577,6 +577,7 @@ async function syncRecentDeals(limitPages = 4) {
     } while (start >= 0 && pages < limitPages);
 
     SALES.lastSyncAt = new Date().toISOString();
+    if (SALES.lastError?.source === "sales-sync") SALES.lastError = null;
     console.log(JSON.stringify({
       source: "sales-mvp",
       action: "sync-ok",
@@ -669,6 +670,9 @@ function dealLink(id) {
 
 function html() {
   const s = status();
+  const syncAge = s.lastSyncAt ? Date.now() - Date.parse(s.lastSyncAt) : Infinity;
+  const syncState = s.lastError ? "bad" : !s.lastSyncAt ? "pending" : syncAge <= 5 * 60 * 1000 ? "ok" : "stale";
+  const syncLabel = s.lastError ? "Ошибка последней операции" : !s.lastSyncAt ? "Ожидание первой синхронизации" : syncAge <= 5 * 60 * 1000 ? "Синхронизация актуальна" : "Синхронизация устарела";
   const prospectRows = s.prospects.map(x => `<tr>
     <td><a href="${escapeHtml(dealLink(x.dealId))}" target="_blank" rel="noopener">#${escapeHtml(x.dealId)} · ${escapeHtml(x.title)}</a></td>
     <td>${escapeHtml(x.manager)}</td>
@@ -701,7 +705,7 @@ function html() {
 <title>TOP-SENS · Sales Control MVP</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,Arial,sans-serif;background:#07111f;color:#e8eef8}*{box-sizing:border-box}
-body{margin:0;background:#07111f}.wrap{padding:18px;max-width:1900px;margin:auto}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.top h1{margin:0;font-size:28px}.sub{color:#8ea0b8;margin-top:5px}.live{padding:7px 10px;border:1px solid #29405d;border-radius:999px;color:#8fd0a7;background:#0f2630;font-size:13px}
+body{margin:0;background:#07111f}.wrap{padding:18px;max-width:1900px;margin:auto}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.top h1{margin:0;font-size:28px}.sub{color:#8ea0b8;margin-top:5px}.live{padding:7px 10px;border:1px solid #29405d;border-radius:999px;color:#8fd0a7;background:#0f2630;font-size:13px}.live.bad{color:#ff9ea9;background:#321c25;border-color:#5b2a34}.live.pending,.live.stale{color:#b9c4d4;background:#182335;border-color:#35435a}
 .cards{display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:10px;margin:16px 0}.card{background:#101d30;border:1px solid #21344d;border-radius:13px;padding:14px}.k{color:#8ea0b8;font-size:12px;text-transform:uppercase}.v{font-size:27px;font-weight:800;margin-top:6px}.hint{font-size:12px;color:#9dafc4;margin-top:4px}
 .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}.panel{background:#0e1a2b;border:1px solid #21344d;border-radius:13px;padding:12px;margin-bottom:12px}.panel h2{margin:3px 0 10px;font-size:19px}
 table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-align:left;font-size:11px;text-transform:uppercase;border-bottom:1px solid #263a53;padding:8px}td{padding:9px 8px;border-bottom:1px solid #1b2c42;vertical-align:top}a{color:#d8e8ff;text-decoration:none}a:hover{text-decoration:underline}
@@ -709,7 +713,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 .red{color:#ff8e9b}.alerts{display:flex;flex-direction:column;gap:7px}.alert{display:flex;gap:9px;padding:9px;border-radius:10px;background:#101f33}.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex:0 0 auto}.dot.ok{background:#44d98b}.dot.bad{background:#ff5f6d}.dot.star{background:#ffd05a}.dot.warn{background:#f2a742}.alert small{color:#8ea0b8}
 .note{font-size:12px;color:#8ea0b8;margin-top:7px}@media(max-width:1200px){.cards{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}@media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:10px}.tablewrap{overflow:auto}table{min-width:900px}}
 </style></head><body><div class="wrap">
-<div class="top"><div><h1>TOP-SENS · Sales Control</h1><div class="sub">MVP контроля перспективных и проблемных сделок из Bitrix24</div></div><div class="live">● данные Bitrix · автообновление 20 сек</div></div>
+<div class="top"><div><h1>TOP-SENS · Sales Control</h1><div class="sub">MVP контроля перспективных и проблемных сделок из Bitrix24</div></div><div class="live ${syncState}">${syncState === "ok" ? "● " : "○ "}${escapeHtml(syncLabel)} · автообновление 20 сек</div></div>
 <div class="cards">
 <div class="card"><div class="k">Открытые</div><div class="v">${s.counts.open}</div><div class="hint">${money(s.sums.open)}</div></div>
 <div class="card"><div class="k">Перспективные</div><div class="v">${s.counts.prospects}</div><div class="hint">${money(s.sums.prospects)}</div></div>
