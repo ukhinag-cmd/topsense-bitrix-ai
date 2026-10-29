@@ -287,8 +287,9 @@ function validateDealRow(deal, expectedId = null) {
 // silently losing a webhook or reading an unrelated deal.
 function validateActivityRow(activity, expectedId) {
   if (!activity || typeof activity !== "object" || Array.isArray(activity) ||
-      (activity.ID != null &&
-       (!validDealId(activity.ID) || String(activity.ID) !== String(expectedId)))) {
+      // Missing ID is not proof that this is the requested activity.
+      // Never follow OWNER_ID for an unidentifiable activity response.
+      !validDealId(activity.ID) || String(activity.ID) !== String(expectedId)) {
     throw new Error("Invalid Bitrix activity record");
   }
   const ownerType = String(activity.OWNER_TYPE_ID ?? "").trim();
