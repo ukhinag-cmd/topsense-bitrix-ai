@@ -70,14 +70,14 @@ test('new scheduled activity updates Next Step at unchanged deal version without
   let dealReads = 0;
   const calls = [];
 
-  global.fetch = async input => {
+  global.fetch = async (input, options = {}) => {
     const path = new URL(String(input)).pathname;
     calls.push(path);
     let result;
     if (path.endsWith('/crm.deal.get.json')) {
       result = versions[Math.min(dealReads++, versions.length - 1)];
     } else if (path.endsWith('/crm.activity.get.json')) {
-      result = { OWNER_TYPE_ID: 2, OWNER_ID: id };
+      result = { ID: JSON.parse(options.body).id, OWNER_TYPE_ID: 2, OWNER_ID: id };
     } else if (path.endsWith('/user.get.json')) {
       result = [{ ID: 7, NAME: 'Sales', LAST_NAME: 'Manager' }];
     } else {
