@@ -320,6 +320,7 @@ function enqueue(companies){
    // The dashboard already fetches the COMPLETE private archive at startup.
    // Give that restore time to populate site profiles, avoiding two simultaneous
    // large JSON responses that have repeatedly exhausted the web heap.
+   // The primary restore has up to 45+60+75 seconds of bounded retries.
    const fallback=setTimeout(()=>{
     if(restored){restoring=false;return;}
     evidenceStore.load().then(map=>{
@@ -337,7 +338,7 @@ function enqueue(companies){
       rows:persistedProfiles.size,buffered:buffered.length}));
      enqueue(buffered);
     });
-   },45000);
+   },210000);
    fallback.unref?.();
   }
   return;
