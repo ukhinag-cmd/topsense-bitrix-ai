@@ -51,13 +51,13 @@ test('same-version activity without next-action fields preserves the scheduled N
     NEXT_ACTIVITY_TIME: '',
   };
   let dealReads = 0;
-  global.fetch = async input => {
+  global.fetch = async (input, options = {}) => {
     const path = new URL(String(input)).pathname;
     let result;
     if (path.endsWith('/crm.deal.get.json')) {
       result = ++dealReads === 1 ? deal : contactOnly;
     } else if (path.endsWith('/crm.activity.get.json')) {
-      result = { OWNER_TYPE_ID: 2, OWNER_ID: id };
+      result = { ID: JSON.parse(options.body).id, OWNER_TYPE_ID: 2, OWNER_ID: id };
     } else {
       throw new Error('Unexpected Bitrix method: ' + path);
     }
