@@ -481,7 +481,21 @@ async function loadPersisted() {
       const key = String(entry?.key || "");
       const row = entry?.payload;
       if (!key.startsWith(SALES_PREFIX) || !row?.dealId) continue;
-      SALES.deals.set(String(row.dealId), row);
+
+      const id = String(row.dealId);
+      const current = SALES.deals.get(id);
+      if (current) {
+        // A webhook can finish while the startup store read is in flight.
+        // Never let an older or incomparable persisted row replace that
+        // in-memory snapshot; only accept a strictly newer, comparable row.
+        const currentVersion = current.sourceUpdatedAt || current.updatedAt;
+        const storedVersion = row.sourceUpdatedAt || row.updatedAt;
+        if (!currentVersion || !storedVersion) continue;
+        const order = compareBitrixTimestamp(storedVersion, currentVersion);
+        if (order === null || order <= 0) continue;
+      }
+
+      SALES.deals.set(id, row);
       count += 1;
     }
     console.log(JSON.stringify({ source: "sales-mvp", action: "store-load-ok", count }));
