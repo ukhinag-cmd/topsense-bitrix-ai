@@ -83,10 +83,16 @@ async function storeRequest(action, rows = null) {
     signal: AbortSignal.timeout(20000),
   });
   const text = await response.text();
-  let payload = {};
-  try { payload = JSON.parse(text); } catch {}
-  if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.error || ("HTTP " + response.status));
+  let payload;
+  try { payload = JSON.parse(text); } catch { throw new Error("Invalid Sales store response"); }
+  // HTTP 200 alone is not an acknowledgement: redirects, login pages or
+  // malformed JSON must never cause pending score history to be discarded.
+  if (!response.ok || !payload || typeof payload !== "object" ||
+      Array.isArray(payload) || payload.ok !== true) {
+    throw new Error(typeof payload?.error === "string" ? payload.error : "Sales store request was not acknowledged");
+  }
+  if (action === "load" && !Array.isArray(payload.rows)) {
+    throw new Error("Invalid Sales store load response");
   }
   return payload;
 }
