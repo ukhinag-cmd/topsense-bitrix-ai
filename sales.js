@@ -398,18 +398,27 @@ async function snapshotDeal(deal, source = "event") {
     ? (Object.prototype.hasOwnProperty.call(latest, "sourceUpdatedAt") ? latest.sourceUpdatedAt : latest.updatedAt)
     : "";
   let activityOnlyRefresh = false;
+  let activityContactAdvanced = false;
+  let activityNextAdvanced = false;
   if (latest) {
     // An unversioned or malformed response must never replace an existing row.
     if (!incomingVersion) return latest;
     if (latestVersion) {
       const order = compareBitrixTimestamp(incomingVersion, latestVersion);
       if (order === 0 && source === "activity") {
-        // An activity can advance the contact timestamp without changing the
-        // deal's DATE_MODIFY. Accept only a strictly newer contact timestamp:
-        // a late activity fetch must not roll back a fresher snapshot.
+        // Bitrix can add a scheduled action without changing the deal's
+        // DATE_MODIFY or last contact. Accept strictly newer contact/next times,
+        // but never regress either field from an out-of-order activity read.
+        // An earlier reschedule needs a newer source version to disambiguate.
         const incomingLast = dateValue(deal.LAST_ACTIVITY_TIME);
         const currentLast = dateValue(latest.lastActivityAt);
-        if (incomingLast !== null && (currentLast === null || incomingLast > currentLast)) {
+        const incomingNext = dateValue(deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME);
+        const currentNext = dateValue(latest.nextActivityAt);
+        activityContactAdvanced = incomingLast !== null &&
+          (currentLast === null || incomingLast > currentLast);
+        activityNextAdvanced = incomingNext !== null &&
+          (currentNext === null || incomingNext > currentNext);
+        if (activityContactAdvanced || activityNextAdvanced) {
           activityOnlyRefresh = true;
         } else {
           return latest;
@@ -438,11 +447,13 @@ async function snapshotDeal(deal, source = "event") {
       CURRENCY_ID: latest.currency,
       DATE_CREATE: latest.createdAt,
       DATE_MODIFY: incomingVersion,
-      LAST_ACTIVITY_TIME: deal.LAST_ACTIVITY_TIME,
-      // A contact-only change at the same DATE_MODIFY is not proof that the
-      // previously scheduled Next Step has been removed. Preserve the known
-      // action when Bitrix omits or blanks both next-activity fields.
-      ACTIVITY_TIME: deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME || latest.nextActivityAt || null,
+      // Scheduled activities do not necessarily imply customer contact.
+      // Preserve the most recent known timestamp if this fetch is stale.
+      LAST_ACTIVITY_TIME: activityContactAdvanced ? deal.LAST_ACTIVITY_TIME : latest.lastActivityAt,
+      // At an unchanged source version only a strictly later scheduled time
+      // can be trusted; blank/older values cannot erase the known Next Step.
+      ACTIVITY_TIME: activityNextAdvanced ?
+        (deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME) : latest.nextActivityAt,
       UF_CRM_AI_CLIENT_TYPE: latest.clientType,
       UF_CRM_AI_QUAL_STATUS: latest.qualificationStatus,
     };
