@@ -59,7 +59,7 @@ test('LAST_ACTIVITY_BY user ID is never scored as an activity timestamp', async 
   const row = sales.status().prospects.find(item => item.dealId === deal.ID);
 
   assert.ok(row, 'the high-potential open deal should appear in the dashboard');
-  assert.equal(row.lastActivityAt, modifiedAt);
-  assert.ok(row.lastActivityAgeDays < 0.001, 'the modified timestamp is recent');
-  assert.ok(row.riskScore < 20, 'a numeric activity-owner ID must not create false inactivity risk');
+  assert.equal(row.lastActivityAt, null, 'record modification is not proof of customer activity');
+  assert.equal(row.lastActivityAgeDays, null, 'an unknown activity timestamp remains unknown');
+  assert.ok(row.riskScore >= 20, 'unknown activity must retain a conservative risk contribution');
 });
