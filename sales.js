@@ -284,6 +284,14 @@ function validateDealRow(deal, expectedId = null) {
       (expectedId !== null && String(deal.ID) !== String(expectedId))) {
     throw new Error("Invalid Bitrix deal record");
   }
+  // DATE_MODIFY is the source-version key for ordering updates and
+  // reconciling CRM reads with persisted history. A missing/blank version
+  // must fail closed even when an otherwise valid deal ID was returned:
+  // treating it as a new deal invents a version, while an existing deal
+  // would silently acknowledge an update that could not be applied.
+  if (typeof deal.DATE_MODIFY !== "string" || !deal.DATE_MODIFY.trim()) {
+    throw new Error("Missing Bitrix deal DATE_MODIFY timestamp");
+  }
   // Source timestamps, unlike planned Next Step dates, are observations of
   // events that already happened. A far-future CRM version would make later
   // legitimate updates look stale; a future contact hides risk indefinitely.
