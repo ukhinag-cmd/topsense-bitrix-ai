@@ -26,6 +26,7 @@ test('bounded Bitrix sync resumes later pages without claiming partial data is c
       queueMicrotask(() => fn(...args));
       return { unref() {} };
     }
+    if (ms === 2500) return { unref() {} };
     return originalSetTimeout(fn, ms, ...args);
   };
   global.setInterval = (fn, ms, ...args) => {
@@ -40,7 +41,20 @@ test('bounded Bitrix sync resumes later pages without claiming partial data is c
     if (path.endsWith('/crm.deal.list.json')) {
       const cursor = JSON.parse(options.body).start;
       cursors.push(cursor);
-      const result = cursor < 200 ? { result: [], next: cursor + 50 } : { result: [] };
+      // Bitrix next advances over actual records, never an empty page.
+      // Populate each bounded page with distinct deals so resume testing
+      // does not rely on an impossible page/cursor combination.
+      const page = Array.from({ length: 50 }, (_, i) => ({
+        ID: String(9940000 + cursor + i),
+        TITLE: 'Deal from page ' + cursor + ' row ' + i,
+        STAGE_ID: 'NEW',
+        STAGE_SEMANTIC_ID: 'P',
+        OPPORTUNITY: '0',
+        CURRENCY_ID: 'RUB',
+        DATE_CREATE: new Date(Date.now() - 86400000).toISOString(),
+        DATE_MODIFY: new Date(Date.now() - 60000).toISOString(),
+      }));
+      const result = cursor < 200 ? { result: page, next: cursor + 50 } : { result: [] };
       return { ok: true, status: 200, json: async () => result };
     }
     throw new Error('Unexpected mocked Bitrix method: ' + path);
