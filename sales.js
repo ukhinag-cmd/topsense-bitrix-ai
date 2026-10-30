@@ -661,6 +661,13 @@ function validPersistedSnapshot(row) {
   const scoreValid = score => typeof score === "number" &&
     Number.isFinite(score) && score >= 0 && score <= 100;
   const record = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  // A poisoned Sheet row with a far-future CRM source version would make
+  // every legitimate crm.deal.get read look stale, freezing the dashboard.
+  // Permit normal clock skew while rejecting impossible persisted versions.
+  const plausibleVersion = value => {
+    const timestamp = dateValue(value);
+    return timestamp !== null && timestamp <= Date.now() + 10 * 60 * 1000;
+  };
 
   if (!record(row) || row.kind !== "salesDeal" ||
       typeof row.title !== "string" || typeof row.manager !== "string" ||
@@ -670,9 +677,9 @@ function validPersistedSnapshot(row) {
       typeof row.hasNext !== "boolean" || typeof row.qualificationIssue !== "boolean" ||
       typeof row.amount !== "number" || !Number.isFinite(row.amount) ||
       !scoreValid(row.prospectScore) || !scoreValid(row.riskScore) ||
-      typeof row.updatedAt !== "string" || dateValue(row.updatedAt) === null ||
+      typeof row.updatedAt !== "string" || !plausibleVersion(row.updatedAt) ||
       (row.sourceUpdatedAt != null &&
-        (typeof row.sourceUpdatedAt !== "string" || dateValue(row.sourceUpdatedAt) === null)) ||
+        (typeof row.sourceUpdatedAt !== "string" || !plausibleVersion(row.sourceUpdatedAt))) ||
       !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
       !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS) {
     return false;
