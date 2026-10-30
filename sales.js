@@ -303,6 +303,19 @@ function validateDealRow(deal, expectedId = null) {
       (expectedId !== null && String(deal.ID) !== String(expectedId))) {
     throw new Error("Invalid Bitrix deal record");
   }
+  // ASSIGNED_BY_ID identifies the accountable manager. A malformed array
+  // such as ['9'] becomes '9' in JavaScript and can attribute a deal to an
+  // unrelated user.get identity. Accept only canonical scalar Bitrix IDs,
+  // while preserving the CRM's empty/zero representations for unassigned.
+  const assignedId = deal.ASSIGNED_BY_ID;
+  if (assignedId != null && assignedId !== "" && assignedId !== false) {
+    const scalar = typeof assignedId === "string" || typeof assignedId === "number";
+    const canonical = String(assignedId) === "0" ||
+      (validDealId(assignedId) && String(assignedId) === String(Number(assignedId)));
+    if (!scalar || !canonical) {
+      throw new Error("Invalid Bitrix deal ASSIGNED_BY_ID");
+    }
+  }
   // Bitrix monetary values are numeric strings (or numbers). Invalid
   // non-empty amounts must not silently become zero via num(): doing so
   // would falsify Prospect/Risk Score, pipeline totals and score history.
