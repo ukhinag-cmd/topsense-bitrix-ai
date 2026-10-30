@@ -328,6 +328,14 @@ function validateDealRow(deal, expectedId = null) {
       throw new Error("Invalid Bitrix deal " + field + " value");
     }
   }
+  // A nonzero deal amount without an explicit currency cannot safely be
+  // treated as RUB. Earlier code defaulted blank/missing CURRENCY_ID to RUB,
+  // which could invent RUB totals and size-based Prospect/Risk Score bonuses.
+  // Keep zero-value deals compatible with Bitrix's optional currency field.
+  if (Number(opportunity || 0) !== 0 &&
+      (typeof deal.CURRENCY_ID !== "string" || !deal.CURRENCY_ID.trim())) {
+    throw new Error("Missing Bitrix deal CURRENCY_ID for nonzero opportunity");
+  }
   // DATE_MODIFY is the source-version key for ordering updates and
   // reconciling CRM reads with persisted history. A missing/blank version
   // must fail closed even when an otherwise valid deal ID was returned:
