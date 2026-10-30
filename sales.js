@@ -85,13 +85,51 @@ async function storeRequest(action, rows = null) {
     secret: String(process.env.GOOGLE_SHEET_STORE_SECRET || "").trim(),
   };
   if (rows) body.rows = rows;
-  const response = await fetch(String(process.env.GOOGLE_SHEET_STORE_URL || "").trim(), {
+  // Fetch automatically repeats a POST (including its JSON secret) after
+  // HTTP 307/308. A compromised store endpoint could redirect that request
+  // to an unrelated host. Follow safe 301/302/303 redirects explicitly as
+  // credential-free GETs (Google Apps Script redirects to googleusercontent).
+  const configuredUrl = new URL(String(process.env.GOOGLE_SHEET_STORE_URL || "").trim());
+  let targetUrl = configuredUrl;
+  let options = {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
-    redirect: "follow",
+    redirect: "manual",
     signal: AbortSignal.timeout(20000),
-  });
+  };
+  let response;
+  for (let hops = 0; hops < 5; hops += 1) {
+    response = await fetch(targetUrl, options);
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    // Never replay the store secret in a POST, even to the same origin.
+    if (response.status === 307 || response.status === 308) {
+      throw new Error("Unsafe Sales store POST redirect blocked");
+    }
+    const location = response.headers?.get?.("location");
+    if (!location) throw new Error("Sales store redirect missing Location");
+    let nextUrl;
+    try { nextUrl = new URL(location, targetUrl); }
+    catch { throw new Error("Invalid Sales store redirect URL"); }
+    const googleScriptRedirect = targetUrl.hostname === "script.google.com" &&
+      nextUrl.hostname === "script.googleusercontent.com";
+    // Avoid using this credentialed integration as an arbitrary URL fetcher.
+    // Google Apps Script is the only accepted cross-origin redirect.
+    if (nextUrl.protocol !== "https:" || nextUrl.username || nextUrl.password ||
+        (nextUrl.origin !== targetUrl.origin && !googleScriptRedirect)) {
+      throw new Error("Untrusted Sales store redirect blocked");
+    }
+    targetUrl = nextUrl;
+    options = {
+      method: "GET",
+      headers: { accept: "application/json" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(20000),
+    };
+  }
+  if ([301, 302, 303, 307, 308].includes(response?.status)) {
+    throw new Error("Sales store redirect limit exceeded");
+  }
   const text = await response.text();
   let payload;
   try { payload = JSON.parse(text); } catch { throw new Error("Invalid Sales store response"); }
