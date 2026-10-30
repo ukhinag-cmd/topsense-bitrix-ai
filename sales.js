@@ -291,7 +291,7 @@ function validateDealRow(deal, expectedId = null) {
   const opportunity = deal.OPPORTUNITY;
   if (opportunity != null && opportunity !== "") {
     const decimal = typeof opportunity === "string" &&
-      /^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+-]?\\d+)?$/i.test(opportunity.trim());
+      /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(opportunity.trim());
     const validAmount = typeof opportunity === "number"
       ? Number.isFinite(opportunity)
       : decimal && Number.isFinite(Number(opportunity.trim()));
