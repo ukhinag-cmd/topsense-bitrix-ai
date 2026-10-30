@@ -930,8 +930,10 @@ async function syncRecentDeals(limitPages = 4) {
         // Bitrix crm.deal.list uses pages of at most 50 records. A cursor
         // that jumps further can silently skip deals and falsely mark the
         // dashboard sync complete once the jumped-to page is exhausted.
+        // Do not skip unseen records when a short/empty Bitrix page claims
+        // a cursor advance larger than the number of rows returned.
         if (!/^[1-9]\d*$/.test(cursorText) || !Number.isSafeInteger(next) ||
-            next <= start || next - start > 50) {
+            next <= start || next - start > 50 || next - start > rows.length) {
           throw new Error("Invalid Bitrix pagination cursor");
         }
         start = next;
