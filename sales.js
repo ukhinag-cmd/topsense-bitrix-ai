@@ -309,6 +309,17 @@ function validateDealRow(deal, expectedId = null) {
       throw new Error("Invalid Bitrix deal " + field + " value");
     }
   }
+  // Bitrix stage and currency fields are single-value strings. If an
+  // intermediary returns ['S'] or ['RUB'], JavaScript string coercion would
+  // otherwise invent a closed-won deal or count foreign money as RUB.
+  // Unlike optional custom fields, false is not a valid stage/currency ID:
+  // treating it as empty can silently default the currency to RUB.
+  for (const field of ["STAGE_ID", "STAGE_SEMANTIC_ID", "CURRENCY_ID"]) {
+    const value = deal[field];
+    if (value != null && typeof value !== "string") {
+      throw new Error("Invalid Bitrix deal " + field + " value");
+    }
+  }
   // DATE_MODIFY is the source-version key for ordering updates and
   // reconciling CRM reads with persisted history. A missing/blank version
   // must fail closed even when an otherwise valid deal ID was returned:
