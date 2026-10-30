@@ -263,7 +263,7 @@ async function managerName(id) {
     // name must never be attributed to the deal's assigned manager.
     const user = Array.isArray(users)
       ? users.find(candidate => candidate && typeof candidate === "object" &&
-          String(candidate.ID ?? "") === key)
+          validDealId(candidate.ID) && String(candidate.ID) === key)
       : null;
     const name = user
       ? [user.NAME, user.LAST_NAME].filter(Boolean).join(" ").trim() || String(user.EMAIL || "").trim()
@@ -293,7 +293,10 @@ function clientType(deal) {
 // Never silently acknowledge a webhook or mark a paginated scan complete
 // if a row lacks a usable ID (or crm.deal.get returned a different deal).
 function validDealId(value) {
-  const id = String(value ?? "").trim();
+  // JSON arrays such as ["42"] stringify to a legitimate-looking CRM ID.
+  // Only canonical scalar IDs can identify a deal, activity or manager.
+  if (typeof value !== "string" && typeof value !== "number") return false;
+  const id = String(value);
   return /^[1-9]\d{0,14}$/.test(id) && Number.isSafeInteger(Number(id));
 }
 
@@ -407,7 +410,9 @@ function validateActivityRow(activity, expectedId) {
       !validDealId(activity.ID) || String(activity.ID) !== String(expectedId)) {
     throw new Error("Invalid Bitrix activity record");
   }
-  const ownerType = String(activity.OWNER_TYPE_ID ?? "").trim();
+  const ownerTypeValue = activity.OWNER_TYPE_ID;
+  const ownerType = (typeof ownerTypeValue === "string" || typeof ownerTypeValue === "number")
+    ? String(ownerTypeValue) : "";
   if (!/^[1-9]\d*$/.test(ownerType) || !Number.isSafeInteger(Number(ownerType))) {
     throw new Error("Invalid Bitrix activity owner type");
   }
@@ -835,7 +840,9 @@ async function loadPersisted() {
       const row = entry?.payload;
       if (!key.startsWith(SALES_PREFIX)) continue;
 
-      const id = String(row?.dealId ?? "");
+      // Validate the raw persisted identity before String() can coerce
+      // an array such as ["42"] into an apparently valid deal key.
+      const id = validDealId(row?.dealId) ? String(row.dealId) : "";
       // Storage records are not authoritative CRM events. Validate their
       // identity AND their score, alert and history shape before hydration.
       // Keep any previously accepted snapshot when a duplicate is corrupt.
