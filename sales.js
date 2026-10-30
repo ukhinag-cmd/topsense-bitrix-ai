@@ -299,6 +299,16 @@ function validateDealRow(deal, expectedId = null) {
       throw new Error("Invalid Bitrix deal OPPORTUNITY amount");
     }
   }
+  // These AI qualification fields are single-value text fields. Coercing
+  // an array such as ["Квалифицировано"] to a string would fabricate an
+  // affirmative qualification and inflate Prospect Score. Bitrix may use
+  // false for an empty custom field; preserve that supported empty value.
+  for (const field of ["UF_CRM_AI_QUAL_STATUS", "UF_CRM_AI_CLIENT_TYPE"]) {
+    const value = deal[field];
+    if (value != null && value !== false && typeof value !== "string") {
+      throw new Error("Invalid Bitrix deal " + field + " value");
+    }
+  }
   // DATE_MODIFY is the source-version key for ordering updates and
   // reconciling CRM reads with persisted history. A missing/blank version
   // must fail closed even when an otherwise valid deal ID was returned:
