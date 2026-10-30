@@ -284,6 +284,19 @@ function validateDealRow(deal, expectedId = null) {
       (expectedId !== null && String(deal.ID) !== String(expectedId))) {
     throw new Error("Invalid Bitrix deal record");
   }
+  // Source timestamps, unlike planned Next Step dates, are observations of
+  // events that already happened. A far-future CRM version would make later
+  // legitimate updates look stale; a future contact hides risk indefinitely.
+  // Allow 10 minutes of clock skew, as for snapshots loaded from the store.
+  const latestPlausible = Date.now() + 10 * 60 * 1000;
+  for (const field of ["DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME"]) {
+    const value = deal[field];
+    if (value == null || value === "") continue;
+    const timestamp = dateValue(value);
+    if (timestamp !== null && timestamp > latestPlausible) {
+      throw new Error("Invalid Bitrix deal " + field + " timestamp");
+    }
+  }
   return deal;
 }
 
