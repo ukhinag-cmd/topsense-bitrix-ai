@@ -327,6 +327,14 @@ async function managerName(id) {
       ? users.find(candidate => candidate && typeof candidate === "object" &&
           validDealId(candidate.ID) && String(candidate.ID) === key)
       : null;
+    // user.get display fields must be scalar strings, just like the user ID.
+    // String coercion otherwise turns ['Impostor'] into a believable manager
+    // name and permanently caches a malformed identity for this manager.
+    // Bitrix may return false/null for an unset text field; keep it empty.
+    if (user && ["NAME", "LAST_NAME", "EMAIL"].some(field =>
+        user[field] != null && user[field] !== false && typeof user[field] !== "string")) {
+      return "#" + key;
+    }
     const name = user
       ? [user.NAME, user.LAST_NAME].filter(Boolean).join(" ").trim() || String(user.EMAIL || "").trim()
       : "";
