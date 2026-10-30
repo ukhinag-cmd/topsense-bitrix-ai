@@ -38,6 +38,7 @@ test('a skipped Bitrix pagination cursor cannot certify an incomplete Sales scan
       queueMicrotask(() => fn(...args));
       return { unref() {} };
     }
+    if (ms === 2500) return { unref() {} };
     return originalSetTimeout(fn, ms, ...args);
   };
   global.setInterval = (fn, ms, ...args) =>
@@ -51,8 +52,20 @@ test('a skipped Bitrix pagination cursor cannot certify an incomplete Sales scan
     if (path.endsWith('/crm.deal.list.json')) {
       const cursor = JSON.parse(options.body).start;
       cursors.push(cursor);
+      // A real Bitrix next: 50 follows a full 50-record page; an empty
+      // page with next would itself be malformed and is tested separately.
+      const page = Array.from({ length: 50 }, (_, i) => ({
+        ID: String(9930000 + i),
+        TITLE: 'CRM pagination fixture ' + i,
+        STAGE_ID: 'NEW',
+        STAGE_SEMANTIC_ID: 'P',
+        OPPORTUNITY: '0',
+        CURRENCY_ID: 'RUB',
+        DATE_CREATE: new Date(Date.now() - 86400000).toISOString(),
+        DATE_MODIFY: new Date(Date.now() - 60000).toISOString(),
+      }));
       const result = cursor === 0
-        ? { result: [], next: mode === 'skip' ? 5000 : 50 }
+        ? { result: mode === 'skip' ? [] : page, next: mode === 'skip' ? 5000 : 50 }
         : { result: [] };
       return { ok: true, status: 200, json: async () => result };
     }
