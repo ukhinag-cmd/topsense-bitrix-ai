@@ -197,6 +197,7 @@ test('a persisted startup snapshot cannot roll back a newer webhook received dur
     UF_CRM_AI_QUAL_STATUS: 'Квалифицировано',
   };
   const stale = {
+    kind: 'salesDeal',
     dealId: id,
     title: 'Stale persisted snapshot',
     managerId: '7',
@@ -204,8 +205,11 @@ test('a persisted startup snapshot cannot roll back a newer webhook received dur
     sourceUpdatedAt: '2026-10-29T00:00:00.100000Z',
     updatedAt: '2026-10-29T00:00:00.100000Z',
     semantic: 'P',
+    stageId: 'C1:NEW',
     open: true,
     amount: 1000000,
+    currency: 'RUB',
+    nextStep: 'Следующее действие запланировано',
     prospectScore: 90,
     riskScore: 10,
     hasNext: true,
