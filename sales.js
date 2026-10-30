@@ -668,6 +668,13 @@ function validPersistedSnapshot(row) {
     const timestamp = dateValue(value);
     return timestamp !== null && timestamp <= Date.now() + 10 * 60 * 1000;
   };
+  // A stored future contact or stage date would make Risk Score look safer
+  // indefinitely; a future alert time suppresses subsequent warnings.
+  // Only planned nextActivityAt may legitimately be in the future.
+  const optionalPastDate = value => value == null ||
+    (typeof value === "string" && plausibleVersion(value));
+  const optionalScheduledDate = value => value == null ||
+    (typeof value === "string" && dateValue(value) !== null);
 
   if (!record(row) || row.kind !== "salesDeal" ||
       typeof row.title !== "string" || typeof row.manager !== "string" ||
@@ -680,6 +687,12 @@ function validPersistedSnapshot(row) {
       typeof row.updatedAt !== "string" || !plausibleVersion(row.updatedAt) ||
       (row.sourceUpdatedAt != null &&
         (typeof row.sourceUpdatedAt !== "string" || !plausibleVersion(row.sourceUpdatedAt))) ||
+      !optionalPastDate(row.createdAt) ||
+      !optionalPastDate(row.modifiedAt) ||
+      !optionalPastDate(row.lastActivityAt) ||
+      !optionalPastDate(row.stageEnteredAt) ||
+      !optionalPastDate(row.observedAt) ||
+      !optionalScheduledDate(row.nextActivityAt) ||
       !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
       !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS) {
     return false;
@@ -689,11 +702,11 @@ function validPersistedSnapshot(row) {
   // unlimited history/alerts can expand the read-only JSON response without
   // bounds. These shapes are exactly what Sales writes on a successful save.
   return row.scoreHistory.every(entry =>
-    record(entry) && typeof entry.at === "string" && dateValue(entry.at) !== null &&
+    record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore)) &&
     row.alerts.every(entry =>
-      record(entry) && typeof entry.at === "string" && dateValue(entry.at) !== null &&
+      record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
       typeof entry.type === "string" && typeof entry.title === "string" &&
       typeof entry.detail === "string");
 }
