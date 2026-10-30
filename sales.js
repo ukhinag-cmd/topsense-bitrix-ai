@@ -89,7 +89,19 @@ async function storeRequest(action, rows = null) {
   // HTTP 307/308. A compromised store endpoint could redirect that request
   // to an unrelated host. Follow safe 301/302/303 redirects explicitly as
   // credential-free GETs (Google Apps Script redirects to googleusercontent).
-  const configuredUrl = new URL(String(process.env.GOOGLE_SHEET_STORE_URL || "").trim());
+  let configuredUrl;
+  try {
+    configuredUrl = new URL(String(process.env.GOOGLE_SHEET_STORE_URL || "").trim());
+  } catch {
+    throw new Error("Invalid Sales store URL");
+  }
+  // The Google Sheet store secret is sent in the initial POST body. Unlike
+  // redirect handling, this first request was not checked for HTTPS and
+  // could disclose the secret if the endpoint was misconfigured as HTTP.
+  // Reject URL userinfo too: credentials must never live in a store URL.
+  if (configuredUrl.protocol !== "https:" || configuredUrl.username || configuredUrl.password) {
+    throw new Error("Insecure Sales store URL");
+  }
   let targetUrl = configuredUrl;
   let options = {
     method: "POST",
