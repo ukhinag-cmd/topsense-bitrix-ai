@@ -927,7 +927,11 @@ async function syncRecentDeals(limitPages = 4) {
       } else {
         const cursorText = String(payload.next).trim();
         const next = Number(cursorText);
-        if (!/^[1-9]\d*$/.test(cursorText) || !Number.isSafeInteger(next) || next <= start) {
+        // Bitrix crm.deal.list uses pages of at most 50 records. A cursor
+        // that jumps further can silently skip deals and falsely mark the
+        // dashboard sync complete once the jumped-to page is exhausted.
+        if (!/^[1-9]\d*$/.test(cursorText) || !Number.isSafeInteger(next) ||
+            next <= start || next - start > 50) {
           throw new Error("Invalid Bitrix pagination cursor");
         }
         start = next;
