@@ -26,6 +26,15 @@ const MAX_ALERTS = 8;
 function bitrixBaseUrl() {
   const raw = String(process.env.BITRIX_WEBHOOK_BASE || "").trim();
   if (!raw) throw new Error("BITRIX_WEBHOOK_BASE is not configured");
+  // A Bitrix outbound webhook embeds its credential in the URL path.
+  // Reject unencrypted or credential-bearing URLs before any CRM read.
+  let base;
+  try { base = new URL(raw); }
+  catch { throw new Error("Invalid Bitrix webhook URL"); }
+  if (base.protocol !== "https:" || base.username || base.password ||
+      base.search || base.hash) {
+    throw new Error("Insecure Bitrix webhook URL");
+  }
   return raw.endsWith("/") ? raw : raw + "/";
 }
 
@@ -52,6 +61,9 @@ async function bitrixRaw(method, params = {}) {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(params),
+    // The Bitrix webhook credential is in the URL path. Do not follow
+    // redirects that might forward CRM data outside the configured origin.
+    redirect: "error",
     signal: AbortSignal.timeout(15000),
   });
   const payload = await response.json().catch(() => ({}));
