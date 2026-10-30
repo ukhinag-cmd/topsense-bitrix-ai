@@ -62,6 +62,13 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     suppliedToken = params.get('auth[application_token]') || params.get('application_token');
   }
 
+  // JSON arrays/objects are never canonical webhook identities or credentials.
+  // String coercion could turn ['941002'] into a valid deal ID, an event-name
+  // array into an allowed event, or [secret] into a matching application token.
+  // Apply the same scalar contract to form and JSON payloads before validation.
+  if (typeof event !== 'string' || typeof suppliedToken !== 'string' ||
+      (typeof entityId !== 'string' && typeof entityId !== 'number')) return null;
+
   const tokenA = Buffer.from(String(suppliedToken || ''), 'utf8');
   const tokenB = Buffer.from(expected, 'utf8');
   if (!tokenA.length || tokenA.length !== tokenB.length || !timingSafeEqual(tokenA, tokenB)) return null;
