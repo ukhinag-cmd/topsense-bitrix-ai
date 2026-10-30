@@ -988,15 +988,16 @@ async function syncRecentDeals(limitPages = 4) {
       if (!Array.isArray(rows)) {
         throw new Error("Invalid Bitrix deal list response");
       }
-      for (const deal of rows) {
-        await snapshotDeal(validateDealRow(deal), "sync");
-      }
-
-      pages += 1;
-      if (payload.next === undefined || payload.next === null) {
-        start = -1;
-      } else {
-        const cursorText = String(payload.next).trim();
+      // Check the entire page before mutating any trusted Sales snapshot.
+      // Otherwise an invalid later row or cursor can leave earlier rows
+      // applied even though the scan correctly reports a sync failure.
+      const validatedRows = rows.map(deal => validateDealRow(deal));
+      let nextStart = -1;
+      if (payload.next !== undefined && payload.next !== null) {
+        // A JSON array such as [1] must not be coerced to a valid cursor.
+        const cursorValue = payload.next;
+        const cursorText = (typeof cursorValue === "string" || typeof cursorValue === "number")
+          ? String(cursorValue).trim() : "";
         const next = Number(cursorText);
         // Bitrix crm.deal.list uses pages of at most 50 records. A cursor
         // that jumps further can silently skip deals and falsely mark the
@@ -1004,11 +1005,17 @@ async function syncRecentDeals(limitPages = 4) {
         // Do not skip unseen records when a short/empty Bitrix page claims
         // a cursor advance larger than the number of rows returned.
         if (!/^[1-9]\d*$/.test(cursorText) || !Number.isSafeInteger(next) ||
-            next <= start || next - start > 50 || next - start > rows.length) {
+            next <= start || next - start > 50 || next - start > validatedRows.length) {
           throw new Error("Invalid Bitrix pagination cursor");
         }
-        start = next;
+        nextStart = next;
       }
+
+      for (const deal of validatedRows) {
+        await snapshotDeal(deal, "sync");
+      }
+      pages += 1;
+      start = nextStart;
 
       if (start >= 0 && pages < limitPages) {
         await new Promise(resolve => setTimeout(resolve, 1400));
