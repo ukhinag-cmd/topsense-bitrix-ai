@@ -292,8 +292,11 @@ function validateDealRow(deal, expectedId = null) {
   for (const field of ["DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME"]) {
     const value = deal[field];
     if (value == null || value === "") continue;
-    const timestamp = dateValue(value);
-    if (timestamp !== null && timestamp > latestPlausible) {
+    const timestamp = typeof value === "string" ? dateValue(value) : null;
+    // An unparseable observed date can silently erase stale-contact risk,
+    // and a malformed DATE_MODIFY can bypass source-version ordering.
+    // Reject malformed fields as well as dates too far in the future.
+    if (timestamp === null || timestamp > latestPlausible) {
       throw new Error("Invalid Bitrix deal " + field + " timestamp");
     }
   }
