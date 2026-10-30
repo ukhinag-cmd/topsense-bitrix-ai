@@ -123,6 +123,20 @@ test('malformed Bitrix qualification and client-type fields cannot fabricate Sal
   assert.equal(updated.scoreHistory.length, trusted.scoreHistory.length + 1);
   assert.equal(sales.status().lastError?.source, 'sales-sync');
 
+  // Bitrix sometimes represents an unset custom field as false. It must
+  // remain a valid empty value, not turn a healthy CRM read into an error.
+  dealResponse = {
+    ...base, DATE_MODIFY: new Date(now + 2000).toISOString(),
+    UF_CRM_AI_CLIENT_TYPE: false, UF_CRM_AI_QUAL_STATUS: false,
+  };
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: id });
+  const empty = sales.status().prospects.find(row => row.dealId === id);
+  assert.ok(empty);
+  assert.equal(empty.clientType, '');
+  assert.equal(empty.qualificationStatus, '');
+  assert.ok(empty.prospectScore < updated.prospectScore);
+  assert.equal(sales.status().lastError?.source, 'sales-sync');
+
   listResponse = { result: [] };
   await scheduledSync();
   assert.ok(sales.status().lastSyncAt);
