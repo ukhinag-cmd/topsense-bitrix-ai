@@ -427,7 +427,7 @@ function validateDealRow(deal, expectedId = null) {
   if (category != null && category !== false && category !== "") {
     const scalar = typeof category === "string" || typeof category === "number";
     const text = scalar ? String(category) : "";
-    if (!/^(0|[1-9]\\d*)$/.test(text) || !Number.isSafeInteger(Number(text))) {
+    if (!/^(0|[1-9][0-9]*)$/.test(text) || !Number.isSafeInteger(Number(text))) {
       throw new Error("Invalid Bitrix deal CATEGORY_ID");
     }
   }
