@@ -284,6 +284,21 @@ function validateDealRow(deal, expectedId = null) {
       (expectedId !== null && String(deal.ID) !== String(expectedId))) {
     throw new Error("Invalid Bitrix deal record");
   }
+  // Bitrix monetary values are numeric strings (or numbers). Invalid
+  // non-empty amounts must not silently become zero via num(): doing so
+  // would falsify Prospect/Risk Score, pipeline totals and score history.
+  // An absent/empty opportunity remains a legitimate zero-value deal.
+  const opportunity = deal.OPPORTUNITY;
+  if (opportunity != null && opportunity !== "") {
+    const decimal = typeof opportunity === "string" &&
+      /^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+-]?\\d+)?$/i.test(opportunity.trim());
+    const validAmount = typeof opportunity === "number"
+      ? Number.isFinite(opportunity)
+      : decimal && Number.isFinite(Number(opportunity.trim()));
+    if (!validAmount) {
+      throw new Error("Invalid Bitrix deal OPPORTUNITY amount");
+    }
+  }
   // DATE_MODIFY is the source-version key for ordering updates and
   // reconciling CRM reads with persisted history. A missing/blank version
   // must fail closed even when an otherwise valid deal ID was returned:
