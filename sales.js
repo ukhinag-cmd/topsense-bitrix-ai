@@ -414,6 +414,23 @@ function validateDealRow(deal, expectedId = null) {
       throw new Error("Invalid Bitrix deal " + field + " value");
     }
   }
+  // Bitrix deal titles, lead sources and pipeline categories are scalar
+  // metadata. Coercing ['WEB'] or ['0'] would forge a believable value and
+  // persist it in the Dashboard/score history. Keep empty Bitrix sentinels.
+  for (const field of ["TITLE", "SOURCE_ID"]) {
+    const value = deal[field];
+    if (value != null && value !== false && typeof value !== "string") {
+      throw new Error("Invalid Bitrix deal " + field + " value");
+    }
+  }
+  const category = deal.CATEGORY_ID;
+  if (category != null && category !== false && category !== "") {
+    const scalar = typeof category === "string" || typeof category === "number";
+    const text = scalar ? String(category) : "";
+    if (!/^(0|[1-9]\\d*)$/.test(text) || !Number.isSafeInteger(Number(text))) {
+      throw new Error("Invalid Bitrix deal CATEGORY_ID");
+    }
+  }
   // Bitrix stage and currency fields are single-value strings. If an
   // intermediary returns ['S'] or ['RUB'], JavaScript string coercion would
   // otherwise invent a closed-won deal or count foreign money as RUB.
