@@ -308,6 +308,16 @@ function validateDealRow(deal, expectedId = null) {
       throw new Error("Invalid Bitrix deal " + field + " timestamp");
     }
   }
+  // Future scheduled actions are legitimate, but a malformed non-empty
+  // activity date would otherwise erase the verified Next Step and inflate
+  // Risk Score. Do not impose the past-observation clock limit on plans.
+  for (const field of ["ACTIVITY_TIME", "NEXT_ACTIVITY_TIME"]) {
+    const value = deal[field];
+    if (value == null || value === "") continue;
+    if (typeof value !== "string" || dateValue(value) === null) {
+      throw new Error("Invalid Bitrix deal " + field + " timestamp");
+    }
+  }
   return deal;
 }
 
