@@ -158,6 +158,17 @@ function compareBitrixTimestamp(left, right) {
   return aa < bb ? -1 : aa > bb ? 1 : 0;
 }
 
+// DATE_MODIFY orders CRM versions, but a delayed CRM update can arrive after
+// an already-recorded time-based score observation. Keep history chronological
+// without changing the authoritative sourceUpdatedAt or inventing CRM changes.
+function chronologicalHistoryAt(candidateAt, previousAt, observedAt = candidateAt) {
+  const previous = dateValue(previousAt);
+  const candidate = dateValue(candidateAt);
+  if (previous === null || (candidate !== null && candidate >= previous)) return candidateAt;
+  const observed = dateValue(observedAt);
+  return observed !== null && observed >= previous ? observedAt : previousAt;
+}
+
 function stageSemantic(deal) {
   const direct = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
   if (direct) return direct;
@@ -652,7 +663,9 @@ async function snapshotDeal(deal, source = "event") {
     history.push({
       // For an activity-only refresh the CRM DATE_MODIFY is unchanged; use
       // observation time for this new history entry, not the old deal version.
-      at: activityOnlyRefresh ? row.observedAt : row.updatedAt,
+      at: chronologicalHistoryAt(
+        activityOnlyRefresh ? row.observedAt : row.updatedAt, last?.at, row.observedAt
+      ),
       stageId: row.stageId,
       stageName: row.stageName,
       amount: row.amount,
@@ -1020,7 +1033,7 @@ function refreshTimedScores() {
     const last = history[history.length - 1];
     if (!last || last.prospectScore !== row.prospectScore || last.riskScore !== row.riskScore) {
       history.push({
-        at: new Date().toISOString(),
+        at: chronologicalHistoryAt(new Date().toISOString(), last?.at),
         stageId: row.stageId,
         stageName: row.stageName,
         amount: row.amount,
