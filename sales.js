@@ -215,6 +215,14 @@ async function loadStages() {
           typeof row.STATUS_ID !== "string" || !row.STATUS_ID.trim()) {
         throw new Error("Invalid Bitrix stage metadata row");
       }
+      // Both metadata fields are single-value strings. An array ['S'] gets
+      // string-coerced into the won semantic by stageSemantic(), and could
+      // falsely close deals when a CRM deal omits STAGE_SEMANTIC_ID.
+      // Validate every row before atomically replacing the stage cache.
+      if ((row.NAME != null && typeof row.NAME !== "string") ||
+          (row.SEMANTICS != null && typeof row.SEMANTICS !== "string")) {
+        throw new Error("Invalid Bitrix stage metadata value");
+      }
       const stageId = row.STATUS_ID.trim();
       if (stages.has(stageId)) throw new Error("Duplicate Bitrix stage metadata ID");
       stages.set(stageId, {
