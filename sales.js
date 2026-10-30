@@ -654,22 +654,63 @@ async function flushDirty() {
   }
 }
 
+// Stored snapshots are useful for continuity, but unlike CRM reads they are
+// not authoritative. A valid sales:deal:<id> key alone cannot guarantee that
+// an older/corrupt Sheet payload is safe to render or use in score totals.
+function validPersistedSnapshot(row) {
+  const scoreValid = score => typeof score === "number" &&
+    Number.isFinite(score) && score >= 0 && score <= 100;
+  const record = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+  if (!record(row) || row.kind !== "salesDeal" ||
+      typeof row.title !== "string" || typeof row.manager !== "string" ||
+      typeof row.stageId !== "string" || typeof row.semantic !== "string" ||
+      typeof row.currency !== "string" || typeof row.nextStep !== "string" ||
+      typeof row.open !== "boolean" || row.open !== isOpenSemantic(row.semantic) ||
+      typeof row.hasNext !== "boolean" || typeof row.qualificationIssue !== "boolean" ||
+      typeof row.amount !== "number" || !Number.isFinite(row.amount) ||
+      !scoreValid(row.prospectScore) || !scoreValid(row.riskScore) ||
+      typeof row.updatedAt !== "string" || dateValue(row.updatedAt) === null ||
+      (row.sourceUpdatedAt != null &&
+        (typeof row.sourceUpdatedAt !== "string" || dateValue(row.sourceUpdatedAt) === null)) ||
+      !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
+      !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS) {
+    return false;
+  }
+
+  // A malformed nested array can otherwise break Dashboard.status(), while
+  // unlimited history/alerts can expand the read-only JSON response without
+  // bounds. These shapes are exactly what Sales writes on a successful save.
+  return row.scoreHistory.every(entry =>
+    record(entry) && typeof entry.at === "string" && dateValue(entry.at) !== null &&
+    typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
+    scoreValid(entry.prospectScore) && scoreValid(entry.riskScore)) &&
+    row.alerts.every(entry =>
+      record(entry) && typeof entry.at === "string" && dateValue(entry.at) !== null &&
+      typeof entry.type === "string" && typeof entry.title === "string" &&
+      typeof entry.detail === "string");
+}
+
 async function loadPersisted() {
   if (!storeConfigured()) return;
   try {
     const payload = await storeRequest("load");
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
     let count = 0;
+    let rejected = 0;
     for (const entry of rows) {
       const key = String(entry?.key || "");
       const row = entry?.payload;
-      if (!key.startsWith(SALES_PREFIX) || !row?.dealId) continue;
+      if (!key.startsWith(SALES_PREFIX)) continue;
 
-      const id = String(row.dealId);
-      // A storage row is not an authoritative CRM event. Reject mismatched
-      // key/payload identities and malformed IDs before hydrating the
-      // dashboard, otherwise a corrupt store row can invent a phantom deal.
-      if (!validDealId(id) || key !== SALES_PREFIX + id) continue;
+      const id = String(row?.dealId ?? "");
+      // Storage records are not authoritative CRM events. Validate their
+      // identity AND their score, alert and history shape before hydration.
+      // Keep any previously accepted snapshot when a duplicate is corrupt.
+      if (!validDealId(id) || key !== SALES_PREFIX + id || !validPersistedSnapshot(row)) {
+        rejected += 1;
+        continue;
+      }
       const current = SALES.deals.get(id);
       if (current) {
         // A webhook can finish while the startup store read is in flight.
@@ -685,7 +726,11 @@ async function loadPersisted() {
       SALES.deals.set(id, row);
       count += 1;
     }
-    console.log(JSON.stringify({ source: "sales-mvp", action: "store-load-ok", count }));
+    console.log(JSON.stringify({ source: "sales-mvp", action: "store-load-ok", count, rejected }));
+    if (rejected) {
+      // Avoid logging potentially sensitive/corrupt row contents.
+      console.warn(JSON.stringify({ source: "sales-mvp", action: "store-load-invalid-rows", rejected }));
+    }
   } catch (error) {
     SALES.lastError = { at: new Date().toISOString(), source: "sales-store-load", message: String(error.message || error) };
     console.warn(JSON.stringify({ source: "sales-mvp", action: "store-load-failed", error: String(error.message || error) }));
