@@ -52,6 +52,7 @@ test('startup rejects malformed stored Sales snapshots without corrupting Dashbo
     lastActivityAt: now.toISOString(),
     nextActivityAt: new Date(now.getTime() + 3600000).toISOString(),
     hasNext: true,
+    nextStep: 'Следующее действие запланировано',
     qualificationIssue: false,
     prospectScore: 80,
     riskScore: 10,
