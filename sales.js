@@ -1046,6 +1046,16 @@ async function syncRecentDeals(limitPages = 4) {
       // Otherwise an invalid later row or cursor can leave earlier rows
       // applied even though the scan correctly reports a sync failure.
       const validatedRows = rows.map(deal => validateDealRow(deal));
+      // Duplicate IDs in one CRM page make its contents ambiguous. Applying
+      // the first row would silently ignore a later conflicting version, yet
+      // a completed scan would be reported as authoritative. Reject the whole
+      // page before changing any cached snapshot.
+      const pageIds = new Set();
+      for (const deal of validatedRows) {
+        const id = String(deal.ID);
+        if (pageIds.has(id)) throw new Error("Duplicate Bitrix deal ID in sync page");
+        pageIds.add(id);
+      }
       let nextStart = -1;
       if (payload.next !== undefined && payload.next !== null) {
         // A JSON array such as [1] must not be coerced to a valid cursor.
