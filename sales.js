@@ -1028,6 +1028,11 @@ async function syncRecentDeals(limitPages = 4) {
   if (SALES.syncing) return;
   SALES.syncing = true;
   try {
+    // A transient failure during startup stage lookup should not leave deal
+    // semantics and stage names unresolved until the next process restart.
+    // Retrying metadata is another read-only CRM call; only a validated
+    // successful lookup can clear the stage health error.
+    if (SALES.lastError?.source === "stages") await loadStages();
     // Continue bounded scans instead of restarting at page zero forever.
     // Keep the same cutoff throughout the scan, including across timer ticks.
     const resume = SALES.syncPartial && SALES.syncCursor > 0 && SALES.syncSince;
