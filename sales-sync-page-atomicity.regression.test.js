@@ -84,6 +84,9 @@ test('a malformed Bitrix sync page never partially replaces verified deal snapsh
   for (const malformed of [
     { result: [updatedDeal], next: 50 },
     { result: [updatedDeal, { ID: 'invalid' }] },
+    // A page with the same deal twice but conflicting source versions is
+    // inconsistent. Do not accept whichever copy happened to appear first.
+    { result: [updatedDeal, { ...originalDeal, DATE_MODIFY: new Date(now - 20000).toISOString() }] },
   ]) {
     listResponse = malformed;
     await scheduledSync();
