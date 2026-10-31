@@ -85,13 +85,23 @@ test('Sales retries a failed read-only stage lookup during sync and repairs cach
   assert.equal(initial.semantic, '');
   assert.equal(initial.sourceUpdatedAt, sourceVersion);
 
+  // A separate event error can replace the single Dashboard health message.
+  // It must not suppress retry of the earlier failed stage metadata lookup.
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: 'invalid' });
+  assert.equal(sales.status().lastError?.source, 'sales-event');
+
   assert.equal(typeof scheduledSync, 'function');
   await scheduledSync();
-  const recovered = sales.status();
+  let recovered = sales.status();
   const row = recovered.prospects.find(x => x.dealId === id);
-  assert.equal(stageReads, 2, 'regular read-only sync must retry the failed stage lookup');
-  assert.equal(recovered.lastError, null, 'successful stage read recovers health');
+  assert.equal(stageReads, 2, 'regular read-only sync must retry even if another error superseded stage health');
+  assert.equal(recovered.lastError?.source, 'sales-event',
+    'recovering stage metadata must not mask an unrelated event error');
   assert.ok(recovered.lastSyncAt);
+
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: id });
+  recovered = sales.status();
+  assert.equal(recovered.lastError, null, 'a valid deal read can then recover event health');
   assert.equal(row.semantic, 'P', 'previously unknown stage should be rescored from verified metadata');
   assert.equal(row.stageSemanticKnown, true);
   assert.equal(row.stageName, 'В работе');
