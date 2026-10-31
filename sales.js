@@ -865,6 +865,12 @@ function validPersistedSnapshot(row) {
   const scoreValid = score => typeof score === "number" &&
     Number.isFinite(score) && score >= 0 && score <= 100;
   const record = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  // Present persisted metadata must match the scalar types emitted by Sales.
+  // An object with a non-callable toString can crash the Dashboard's temporal
+  // refresh, and arrays can spoof a qualification or history label.
+  // Missing optional fields from older snapshots remain supported.
+  const optionalText = value => value == null || typeof value === "string";
+  const optionalFlag = value => value == null || typeof value === "boolean";
   // A poisoned Sheet row with a far-future CRM source version would make
   // every legitimate crm.deal.get read look stale, freezing the dashboard.
   // Permit normal clock skew while rejecting impossible persisted versions.
@@ -898,7 +904,12 @@ function validPersistedSnapshot(row) {
       !optionalPastDate(row.observedAt) ||
       !optionalScheduledDate(row.nextActivityAt) ||
       !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
-      !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS) {
+      !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS ||
+      ["managerId", "sourceId", "categoryId", "stageName",
+        "qualificationStatus", "clientType", "observedFrom"].some(
+        field => !optionalText(row[field])) ||
+      ["stageSemanticKnown", "nextOverdue"].some(
+        field => !optionalFlag(row[field]))) {
     return false;
   }
 
@@ -913,6 +924,7 @@ function validPersistedSnapshot(row) {
     record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
+    ["stageId", "stageName", "currency"].every(field => optionalText(entry[field])) &&
     (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
     row.alerts.every(entry =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
