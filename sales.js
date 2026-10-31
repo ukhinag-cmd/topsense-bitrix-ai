@@ -1310,7 +1310,14 @@ function refreshTimedScores() {
     const scored = scoreDeal(deal, previous);
     // Verified stage labels can change after a metadata retry even when the
     // deal semantic, scores and CRM DATE_MODIFY remain unchanged.
-    const keys = ["prospectScore", "riskScore", "hasNext", "nextOverdue", "qualificationIssue", "nextStep", "stageName"];
+    // JSON dashboard age diagnostics must advance even between scoring
+    // thresholds. Age-only changes still must not append score history:
+    // history below records score changes, not passage of time alone.
+    const keys = [
+      "prospectScore", "riskScore", "hasNext", "nextOverdue",
+      "qualificationIssue", "nextStep", "stageName",
+      "stageAgeDays", "dealAgeDays", "lastActivityAgeDays",
+    ];
     if (keys.every(key => scored[key] === previous[key])) continue;
 
     const row = { ...previous, ...scored };
