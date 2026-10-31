@@ -1202,6 +1202,23 @@ async function syncRecentDeals(limitPages = 4) {
         }
         nextStart = next;
       }
+      // Bitrix crm.deal.list may also return a total match count. A broken
+      // intermediary can drop the next cursor while keeping total > the
+      // number of rows covered by this page. Treating that as the last page
+      // falsely certifies a truncated Dashboard scan as fully synchronized.
+      // Check before applying any page rows, and do not coerce array/object
+      // totals into believable numeric values.
+      if (payload.total !== undefined && payload.total !== null) {
+        const totalValue = payload.total;
+        const totalText = (typeof totalValue === "string" || typeof totalValue === "number")
+          ? String(totalValue).trim() : "";
+        const total = Number(totalText);
+        if (!/^(0|[1-9]\\d*)$/.test(totalText) || !Number.isSafeInteger(total) ||
+            (nextStart < 0 && total > start + validatedRows.length) ||
+            (nextStart >= 0 && nextStart > total)) {
+          throw new Error("Inconsistent Bitrix deal list total or pagination");
+        }
+      }
 
       for (const deal of validatedRows) {
         await snapshotDeal(deal, "sync");
