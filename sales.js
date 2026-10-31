@@ -372,6 +372,10 @@ async function loadStages(categoryId = "0") {
 
 async function ensureStageCategory(categoryId) {
   const category = stageCategoryId(categoryId);
+  // Preserve the original default-pipeline retry cadence: start() and sync
+  // refresh category 0. An event must not retry a failed startup lookup and
+  // hide the stage health error before the scheduled sync can recover it.
+  if (category === "0") return;
   if (!SALES.stageCategoriesLoaded.has(category) || SALES.stageCategoriesPending.has(category)) {
     await loadStages(category);
   }
