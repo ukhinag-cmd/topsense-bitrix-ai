@@ -6,6 +6,8 @@ const SALES = {
   syncPartial: false,
   syncCursor: 0,
   syncSince: null,
+  // Track IDs through every bounded page, including resumed timer ticks.
+  syncSeenIds: new Set(),
   lastError: null,
   // Track failed stage metadata independently of the most recent error.
   // Sync/event/store failures can overwrite lastError before the next retry.
@@ -1044,6 +1046,7 @@ async function syncRecentDeals(limitPages = 4) {
     // Continue bounded scans instead of restarting at page zero forever.
     // Keep the same cutoff throughout the scan, including across timer ticks.
     const resume = SALES.syncPartial && SALES.syncCursor > 0 && SALES.syncSince;
+    const seenIds = resume ? SALES.syncSeenIds : new Set();
     let start = resume ? SALES.syncCursor : 0;
     let pages = 0;
     const since = resume ? SALES.syncSince : new Date(Date.now() - 45 * 86400000).toISOString();
@@ -1079,6 +1082,16 @@ async function syncRecentDeals(limitPages = 4) {
       for (const deal of validatedRows) {
         const id = String(deal.ID);
         if (pageIds.has(id)) throw new Error("Duplicate Bitrix deal ID in sync page");
+        if (seenIds.has(id)) {
+          // A changing offset-based result can repeat an earlier page's deal
+          // and skip a different deal. Never certify that scan as complete.
+          // Restart from page zero on the next tick to avoid a stuck cursor.
+          SALES.syncPartial = false;
+          SALES.syncCursor = 0;
+          SALES.syncSince = null;
+          SALES.syncSeenIds = new Set();
+          throw new Error("Duplicate Bitrix deal ID across sync pages");
+        }
         pageIds.add(id);
       }
       let nextStart = -1;
@@ -1103,6 +1116,10 @@ async function syncRecentDeals(limitPages = 4) {
       for (const deal of validatedRows) {
         await snapshotDeal(deal, "sync");
       }
+      // Commit the page's identities only after it has been fully applied.
+      // Retain these IDs if a bounded scan resumes at a later timer tick.
+      for (const id of pageIds) seenIds.add(id);
+      SALES.syncSeenIds = seenIds;
       pages += 1;
       start = nextStart;
 
@@ -1128,6 +1145,7 @@ async function syncRecentDeals(limitPages = 4) {
     SALES.syncPartial = false;
     SALES.syncCursor = 0;
     SALES.syncSince = null;
+    SALES.syncSeenIds = new Set();
     SALES.lastSyncAt = new Date().toISOString();
     if (SALES.lastError?.source === "sales-sync") SALES.lastError = null;
     console.log(JSON.stringify({
