@@ -1213,7 +1213,7 @@ async function syncRecentDeals(limitPages = 4) {
         const totalText = (typeof totalValue === "string" || typeof totalValue === "number")
           ? String(totalValue).trim() : "";
         const total = Number(totalText);
-        if (!/^(0|[1-9]\\d*)$/.test(totalText) || !Number.isSafeInteger(total) ||
+        if (!/^(0|[1-9]\d*)$/.test(totalText) || !Number.isSafeInteger(total) ||
             (nextStart < 0 && total > start + validatedRows.length) ||
             (nextStart >= 0 && nextStart > total)) {
           throw new Error("Inconsistent Bitrix deal list total or pagination");
