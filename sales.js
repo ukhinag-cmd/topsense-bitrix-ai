@@ -12,6 +12,9 @@ const SALES = {
   // Track failed stage metadata independently of the most recent error.
   // Sync/event/store failures can overwrite lastError before the next retry.
   stageLookupFailed: false,
+  stageCategoriesLoaded: new Set(),
+  stageCategoriesPending: new Set(),
+  stageRequests: new Map(),
   syncing: false,
   deals: new Map(),
   managers: new Map(),
@@ -236,10 +239,19 @@ function chronologicalHistoryAt(candidateAt, previousAt, observedAt = candidateA
   return observed !== null && observed >= previous ? observedAt : previousAt;
 }
 
+function stageCategoryId(value) {
+  return value == null || value === false || value === "" ? "0" : String(value);
+}
+
+function stageKey(categoryId, stageId) {
+  // STATUS_ID is only unique within a deal pipeline, not across pipelines.
+  return stageCategoryId(categoryId) + ":" + String(stageId || "");
+}
+
 function stageSemantic(deal) {
   const direct = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
   if (direct) return direct;
-  const stage = SALES.stages.get(String(deal.STAGE_ID || ""));
+  const stage = SALES.stages.get(stageKey(deal.CATEGORY_ID, deal.STAGE_ID));
   return String(stage?.semantics || "").toUpperCase();
 }
 
@@ -275,10 +287,16 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-async function loadStages() {
+async function loadStagesForCategory(category) {
   try {
+    // Bitrix has one independent stage dictionary per pipeline. Category 0
+    // uses DEAL_STAGE, while every other category uses DEAL_STAGE_<id>.
+    if (!/^(0|[1-9][0-9]*)$/.test(category) || !Number.isSafeInteger(Number(category))) {
+      throw new Error("Invalid Bitrix stage category");
+    }
+    const entityId = category === "0" ? "DEAL_STAGE" : "DEAL_STAGE_" + category;
     const result = await bitrixCall("crm.status.list", {
-      filter: { ENTITY_ID: "DEAL_STAGE" },
+      filter: { ENTITY_ID: entityId },
       order: { SORT: "ASC" },
     });
     // Keep the last known-good stage semantics on partial/malformed reads.
@@ -290,7 +308,8 @@ async function loadStages() {
       // A list may be an array but still contain malformed stage records.
       // Validate every ID before replacing the known-good cache atomically.
       if (!row || typeof row !== "object" || Array.isArray(row) ||
-          typeof row.STATUS_ID !== "string" || !row.STATUS_ID.trim()) {
+          typeof row.STATUS_ID !== "string" || !row.STATUS_ID.trim() ||
+          (row.ENTITY_ID != null && row.ENTITY_ID !== entityId)) {
         throw new Error("Invalid Bitrix stage metadata row");
       }
       // Bitrix deal stages often supply the real semantic in EXTRA.SEMANTICS
@@ -320,12 +339,41 @@ async function loadStages() {
         semantics: shortSemantic || mappedSemantic || "",
       });
     }
-    SALES.stages = stages;
-    SALES.stageLookupFailed = false;
-    if (SALES.lastError?.source === "stages") SALES.lastError = null;
+    // Replace only this pipeline's entries; malformed reads retain every
+    // previously verified dictionary, including other pipelines.
+    const prefix = category + ":";
+    const updated = new Map(
+      [...SALES.stages].filter(([key]) => !key.startsWith(prefix))
+    );
+    for (const [stageId, value] of stages) updated.set(prefix + stageId, value);
+    SALES.stages = updated;
+    SALES.stageCategoriesLoaded.add(category);
+    SALES.stageCategoriesPending.delete(category);
+    SALES.stageLookupFailed = SALES.stageCategoriesPending.size > 0;
+    if (!SALES.stageLookupFailed && SALES.lastError?.source === "stages") SALES.lastError = null;
   } catch (error) {
+    SALES.stageCategoriesPending.add(category);
     SALES.stageLookupFailed = true;
     SALES.lastError = { at: new Date().toISOString(), source: "stages", message: String(error.message || error) };
+  }
+}
+
+async function loadStages(categoryId = "0") {
+  const category = stageCategoryId(categoryId);
+  // Coalesce simultaneous events referring to one previously unseen pipeline.
+  // Otherwise late responses could overwrite the newer verified stage cache.
+  const inFlight = SALES.stageRequests.get(category);
+  if (inFlight) return inFlight;
+  const request = loadStagesForCategory(category);
+  SALES.stageRequests.set(category, request);
+  try { await request; }
+  finally { SALES.stageRequests.delete(category); }
+}
+
+async function ensureStageCategory(categoryId) {
+  const category = stageCategoryId(categoryId);
+  if (!SALES.stageCategoriesLoaded.has(category) || SALES.stageCategoriesPending.has(category)) {
+    await loadStages(category);
   }
 }
 
@@ -615,7 +663,7 @@ function scoreDeal(deal, previous) {
     nextStep = "Следующее действие: " + shortDate(nextActivityAt);
   }
 
-  const stage = SALES.stages.get(stageId);
+  const stage = SALES.stages.get(stageKey(deal.CATEGORY_ID, stageId));
   return {
     semantic,
     stageSemanticKnown,
@@ -1005,7 +1053,9 @@ async function loadPersisted() {
 async function processDealId(dealId, source = "event") {
   if (!validDealId(dealId)) throw new Error("Invalid Bitrix deal ID");
   const deal = await bitrixCall("crm.deal.get", { ID: Number(dealId) });
-  return snapshotDeal(validateDealRow(deal, String(dealId)), source);
+  const verified = validateDealRow(deal, String(dealId));
+  await ensureStageCategory(verified.CATEGORY_ID);
+  return snapshotDeal(verified, source);
 }
 
 async function processActivityId(activityId) {
@@ -1054,7 +1104,9 @@ async function syncRecentDeals(limitPages = 4) {
     // semantics and stage names unresolved until the next process restart.
     // Retrying metadata is another read-only CRM call; only a validated
     // successful lookup can clear the stage health error.
-    if (SALES.stageLookupFailed) await loadStages();
+    if (SALES.stageLookupFailed) {
+      for (const category of [...SALES.stageCategoriesPending]) await loadStages(category);
+    }
     // Continue bounded scans instead of restarting at page zero forever.
     // Keep the same cutoff throughout the scan, including across timer ticks.
     const resume = SALES.syncPartial && SALES.syncCursor > 0 && SALES.syncSince;
@@ -1086,6 +1138,9 @@ async function syncRecentDeals(limitPages = 4) {
       // Otherwise an invalid later row or cursor can leave earlier rows
       // applied even though the scan correctly reports a sync failure.
       const validatedRows = rows.map(deal => validateDealRow(deal));
+      for (const category of new Set(validatedRows.map(deal => stageCategoryId(deal.CATEGORY_ID)))) {
+        await ensureStageCategory(category);
+      }
       // Duplicate IDs in one CRM page make its contents ambiguous. Applying
       // the first row would silently ignore a later conflicting version, yet
       // a completed scan would be reported as authoritative. Reject the whole
