@@ -305,7 +305,8 @@ async function loadStages() {
       }
       const semanticMap = { process: "P", success: "S", failure: "F", apology: "F" };
       const extraSemantic = String(row.EXTRA?.SEMANTICS || "").trim().toLowerCase();
-      const mappedSemantic = extraSemantic ? semanticMap[extraSemantic] : "";
+      const mappedSemantic = Object.prototype.hasOwnProperty.call(semanticMap, extraSemantic)
+        ? semanticMap[extraSemantic] : "";
       const shortSemantic = String(row.SEMANTICS || "").trim().toUpperCase();
       if ((extraSemantic && !mappedSemantic) ||
           (shortSemantic && !["P", "S", "F"].includes(shortSemantic)) ||
