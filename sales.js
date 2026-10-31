@@ -274,7 +274,7 @@ function sourceStageSemanticForRefresh(snapshot) {
 }
 
 function stageSemantic(deal) {
-  const direct = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
+  const direct = String(deal.STAGE_SEMANTIC_ID || "").trim().toUpperCase();
   if (direct) return direct;
   const stage = SALES.stages.get(stageKey(deal.CATEGORY_ID, deal.STAGE_ID));
   return String(stage?.semantics || "").toUpperCase();
@@ -551,6 +551,15 @@ function validateDealRow(deal, expectedId = null) {
     if (value != null && typeof value !== "string") {
       throw new Error("Invalid Bitrix deal " + field + " value");
     }
+  }
+  // A scalar Bitrix semantic must still be a recognized P/S/F outcome.
+  // Otherwise an unknown direct value overrides a verified stage dictionary,
+  // causing false open/risk classification while the sync looks healthy.
+  // Normalize harmless whitespace and casing consistently with scoreDeal.
+  const directSemantic = deal.STAGE_SEMANTIC_ID;
+  if (typeof directSemantic === "string" && directSemantic.trim() &&
+      !["P", "S", "F"].includes(directSemantic.trim().toUpperCase())) {
+    throw new Error("Invalid Bitrix deal STAGE_SEMANTIC_ID");
   }
   // A nonzero deal amount without an explicit currency cannot safely be
   // treated as RUB. Earlier code defaulted blank/missing CURRENCY_ID to RUB,
