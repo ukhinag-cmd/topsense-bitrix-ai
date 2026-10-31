@@ -8,6 +8,9 @@ const SALES = {
   syncSince: null,
   // Track IDs through every bounded page, including resumed timer ticks.
   syncSeenIds: new Set(),
+  // Total from an earlier Bitrix page is a scan-wide invariant. A shrinking
+  // result set can shift offset pages and silently omit a deal.
+  syncExpectedTotal: null,
   lastError: null,
   // Track failed stage metadata independently of the most recent error.
   // Sync/event/store failures can overwrite lastError before the next retry.
@@ -1156,6 +1159,14 @@ async function handleEvent(evt) {
   }
 }
 
+function restartSyncScan() {
+  SALES.syncPartial = false;
+  SALES.syncCursor = 0;
+  SALES.syncSince = null;
+  SALES.syncSeenIds = new Set();
+  SALES.syncExpectedTotal = null;
+}
+
 async function syncRecentDeals(limitPages = 4) {
   if (SALES.syncing) return;
   SALES.syncing = true;
@@ -1177,6 +1188,7 @@ async function syncRecentDeals(limitPages = 4) {
     // Keep the same cutoff throughout the scan, including across timer ticks.
     const resume = SALES.syncPartial && SALES.syncCursor > 0 && SALES.syncSince;
     const seenIds = resume ? SALES.syncSeenIds : new Set();
+    let expectedTotal = resume ? SALES.syncExpectedTotal : null;
     let start = resume ? SALES.syncCursor : 0;
     let pages = 0;
     const since = resume ? SALES.syncSince : new Date(Date.now() - 45 * 86400000).toISOString();
@@ -1219,10 +1231,7 @@ async function syncRecentDeals(limitPages = 4) {
           // A changing offset-based result can repeat an earlier page's deal
           // and skip a different deal. Never certify that scan as complete.
           // Restart from page zero on the next tick to avoid a stuck cursor.
-          SALES.syncPartial = false;
-          SALES.syncCursor = 0;
-          SALES.syncSince = null;
-          SALES.syncSeenIds = new Set();
+          restartSyncScan();
           throw new Error("Duplicate Bitrix deal ID across sync pages");
         }
         pageIds.add(id);
@@ -1252,6 +1261,7 @@ async function syncRecentDeals(limitPages = 4) {
       // falsely certifies a truncated Dashboard scan as fully synchronized.
       // Check before applying any page rows, and do not coerce array/object
       // totals into believable numeric values.
+      let observedTotal = null;
       if (payload.total !== undefined && payload.total !== null) {
         const totalValue = payload.total;
         const totalText = (typeof totalValue === "string" || typeof totalValue === "number")
@@ -1267,6 +1277,26 @@ async function syncRecentDeals(limitPages = 4) {
             (nextStart >= 0 && nextStart > total)) {
           throw new Error("Inconsistent Bitrix deal list total or pagination");
         }
+        observedTotal = total;
+      }
+      // The cursor and total of one page may be internally consistent even
+      // when the underlying offset-based result set shrank between requests.
+      // That can skip a previously unseen deal, then report a false complete
+      // scan. Keep the first verified total through bounded/resumed scans.
+      if (observedTotal !== null) {
+        if (expectedTotal !== null && observedTotal !== expectedTotal) {
+          restartSyncScan();
+          throw new Error("Bitrix deal list total changed during pagination");
+        }
+        expectedTotal = observedTotal;
+      }
+      // A later page may omit total. It cannot override an earlier promise
+      // that more records exist, even if its own next cursor is missing.
+      if (expectedTotal !== null &&
+          ((nextStart < 0 && start + validatedRows.length !== expectedTotal) ||
+           (nextStart >= 0 && nextStart > expectedTotal))) {
+        restartSyncScan();
+        throw new Error("Bitrix deal list pagination omitted previously announced deals");
       }
 
       for (const deal of validatedRows) {
@@ -1276,6 +1306,7 @@ async function syncRecentDeals(limitPages = 4) {
       // Retain these IDs if a bounded scan resumes at a later timer tick.
       for (const id of pageIds) seenIds.add(id);
       SALES.syncSeenIds = seenIds;
+      SALES.syncExpectedTotal = expectedTotal;
       pages += 1;
       start = nextStart;
 
@@ -1298,10 +1329,7 @@ async function syncRecentDeals(limitPages = 4) {
       }));
       return;
     }
-    SALES.syncPartial = false;
-    SALES.syncCursor = 0;
-    SALES.syncSince = null;
-    SALES.syncSeenIds = new Set();
+    restartSyncScan();
     SALES.lastSyncAt = new Date().toISOString();
     if (SALES.lastError?.source === "sales-sync") SALES.lastError = null;
     console.log(JSON.stringify({
