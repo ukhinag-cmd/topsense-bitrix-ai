@@ -102,4 +102,14 @@ test('Bitrix deal stage EXTRA.SEMANTICS determines open, won and lost status wit
   assert.equal(protectedState.counts.open, 1);
   assert.equal(protectedState.counts.won, 1);
   assert.equal(protectedState.wins[0].stageName, 'Успешно');
+
+  // An inherited property name must not resolve through Object.prototype
+  // and become a false, non-string stage semantic.
+  stageRows = [
+    { STATUS_ID: 'NEW', NAME: 'Spoofed', SEMANTICS: null, EXTRA: { SEMANTICS: 'constructor' } },
+  ];
+  await sales.start();
+  assert.equal(sales.status().lastError?.source, 'stages');
+  assert.equal(sales.status().counts.open, 1);
+  assert.equal(sales.status().counts.won, 1);
 });
