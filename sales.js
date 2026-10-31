@@ -905,10 +905,15 @@ function validPersistedSnapshot(row) {
   // A malformed nested array can otherwise break Dashboard.status(), while
   // unlimited history/alerts can expand the read-only JSON response without
   // bounds. These shapes are exactly what Sales writes on a successful save.
-  return row.scoreHistory.every(entry =>
+  // The append path assumes the final history entry is the newest one.
+  // A store row with otherwise plausible, but out-of-order, timestamps can
+  // break the score timeline after the next webhook or temporal refresh.
+  // Preserve equal-millisecond observations; reject reversed sequences.
+  return row.scoreHistory.every((entry, index) =>
     record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
-    scoreValid(entry.prospectScore) && scoreValid(entry.riskScore)) &&
+    scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
+    (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
     row.alerts.every(entry =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
       typeof entry.type === "string" && typeof entry.title === "string" &&
