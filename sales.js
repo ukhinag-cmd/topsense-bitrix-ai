@@ -521,7 +521,10 @@ function scoreDeal(deal, previous) {
   const amount = num(deal.OPPORTUNITY);
   const currency = String(deal.CURRENCY_ID || "RUB").trim().toUpperCase();
   const amountIsRub = currency === "RUB";
-  const createdAt = deal.DATE_CREATE || deal.BEGINDATE || null;
+  // DATE_CREATE is the authoritative CRM creation timestamp. BEGINDATE is
+  // the separately planned start date, not proof of when this deal existed.
+  // Falling back to a historical BEGINDATE falsely adds deal-age Risk Score.
+  const createdAt = deal.DATE_CREATE || null;
   const modifiedAt = deal.DATE_MODIFY || null;
   const lastActivityAt = deal.LAST_ACTIVITY_TIME || null;
   const nextActivityAt = deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME || null;
