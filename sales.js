@@ -879,6 +879,9 @@ async function snapshotDeal(deal, source = "event") {
   if (
     !last ||
     last.stageId !== row.stageId ||
+    // Closed-won and closed-lost outcomes may have identical score values
+    // and the same stage ID. Losing such a transition corrupts audit history.
+    (previous && previous.semantic !== row.semantic) ||
     // Record a pipeline move even when stage ID, amount and scores are equal.
     // Previous snapshots may lack categoryId, so keep them compatible.
     (previous?.categoryId != null && previous.categoryId !== row.categoryId) ||
@@ -895,6 +898,7 @@ async function snapshotDeal(deal, source = "event") {
       ),
       categoryId: row.categoryId,
       stageId: row.stageId,
+      semantic: row.semantic,
       stageName: row.stageName,
       amount: row.amount,
       currency: row.currency,
@@ -1048,6 +1052,9 @@ function validPersistedSnapshot(row) {
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
     ["categoryId", "stageId", "stageName", "currency"].every(field => optionalText(entry[field])) &&
+    // Old snapshots have no history semantic; accept them without adding
+    // synthetic entries on the next refresh.
+    (entry.semantic == null || ["P", "S", "F"].includes(entry.semantic)) &&
     (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
     row.alerts.every(entry =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
@@ -1358,6 +1365,7 @@ function refreshTimedScores() {
     const keys = [
       "prospectScore", "riskScore", "hasNext", "nextOverdue",
       "qualificationIssue", "nextStep", "stageName",
+      "semantic", "open", "stageSemanticKnown",
       "stageAgeDays", "dealAgeDays", "lastActivityAgeDays",
     ];
     if (keys.every(key => scored[key] === previous[key])) continue;
@@ -1365,11 +1373,13 @@ function refreshTimedScores() {
     const row = { ...previous, ...scored };
     const history = Array.isArray(previous.scoreHistory) ? previous.scoreHistory.slice(-MAX_HISTORY) : [];
     const last = history[history.length - 1];
-    if (!last || last.prospectScore !== row.prospectScore || last.riskScore !== row.riskScore) {
+    if (!last || previous.semantic !== row.semantic ||
+        last.prospectScore !== row.prospectScore || last.riskScore !== row.riskScore) {
       history.push({
         at: chronologicalHistoryAt(new Date().toISOString(), last?.at),
         categoryId: row.categoryId,
         stageId: row.stageId,
+        semantic: row.semantic,
         stageName: row.stageName,
         amount: row.amount,
         currency: row.currency,
