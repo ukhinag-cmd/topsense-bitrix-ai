@@ -1028,6 +1028,16 @@ function validPersistedSnapshot(row) {
   if (!record(row) || row.kind !== "salesDeal" ||
       typeof row.title !== "string" || typeof row.manager !== "string" ||
       typeof row.stageId !== "string" || typeof row.semantic !== "string" ||
+      // Only P/S/F are recognized Bitrix outcomes. An empty semantic is
+      // legitimate until stage metadata is verified; arbitrary persisted
+      // values must not be treated as a valid open/closed classification.
+      !["", "P", "S", "F"].includes(row.semantic) ||
+      (row.sourceStageSemantic != null &&
+        !["", "P", "S", "F"].includes(row.sourceStageSemantic)) ||
+      // The known flag is derived, not an independent source of truth.
+      // Preserve older snapshots that do not carry this optional field.
+      (row.stageSemanticKnown != null &&
+        row.stageSemanticKnown !== (row.semantic !== "")) ||
       typeof row.currency !== "string" || typeof row.nextStep !== "string" ||
       typeof row.open !== "boolean" || row.open !== isOpenSemantic(row.semantic) ||
       typeof row.hasNext !== "boolean" || typeof row.qualificationIssue !== "boolean" ||
