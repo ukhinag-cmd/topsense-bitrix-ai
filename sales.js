@@ -1176,7 +1176,9 @@ function refreshTimedScores() {
       UF_CRM_AI_CLIENT_TYPE: previous.clientType,
     };
     const scored = scoreDeal(deal, previous);
-    const keys = ["prospectScore", "riskScore", "hasNext", "nextOverdue", "qualificationIssue", "nextStep"];
+    // Verified stage labels can change after a metadata retry even when the
+    // deal semantic, scores and CRM DATE_MODIFY remain unchanged.
+    const keys = ["prospectScore", "riskScore", "hasNext", "nextOverdue", "qualificationIssue", "nextStep", "stageName"];
     if (keys.every(key => scored[key] === previous[key])) continue;
 
     const row = { ...previous, ...scored };
