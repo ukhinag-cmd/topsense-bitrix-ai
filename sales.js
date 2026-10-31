@@ -1243,6 +1243,11 @@ async function syncRecentDeals(limitPages = 4) {
           ? String(totalValue).trim() : "";
         const total = Number(totalText);
         if (!/^(0|[1-9]\d*)$/.test(totalText) || !Number.isSafeInteger(total) ||
+            // The reported total cannot be smaller than the number of records
+            // already covered by this page, even when next is absent.
+            // Otherwise a contradictory total:0 + one deal is accepted as
+            // complete and applied to a supposedly healthy Dashboard.
+            total < start + validatedRows.length ||
             (nextStart < 0 && total > start + validatedRows.length) ||
             (nextStart >= 0 && nextStart > total)) {
           throw new Error("Inconsistent Bitrix deal list total or pagination");
