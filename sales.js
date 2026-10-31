@@ -608,7 +608,13 @@ function scoreDeal(deal, previous) {
   const nowIso = new Date().toISOString();
 
   let stageEnteredAt = previous?.stageEnteredAt || deal.DATE_MODIFY || deal.DATE_CREATE || nowIso;
-  if (previous && previous.stageId !== stageId) stageEnteredAt = nowIso;
+  // Pipeline IDs scope stage IDs: moving between pipelines counts as
+  // entering a new stage even when both pipelines call that stage "NEW".
+  // Otherwise stale stage age can add 15-25 phantom Risk Score points.
+  if (previous && (previous.stageId !== stageId ||
+      (previous.categoryId != null && previous.categoryId !== stageCategoryId(deal.CATEGORY_ID)))) {
+    stageEnteredAt = nowIso;
+  }
   const stageAge = daysSince(stageEnteredAt);
 
   let prospect = 0;
@@ -834,6 +840,9 @@ async function snapshotDeal(deal, source = "event") {
   if (
     !last ||
     last.stageId !== row.stageId ||
+    // Record a pipeline move even when stage ID, amount and scores are equal.
+    // Previous snapshots may lack categoryId, so keep them compatible.
+    (previous?.categoryId != null && previous.categoryId !== row.categoryId) ||
     last.prospectScore !== row.prospectScore ||
     last.riskScore !== row.riskScore ||
     num(last.amount) !== row.amount ||
@@ -845,6 +854,7 @@ async function snapshotDeal(deal, source = "event") {
       at: chronologicalHistoryAt(
         activityOnlyRefresh ? row.observedAt : row.updatedAt, last?.at, row.observedAt
       ),
+      categoryId: row.categoryId,
       stageId: row.stageId,
       stageName: row.stageName,
       amount: row.amount,
@@ -998,7 +1008,7 @@ function validPersistedSnapshot(row) {
     record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
-    ["stageId", "stageName", "currency"].every(field => optionalText(entry[field])) &&
+    ["categoryId", "stageId", "stageName", "currency"].every(field => optionalText(entry[field])) &&
     (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
     row.alerts.every(entry =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
@@ -1283,6 +1293,7 @@ function refreshTimedScores() {
     if (!last || last.prospectScore !== row.prospectScore || last.riskScore !== row.riskScore) {
       history.push({
         at: chronologicalHistoryAt(new Date().toISOString(), last?.at),
+        categoryId: row.categoryId,
         stageId: row.stageId,
         stageName: row.stageName,
         amount: row.amount,
