@@ -1204,7 +1204,10 @@ async function syncRecentDeals(limitPages = 4) {
 
     do {
       const payload = await bitrixRaw("crm.deal.list", {
-        order: { DATE_MODIFY: "DESC" },
+        // DATE_MODIFY ties are common during bulk CRM updates. Offset pages
+        // need a unique secondary key or equal-timestamp deals can swap
+        // order across requests, causing an overlap and missing records.
+        order: { DATE_MODIFY: "DESC", ID: "DESC" },
         filter: { ">DATE_MODIFY": since },
         select: [
           "ID","TITLE","ASSIGNED_BY_ID","SOURCE_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID",
