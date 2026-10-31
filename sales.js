@@ -16,6 +16,8 @@ const SALES = {
   // of one operation cannot falsely certify incomplete stage metadata.
   stageErrors: new Map(),
   stageCategoriesLoaded: new Set(),
+  // Successful dictionaries also become stale when an admin edits a pipeline.
+  stageLoadedAt: new Map(),
   stageCategoriesPending: new Set(),
   stageRequests: new Map(),
   syncing: false,
@@ -33,6 +35,9 @@ const SALES = {
 const SALES_PREFIX = "sales:deal:";
 const MAX_HISTORY = 40;
 const MAX_ALERTS = 8;
+// Bitrix stage edits do not necessarily update any deal's DATE_MODIFY.
+// Poll successful dictionaries periodically rather than freezing them forever.
+const STAGE_CACHE_TTL_MS = 30 * 60 * 1000;
 
 function bitrixBaseUrl() {
   const raw = String(process.env.BITRIX_WEBHOOK_BASE || "").trim();
@@ -365,6 +370,7 @@ async function loadStagesForCategory(category) {
     for (const [stageId, value] of stages) updated.set(prefix + stageId, value);
     SALES.stages = updated;
     SALES.stageCategoriesLoaded.add(category);
+    SALES.stageLoadedAt.set(category, Date.now());
     SALES.stageCategoriesPending.delete(category);
     SALES.stageErrors.delete(category);
     SALES.stageLookupFailed = SALES.stageCategoriesPending.size > 0;
@@ -1140,13 +1146,19 @@ async function syncRecentDeals(limitPages = 4) {
   if (SALES.syncing) return;
   SALES.syncing = true;
   try {
-    // A transient failure during startup stage lookup should not leave deal
-    // semantics and stage names unresolved until the next process restart.
-    // Retrying metadata is another read-only CRM call; only a validated
-    // successful lookup can clear the stage health error.
-    if (SALES.stageLookupFailed) {
-      for (const category of [...SALES.stageCategoriesPending]) await loadStages(category);
+    // Failed dictionaries need retry; successful dictionaries must also
+    // expire. Bitrix admins can rename a stage or change its semantics
+    // without any deal webhook or DATE_MODIFY change. Refreshing every loaded
+    // pipeline on a bounded cadence avoids permanent stale scoring while
+    // retaining the last known-good cache if a read is malformed.
+    const categoriesToRefresh = new Set(SALES.stageCategoriesPending);
+    for (const category of SALES.stageCategoriesLoaded) {
+      const loadedAt = SALES.stageLoadedAt.get(category);
+      if (!Number.isFinite(loadedAt) || Date.now() - loadedAt >= STAGE_CACHE_TTL_MS) {
+        categoriesToRefresh.add(category);
+      }
     }
+    for (const category of categoriesToRefresh) await loadStages(category);
     // Continue bounded scans instead of restarting at page zero forever.
     // Keep the same cutoff throughout the scan, including across timer ticks.
     const resume = SALES.syncPartial && SALES.syncCursor > 0 && SALES.syncSince;
