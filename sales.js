@@ -1256,6 +1256,10 @@ function refreshTimedScores() {
   for (const [id, previous] of SALES.deals) {
     if (!previous || !previous.dealId) continue;
     const deal = {
+      // Re-scoring must use the original deal pipeline. Without CATEGORY_ID,
+      // a non-default pipeline can silently inherit a same-named default
+      // stage, producing a phantom won deal on every Dashboard refresh.
+      CATEGORY_ID: previous.categoryId,
       STAGE_SEMANTIC_ID: previous.semantic,
       STAGE_ID: previous.stageId,
       OPPORTUNITY: previous.amount,
