@@ -251,6 +251,20 @@ function stageKey(categoryId, stageId) {
   return stageCategoryId(categoryId) + ":" + String(stageId || "");
 }
 
+// Keep the CRM's directly supplied semantic separate from a value inferred
+// from the stage dictionary. Reusing the inferred result as a direct field
+// freezes a deal's outcome after a verified stage dictionary correction.
+function sourceStageSemanticForRefresh(snapshot) {
+  if (typeof snapshot.sourceStageSemantic === "string") {
+    return snapshot.sourceStageSemantic;
+  }
+  // Older persisted snapshots predate sourceStageSemantic. Prefer a verified
+  // dictionary when available; otherwise retain the last known classification
+  // until the next read-only CRM synchronization supplies provenance.
+  return SALES.stages.has(stageKey(snapshot.categoryId, snapshot.stageId))
+    ? "" : snapshot.semantic;
+}
+
 function stageSemantic(deal) {
   const direct = String(deal.STAGE_SEMANTIC_ID || "").toUpperCase();
   if (direct) return direct;
@@ -810,7 +824,7 @@ async function snapshotDeal(deal, source = "event") {
       SOURCE_ID: latest.sourceId,
       CATEGORY_ID: latest.categoryId,
       STAGE_ID: latest.stageId,
-      STAGE_SEMANTIC_ID: latest.semantic,
+      STAGE_SEMANTIC_ID: sourceStageSemanticForRefresh(latest),
       OPPORTUNITY: latest.amount,
       CURRENCY_ID: latest.currency,
       DATE_CREATE: latest.createdAt,
@@ -836,6 +850,9 @@ async function snapshotDeal(deal, source = "event") {
     sourceId: String(deal.SOURCE_ID || ""),
     categoryId: String(deal.CATEGORY_ID || "0"),
     stageId: String(deal.STAGE_ID || ""),
+    // An absent direct semantic must stay absent across temporal re-scoring:
+    // the authoritative pipeline stage dictionary may later be corrected.
+    sourceStageSemantic: String(deal.STAGE_SEMANTIC_ID || "").trim().toUpperCase(),
     currency: String(deal.CURRENCY_ID || "RUB").trim().toUpperCase(),
     updatedAt: isoOrNull(incomingVersion) || new Date().toISOString(),
     sourceUpdatedAt: incomingVersion || null,
@@ -876,7 +893,7 @@ async function snapshotDeal(deal, source = "event") {
   row.alerts = addAlert(row, previous);
 
   const changed = !previous || [
-    "title","managerId","sourceId","categoryId","stageId","semantic","stageSemanticKnown","amount","currency","sourceUpdatedAt",
+    "title","managerId","sourceId","categoryId","stageId","semantic","sourceStageSemantic","stageSemanticKnown","amount","currency","sourceUpdatedAt",
     "prospectScore","riskScore","qualificationIssue","qualificationStatus",
     "clientType","lastActivityAt","nextActivityAt","hasNext","nextOverdue",
     "stageEnteredAt","nextStep"
@@ -999,7 +1016,7 @@ function validPersistedSnapshot(row) {
       !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
       !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS ||
       ["managerId", "sourceId", "categoryId", "stageName",
-        "qualificationStatus", "clientType", "observedFrom"].some(
+        "sourceStageSemantic", "qualificationStatus", "clientType", "observedFrom"].some(
         field => !optionalText(row[field])) ||
       ["stageSemanticKnown", "nextOverdue"].some(
         field => !optionalFlag(row[field]))) {
@@ -1296,7 +1313,7 @@ function refreshTimedScores() {
       // a non-default pipeline can silently inherit a same-named default
       // stage, producing a phantom won deal on every Dashboard refresh.
       CATEGORY_ID: previous.categoryId,
-      STAGE_SEMANTIC_ID: previous.semantic,
+      STAGE_SEMANTIC_ID: sourceStageSemanticForRefresh(previous),
       STAGE_ID: previous.stageId,
       OPPORTUNITY: previous.amount,
       CURRENCY_ID: previous.currency,
