@@ -7,6 +7,9 @@ const SALES = {
   syncCursor: 0,
   syncSince: null,
   lastError: null,
+  // Track failed stage metadata independently of the most recent error.
+  // Sync/event/store failures can overwrite lastError before the next retry.
+  stageLookupFailed: false,
   syncing: false,
   deals: new Map(),
   managers: new Map(),
@@ -304,8 +307,10 @@ async function loadStages() {
       });
     }
     SALES.stages = stages;
+    SALES.stageLookupFailed = false;
     if (SALES.lastError?.source === "stages") SALES.lastError = null;
   } catch (error) {
+    SALES.stageLookupFailed = true;
     SALES.lastError = { at: new Date().toISOString(), source: "stages", message: String(error.message || error) };
   }
 }
@@ -1032,7 +1037,7 @@ async function syncRecentDeals(limitPages = 4) {
     // semantics and stage names unresolved until the next process restart.
     // Retrying metadata is another read-only CRM call; only a validated
     // successful lookup can clear the stage health error.
-    if (SALES.lastError?.source === "stages") await loadStages();
+    if (SALES.stageLookupFailed) await loadStages();
     // Continue bounded scans instead of restarting at page zero forever.
     // Keep the same cutoff throughout the scan, including across timer ticks.
     const resume = SALES.syncPartial && SALES.syncCursor > 0 && SALES.syncSince;
