@@ -361,9 +361,16 @@ async function loadStagesForCategory(category) {
         semantics: shortSemantic || mappedSemantic || "",
       });
     }
+    // An empty refresh is not proof that all previously verified stages
+    // vanished. Transient empty REST results would otherwise erase their
+    // names/semantics and silently reclassify active Dashboard deals.
+    // Initial empty responses are still supported for backward compatibility.
+    const prefix = category + ":";
+    if (stages.size === 0 && [...SALES.stages.keys()].some(key => key.startsWith(prefix))) {
+      throw new Error("Empty Bitrix stage metadata refresh");
+    }
     // Replace only this pipeline's entries; malformed reads retain every
     // previously verified dictionary, including other pipelines.
-    const prefix = category + ":";
     const updated = new Map(
       [...SALES.stages].filter(([key]) => !key.startsWith(prefix))
     );
