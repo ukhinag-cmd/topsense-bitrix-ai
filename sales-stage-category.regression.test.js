@@ -94,7 +94,7 @@ test('stage semantics and names are scoped to the Bitrix deal pipeline, and fail
   await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: '9988832' });
   assert.ok(calls.includes('DEAL_STAGE_7'), 'category 7 must use its own stage directory');
   let prospect = sales.status().prospects.find(x => x.dealId === '9988832');
-  assert.ok(prospect, 'unknown semantics must not inherit the main pipeline win: ' + JSON.stringify({ counts: sales.status().counts, lastError: sales.status().lastError, wins: sales.status().wins }));
+  assert.ok(prospect, 'unknown semantics must not inherit the main pipeline win');
   assert.equal(prospect.stageSemanticKnown, false);
   assert.equal(sales.status().lastError?.source, 'stages');
 
