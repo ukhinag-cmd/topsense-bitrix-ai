@@ -1352,6 +1352,11 @@ async function syncRecentDeals(limitPages = 4) {
       since,
     }));
   } catch (error) {
+    // An interrupted multi-tick scan cannot safely reuse its old offset:
+    // the underlying CRM result set may have shifted before the next tick.
+    // Keep verified deal snapshots, but abandon the partial cursor/cutoff
+    // after any failed resumed page (including invalid cursors or timeouts).
+    if (SALES.syncPartial) restartSyncScan();
     SALES.lastError = {
       at: new Date().toISOString(),
       source: "sales-sync",
