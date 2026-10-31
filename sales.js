@@ -293,19 +293,30 @@ async function loadStages() {
           typeof row.STATUS_ID !== "string" || !row.STATUS_ID.trim()) {
         throw new Error("Invalid Bitrix stage metadata row");
       }
-      // Both metadata fields are single-value strings. An array ['S'] gets
-      // string-coerced into the won semantic by stageSemantic(), and could
-      // falsely close deals when a CRM deal omits STAGE_SEMANTIC_ID.
-      // Validate every row before atomically replacing the stage cache.
+      // Bitrix deal stages often supply the real semantic in EXTRA.SEMANTICS
+      // (process/success/failure) while top-level SEMANTICS is null.
+      // Validate both fields before accepting a stage dictionary: otherwise
+      // an array in EXTRA could coerce to a false "won" classification.
       if ((row.NAME != null && typeof row.NAME !== "string") ||
-          (row.SEMANTICS != null && typeof row.SEMANTICS !== "string")) {
+          (row.SEMANTICS != null && typeof row.SEMANTICS !== "string") ||
+          (row.EXTRA != null && (typeof row.EXTRA !== "object" || Array.isArray(row.EXTRA))) ||
+          (row.EXTRA?.SEMANTICS != null && typeof row.EXTRA.SEMANTICS !== "string")) {
         throw new Error("Invalid Bitrix stage metadata value");
+      }
+      const semanticMap = { process: "P", success: "S", failure: "F", apology: "F" };
+      const extraSemantic = String(row.EXTRA?.SEMANTICS || "").trim().toLowerCase();
+      const mappedSemantic = extraSemantic ? semanticMap[extraSemantic] : "";
+      const shortSemantic = String(row.SEMANTICS || "").trim().toUpperCase();
+      if ((extraSemantic && !mappedSemantic) ||
+          (shortSemantic && !["P", "S", "F"].includes(shortSemantic)) ||
+          (shortSemantic && mappedSemantic && shortSemantic !== mappedSemantic)) {
+        throw new Error("Conflicting or unknown Bitrix stage semantics");
       }
       const stageId = row.STATUS_ID.trim();
       if (stages.has(stageId)) throw new Error("Duplicate Bitrix stage metadata ID");
       stages.set(stageId, {
         name: row.NAME || stageId,
-        semantics: row.SEMANTICS || "",
+        semantics: shortSemantic || mappedSemantic || "",
       });
     }
     SALES.stages = stages;
