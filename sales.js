@@ -12,6 +12,9 @@ const SALES = {
   // Track failed stage metadata independently of the most recent error.
   // Sync/event/store failures can overwrite lastError before the next retry.
   stageLookupFailed: false,
+  // Track stage errors independently of event/sync/store errors so recovery
+  // of one operation cannot falsely certify incomplete stage metadata.
+  stageErrors: new Map(),
   stageCategoriesLoaded: new Set(),
   stageCategoriesPending: new Set(),
   stageRequests: new Map(),
@@ -349,12 +352,18 @@ async function loadStagesForCategory(category) {
     SALES.stages = updated;
     SALES.stageCategoriesLoaded.add(category);
     SALES.stageCategoriesPending.delete(category);
+    SALES.stageErrors.delete(category);
     SALES.stageLookupFailed = SALES.stageCategoriesPending.size > 0;
-    if (!SALES.stageLookupFailed && SALES.lastError?.source === "stages") SALES.lastError = null;
+    // A different pipeline may still have a failed stage dictionary.
+    if (SALES.lastError?.source === "stages") {
+      SALES.lastError = SALES.stageErrors.values().next().value || null;
+    }
   } catch (error) {
     SALES.stageCategoriesPending.add(category);
     SALES.stageLookupFailed = true;
-    SALES.lastError = { at: new Date().toISOString(), source: "stages", message: String(error.message || error) };
+    const stageError = { at: new Date().toISOString(), source: "stages", message: String(error.message || error) };
+    SALES.stageErrors.set(category, stageError);
+    SALES.lastError = stageError;
   }
 }
 
@@ -1337,7 +1346,10 @@ function status() {
     lastEventAt: SALES.lastEventAt,
     lastSyncAt: SALES.lastSyncAt,
     syncPartial: SALES.syncPartial,
-    lastError: SALES.lastError,
+    // A successful deal read may clear the latest sales-event error even
+    // while earlier stage metadata failures are still awaiting a retry.
+    lastError: SALES.lastError || (SALES.stageLookupFailed
+      ? SALES.stageErrors.values().next().value || null : null),
     counts: {
       tracked: all.length,
       open: open.length,
