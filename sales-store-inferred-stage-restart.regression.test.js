@@ -102,10 +102,9 @@ test('persisted inferred closing outcome survives stage lookup outage until veri
   assert.equal(state.counts.won, 0);
   assert.equal(state.counts.open, 0);
   assert.equal(state.counts.tracked, 1);
-  const snapshot = [...state.prospects, ...state.attention, ...state.wins][0];
-  // Closed losses do not appear in the visible open/won arrays. Access the
-  // trusted cached record through a read-only VM hook if needed instead.
-  assert.equal(snapshot, undefined);
-  const source = require('node:fs').readFileSync(require.resolve('./sales'), 'utf8');
-  assert.match(source, /function sourceStageSemanticForRefresh\(/);
+  assert.ok(state.lastSyncAt, 'a complete read-only synchronization still succeeds');
+  assert.equal(state.prospects.length, 0);
+  assert.equal(state.attention.length, 0);
+  assert.equal(state.wins.length, 0,
+    'the new verified failed outcome is neither open nor a successful win');
 });
