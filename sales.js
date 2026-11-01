@@ -264,7 +264,14 @@ function stageKey(categoryId, stageId) {
 // freezes a deal's outcome after a verified stage dictionary correction.
 function sourceStageSemanticForRefresh(snapshot) {
   if (typeof snapshot.sourceStageSemantic === "string") {
-    return snapshot.sourceStageSemantic;
+    if (snapshot.sourceStageSemantic) return snapshot.sourceStageSemantic;
+    // When a persisted classification came from a verified stage dictionary,
+    // an outage on the next startup must not silently turn a won/lost deal
+    // into an unknown open deal. Keep the last verified inference until this
+    // pipeline's dictionary is loaded again. Once verified, use its current
+    // semantics (including a genuinely missing stage) instead of stale data.
+    return SALES.stageCategoriesLoaded.has(stageCategoryId(snapshot.categoryId))
+      ? "" : snapshot.semantic;
   }
   // Older persisted snapshots predate sourceStageSemantic. Prefer a verified
   // dictionary when available; otherwise retain the last known classification
