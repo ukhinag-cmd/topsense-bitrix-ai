@@ -676,7 +676,11 @@ function scoreDeal(deal, previous) {
   // Otherwise stale stage age can add 15-25 phantom Risk Score points.
   if (previous && (previous.stageId !== stageId ||
       (previous.categoryId != null && previous.categoryId !== stageCategoryId(deal.CATEGORY_ID)))) {
-    stageEnteredAt = nowIso;
+    // A delayed webhook/sync can reveal a stage move that occurred days ago.
+    // DATE_MODIFY is the latest verified time that the move could have
+    // happened; using observation time would erase overdue stage-age risk.
+    // CRM versions are validated before scoreDeal is called for live rows.
+    stageEnteredAt = isoOrNull(deal.DATE_MODIFY) || nowIso;
   }
   const stageAge = daysSince(stageEnteredAt);
 
