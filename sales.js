@@ -698,7 +698,9 @@ function scoreDeal(deal, previous) {
   if (hasNext) prospect += 15;
   if (lastAge !== null && lastAge <= 3) prospect += 10;
   else if (lastAge !== null && lastAge <= 7) prospect += 5;
-  if (stageId && !/^NEW$/i.test(stageId)) prospect += 5;
+  // Bitrix prefixes the initial NEW stage with the pipeline identifier
+  // (e.g. C7:NEW). A new deal in a custom pipeline has not progressed.
+  if (stageId && !/^(?:C[0-9]+:)?NEW$/i.test(stageId)) prospect += 5;
   prospect = clamp(prospect);
 
   let risk = 0;
