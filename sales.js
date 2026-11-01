@@ -1314,6 +1314,15 @@ async function syncRecentDeals(limitPages = 4) {
         categoriesToRefresh.add(category);
       }
     }
+    // Hydration may restore dormant deals that are older than the 45-day
+    // crm.deal.list window. A non-default pipeline then has no recent deal
+    // to trigger ensureStageCategory(), so its stored inferred classification
+    // and Next Step could stay stale forever. Refresh every missing dictionary
+    // referenced by trusted snapshots, using read-only crm.status.list.
+    for (const snapshot of SALES.deals.values()) {
+      const category = stageCategoryId(snapshot.categoryId);
+      if (!SALES.stageCategoriesLoaded.has(category)) categoriesToRefresh.add(category);
+    }
     for (const category of categoriesToRefresh) await loadStages(category);
     // Continue bounded scans instead of restarting at page zero forever.
     // Keep the same cutoff throughout the scan, including across timer ticks.
