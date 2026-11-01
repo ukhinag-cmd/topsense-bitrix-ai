@@ -35,6 +35,21 @@ test('stored Sales semantic provenance must be canonical before hydration', () =
     'uncanonical case must not fabricate a different closed outcome');
   assert.equal(validate({ ...base, sourceStageSemantic: 'X' }), false,
     'unknown direct semantic must not override stage metadata on refresh');
+
+  // Direct CRM semantics always outrank inferred stage metadata. A valid but
+  // contradictory persisted pair would be accepted at hydration, then
+  // silently turn an open deal into a closed win/loss on timed rescoring.
+  assert.equal(validate({ ...base, sourceStageSemantic: 'S' }), false,
+    'direct won outcome must not contradict a stored open classification');
+  assert.equal(validate({ ...base, sourceStageSemantic: 'F' }), false,
+    'direct lost outcome must not contradict a stored open classification');
+  assert.equal(validate({ ...base, semantic: '', sourceStageSemantic: 'P',
+    stageSemanticKnown: false }), false,
+    'known direct processing semantics cannot coexist with unknown outcome');
+  assert.equal(validate({ ...base, semantic: 'S', sourceStageSemantic: '' ,
+    open: false }), true,
+    'a known outcome inferred from the dictionary may lack direct provenance');
+
   assert.equal(validate({ ...base, stageSemanticKnown: false }), false,
     'the stored known flag must agree with a recognized semantic');
 
