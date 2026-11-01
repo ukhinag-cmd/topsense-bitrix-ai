@@ -37,4 +37,19 @@ test('initial CRM observation does not invent a won-transition or red-zone-entry
   assert.equal(addAlert(highRisk, { ...highRisk, riskScore: 45 })
     .some(alert => alert.type === 'risk'), true,
     'an observed threshold crossing must still trigger the risk alert');
+
+  const highProspect = {
+    semantic: 'P', open: true, prospectScore: 85, riskScore: 10,
+    amount: 700000, currency: 'RUB', hasNext: true,
+    qualificationIssue: false, nextStep: 'Следующее действие назначено',
+  };
+  assert.equal(addAlert(highProspect, null)
+    .some(alert => alert.type === 'prospect'), false,
+    'first sight of a historical high-prospect deal is not a new score transition');
+  assert.equal(addAlert(highProspect, { ...highProspect, prospectScore: 50 })
+    .some(alert => alert.type === 'prospect'), true,
+    'an observed rise across the prospect threshold still creates an alert');
+  assert.equal(addAlert(highProspect, { ...highProspect, prospectScore: 75 })
+    .some(alert => alert.type === 'prospect'), false,
+    'an already-high prospect should not cause repeated threshold alerts');
 });
