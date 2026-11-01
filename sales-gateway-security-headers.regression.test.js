@@ -41,11 +41,11 @@ test('read-only Sales HTML and JSON refuse framing, MIME sniffing and referrer d
       assert.equal(response.headers['x-frame-options'], 'DENY', path);
       assert.equal(response.headers['referrer-policy'], 'no-referrer', path);
       const csp = response.headers['content-security-policy'];
-      assert.match(csp || '', /(?:^|;)\\s*default-src 'none'/);
-      assert.match(csp || '', /(?:^|;)\\s*style-src 'unsafe-inline'/);
-      assert.match(csp || '', /(?:^|;)\\s*frame-ancestors 'none'/);
-      assert.match(csp || '', /(?:^|;)\\s*base-uri 'none'/);
-      assert.match(csp || '', /(?:^|;)\\s*form-action 'none'/);
+      assert.match(csp || '', /(?:^|;)\s*default-src 'none'/);
+      assert.match(csp || '', /(?:^|;)\s*style-src 'unsafe-inline'/);
+      assert.match(csp || '', /(?:^|;)\s*frame-ancestors 'none'/);
+      assert.match(csp || '', /(?:^|;)\s*base-uri 'none'/);
+      assert.match(csp || '', /(?:^|;)\s*form-action 'none'/);
     }
   }
 });
