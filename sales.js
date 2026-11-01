@@ -896,7 +896,14 @@ async function snapshotDeal(deal, source = "event") {
     stageId: String(deal.STAGE_ID || ""),
     // An absent direct semantic must stay absent across temporal re-scoring:
     // the authoritative pipeline stage dictionary may later be corrected.
-    sourceStageSemantic: String(deal.STAGE_SEMANTIC_ID || "").trim().toUpperCase(),
+    // Same-version activity refreshes may temporarily borrow a previously
+    // verified inferred outcome while the Bitrix stage dictionary is down.
+    // That fallback is for scoring only; it is not a direct CRM semantic.
+    // Keep the original provenance so a later verified dictionary can
+    // correct the outcome without waiting for DATE_MODIFY to change.
+    sourceStageSemantic: activityOnlyRefresh
+      ? (typeof latest.sourceStageSemantic === "string" ? latest.sourceStageSemantic : "")
+      : String(deal.STAGE_SEMANTIC_ID || "").trim().toUpperCase(),
     currency: String(deal.CURRENCY_ID || "RUB").trim().toUpperCase(),
     updatedAt: isoOrNull(incomingVersion) || new Date().toISOString(),
     sourceUpdatedAt: incomingVersion || null,
