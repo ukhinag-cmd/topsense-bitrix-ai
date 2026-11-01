@@ -771,13 +771,17 @@ function addAlert(snapshot, previous) {
     alerts.push({ at: now, type, title, detail });
   };
 
-  if (snapshot.semantic === "S" && previous?.semantic !== "S") {
+  // First observation of a historical won deal is not a newly won deal.
+  // Emit transition alerts only when a previous trusted snapshot exists.
+  if (snapshot.semantic === "S" && previous && previous.semantic !== "S") {
     push("success", "Сделка успешно закрыта", money(snapshot.amount, snapshot.currency));
   }
   if (snapshot.open && snapshot.prospectScore >= 70 && num(previous?.prospectScore) < 70) {
     push("prospect", "Перспективная сделка", "Score " + snapshot.prospectScore + " · " + money(snapshot.amount, snapshot.currency));
   }
-  if (snapshot.open && snapshot.riskScore >= 60 && num(previous?.riskScore) < 60) {
+  // A high initial risk is visible in the attention queue, but it is not
+  // evidence that a deal has just *entered* the red zone.
+  if (snapshot.open && previous && snapshot.riskScore >= 60 && num(previous.riskScore) < 60) {
     push("risk", "Сделка вошла в красную зону", "Risk " + snapshot.riskScore + " · " + snapshot.nextStep);
   }
   if (snapshot.open && !snapshot.hasNext && previous?.hasNext !== false) {
