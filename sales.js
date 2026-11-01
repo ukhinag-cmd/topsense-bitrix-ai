@@ -1142,11 +1142,16 @@ function validPersistedSnapshot(row) {
     // is available. Accept that canonical unknown value across restarts.
     (entry.semantic == null || ["", "P", "S", "F"].includes(entry.semantic)) &&
     (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
-    row.alerts.every(entry =>
+    row.alerts.every((entry, index) =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
       // Sales alerts are generated only after the underlying CRM deal exists.
       // Old snapshots without a creation timestamp remain compatible.
       (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
+      // addAlert appends observations and retains the newest MAX_ALERTS.
+      // Unordered persisted alerts can instead make the tail discard a
+      // recent warning while displaying an older one as its replacement.
+      // Multiple alerts from one observation may share a timestamp.
+      (index === 0 || dateValue(entry.at) >= dateValue(row.alerts[index - 1].at)) &&
       typeof entry.type === "string" && typeof entry.title === "string" &&
       typeof entry.detail === "string") &&
     // Each accepted snapshot is emitted with an audit entry whenever its
