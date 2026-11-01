@@ -55,11 +55,11 @@ test('dormant stored non-default pipeline resolves verified stage metadata durin
     hasNext: false, nextOverdue: false,
     nextStep: 'Назначить следующее действие',
     qualificationIssue: false, qualificationStatus: '', clientType: '',
-    prospectScore: 15, riskScore: 100,
+    prospectScore: 15, riskScore: 88,
     scoreHistory: [{
       at: lastObserved, categoryId: '7', stageId: 'A',
       stageName: 'Старая открытая стадия', semantic: 'P', amount: 0,
-      currency: 'RUB', prospectScore: 15, riskScore: 100,
+      currency: 'RUB', prospectScore: 15, riskScore: 88,
     }],
     alerts: [],
   };
@@ -81,7 +81,7 @@ test('dormant stored non-default pipeline resolves verified stage metadata durin
       const result = category === 'DEAL_STAGE' ? [
         { STATUS_ID: 'OTHER', NAME: 'Default pipeline', SEMANTICS: 'P' },
       ] : category === 'DEAL_STAGE_7' ? [
-        { STATUS_ID: 'A', NAME: 'Проверено: закрыта без продажи', SEMANTICS: 'F' },
+        { STATUS_ID: 'A', NAME: 'Проверено: успешно закрыта', SEMANTICS: 'S' },
       ] : null;
       assert.ok(result, 'only the known pipelines may be requested');
       return { ok: true, status: 200, json: async () => ({ result }) };
@@ -111,11 +111,14 @@ test('dormant stored non-default pipeline resolves verified stage metadata durin
   assert.ok(after.lastSyncAt);
   assert.equal(after.counts.tracked, 1);
   assert.equal(after.counts.open, 0);
-  assert.equal(after.counts.won, 0);
+  assert.equal(after.counts.won, 1, 'the verified stage correction must restore the win');
   assert.equal(after.attention.length, 0);
   const row = after.wins.find(x => x.dealId === id);
-  assert.equal(row, undefined, 'the verified failed stage must not remain a win');
-  // The closed deal no longer appears in the open/attention lists. Its audit
-  // history still exists in the trusted in-memory map, reachable via status.
-  assert.equal(after.counts.tracked, before.counts.tracked);
+  assert.ok(row, 'the dormant deal is now classified as won');
+  assert.equal(row.stageName, 'Проверено: успешно закрыта');
+  assert.equal(row.sourceUpdatedAt, modified, 'stage metadata must not invent a CRM version');
+  assert.equal(row.scoreHistory.length, 2, 'an outcome correction must be audited');
+  assert.equal(row.scoreHistory[1].semantic, 'S');
+  assert.equal(row.alerts.some(alert => alert.type === 'success'), false,
+    'a dictionary correction must not fabricate a new closed-won event');
 });
