@@ -1102,7 +1102,25 @@ function validPersistedSnapshot(row) {
     row.alerts.every(entry =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
       typeof entry.type === "string" && typeof entry.title === "string" &&
-      typeof entry.detail === "string");
+      typeof entry.detail === "string") &&
+    // Each accepted snapshot is emitted with an audit entry whenever its
+    // scored state, amount, currency, pipeline, stage or outcome changes.
+    // A Sheet row whose final history entry disagrees with its current state
+    // would otherwise display a forged or stale score/outcome progression.
+    // Older history may omit optional semantic/category/currency metadata.
+    (() => {
+      const latest = row.scoreHistory[row.scoreHistory.length - 1];
+      return !latest || (
+        latest.amount === row.amount &&
+        latest.prospectScore === row.prospectScore &&
+        latest.riskScore === row.riskScore &&
+        (latest.stageId == null || latest.stageId === row.stageId) &&
+        (latest.categoryId == null || row.categoryId == null ||
+          latest.categoryId === row.categoryId) &&
+        (latest.semantic == null || latest.semantic === row.semantic) &&
+        (latest.currency == null || latest.currency === row.currency)
+      );
+    })();
 }
 
 async function loadPersisted() {
