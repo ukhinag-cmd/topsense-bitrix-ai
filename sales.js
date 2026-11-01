@@ -1127,6 +1127,9 @@ function validPersistedSnapshot(row) {
   // Preserve equal-millisecond observations; reject reversed sequences.
   return row.scoreHistory.every((entry, index) =>
     record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
+    // Score observations cannot predate the deal that was scored. A poisoned
+    // Sheet audit row otherwise creates a fictitious pre-creation history.
+    (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
     ["categoryId", "stageId", "stageName", "currency"].every(field => optionalText(entry[field])) &&
@@ -1137,6 +1140,9 @@ function validPersistedSnapshot(row) {
     (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
     row.alerts.every(entry =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
+      // Sales alerts are generated only after the underlying CRM deal exists.
+      // Old snapshots without a creation timestamp remain compatible.
+      (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
       typeof entry.type === "string" && typeof entry.title === "string" &&
       typeof entry.detail === "string") &&
     // Each accepted snapshot is emitted with an audit entry whenever its
