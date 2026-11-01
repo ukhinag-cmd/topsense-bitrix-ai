@@ -1090,6 +1090,13 @@ function validPersistedSnapshot(row) {
       // Preserve older snapshots that do not carry this optional field.
       (row.stageSemanticKnown != null &&
         row.stageSemanticKnown !== (row.semantic !== "")) ||
+      // Stored manager IDs must obey the same canonical identity rule as
+      // live ASSIGNED_BY_ID. A Sheet row with "07" or " 7 " must not
+      // masquerade as a different Bitrix manager after a restart.
+      // Empty/zero still represents an unassigned manager; legacy rows may
+      // omit the manager ID entirely.
+      (row.managerId != null && row.managerId !== "" && row.managerId !== "0" &&
+        (typeof row.managerId !== "string" || !validDealId(row.managerId))) ||
       typeof row.currency !== "string" ||
       // Live CRM reads require an explicit currency for nonzero amounts.
       // Apply that same rule to untrusted Sheet snapshots: otherwise timed
