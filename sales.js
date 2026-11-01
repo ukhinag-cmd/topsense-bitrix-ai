@@ -762,7 +762,10 @@ function scoreDeal(deal, previous) {
   };
 }
 
-function addAlert(snapshot, previous, { allowWonTransition = true } = {}) {
+function addAlert(snapshot, previous, {
+  allowWonTransition = true,
+  allowScoreTransitions = true,
+} = {}) {
   const alerts = Array.isArray(previous?.alerts) ? previous.alerts.slice(-MAX_ALERTS) : [];
   const now = new Date().toISOString();
 
@@ -779,12 +782,12 @@ function addAlert(snapshot, previous, { allowWonTransition = true } = {}) {
   // An already-promising historical deal is visible in the prospects
   // queue, but first observation is not evidence of a fresh score increase.
   // Emit a prospect alert only for an observed crossing of the threshold.
-  if (snapshot.open && previous && snapshot.prospectScore >= 70 && num(previous.prospectScore) < 70) {
+  if (allowScoreTransitions && snapshot.open && previous && snapshot.prospectScore >= 70 && num(previous.prospectScore) < 70) {
     push("prospect", "Перспективная сделка", "Score " + snapshot.prospectScore + " · " + money(snapshot.amount, snapshot.currency));
   }
   // A high initial risk is visible in the attention queue, but it is not
   // evidence that a deal has just *entered* the red zone.
-  if (snapshot.open && previous && snapshot.riskScore >= 60 && num(previous.riskScore) < 60) {
+  if (allowScoreTransitions && snapshot.open && previous && snapshot.riskScore >= 60 && num(previous.riskScore) < 60) {
     push("risk", "Сделка вошла в красную зону", "Risk " + snapshot.riskScore + " · " + snapshot.nextStep);
   }
   if (snapshot.open && !snapshot.hasNext && previous?.hasNext !== false) {
@@ -1545,9 +1548,14 @@ function refreshTimedScores() {
     }
     row.scoreHistory = history.slice(-MAX_HISTORY);
     // Timed scoring can reclassify a deal after a stage-dictionary edit.
-    // That is an audit correction, not a new CRM-verified sale. Keep the
-    // corrected history without publishing a fictitious closed-won alert.
-    row.alerts = addAlert(row, previous, { allowWonTransition: false });
+    // That is an audit correction, not an observed CRM deal transition:
+    // reopening a historical deal can cross the prospect/red-zone scoring
+    // thresholds without any new customer activity. Preserve real temporal
+    // threshold alerts when the stage meaning itself has not changed.
+    row.alerts = addAlert(row, previous, {
+      allowWonTransition: false,
+      allowScoreTransitions: previous.semantic === row.semantic,
+    });
     SALES.deals.set(id, row);
     markDirty(id);
   }
