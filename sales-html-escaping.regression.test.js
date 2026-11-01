@@ -49,15 +49,31 @@ test('Dashboard escapes untrusted currency identifiers in rows and alerts', asyn
     UF_CRM_AI_QUAL_STATUS: 'Квалифицировано',
   };
 
+  // A historical high Prospect Score must not fabricate an initial
+  // transition alert. Trigger a real observed crossing to test HTML escaping
+  // in both the prospect row and the resulting alert.
+  let currentDeal = {
+    ...deal,
+    DATE_MODIFY: new Date(now - 120000).toISOString(),
+    LAST_ACTIVITY_TIME: null,
+    ACTIVITY_TIME: null,
+    UF_CRM_AI_CLIENT_TYPE: '',
+    UF_CRM_AI_QUAL_STATUS: '',
+  };
+
   global.fetch = async input => {
     const path = new URL(String(input)).pathname;
-    if (path.endsWith('/crm.deal.get.json')) return bitrixResponse(deal);
+    if (path.endsWith('/crm.deal.get.json')) return bitrixResponse(currentDeal);
     if (path.endsWith('/user.get.json')) {
       return bitrixResponse([{ ID: '7', NAME: 'Test', LAST_NAME: 'Manager' }]);
     }
     throw new Error('Unexpected mocked Bitrix method: ' + path);
   };
 
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: deal.ID });
+  assert.equal(sales.status().alerts.some(alert => alert.type === 'prospect'), false,
+    'first observation is not evidence of a new prospect-score increase');
+  currentDeal = deal;
   await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: deal.ID });
   const state = sales.status();
   assert.ok(state.prospects.some(row => row.dealId === deal.ID));
