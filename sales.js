@@ -762,7 +762,7 @@ function scoreDeal(deal, previous) {
   };
 }
 
-function addAlert(snapshot, previous) {
+function addAlert(snapshot, previous, { allowWonTransition = true } = {}) {
   const alerts = Array.isArray(previous?.alerts) ? previous.alerts.slice(-MAX_ALERTS) : [];
   const now = new Date().toISOString();
 
@@ -773,7 +773,7 @@ function addAlert(snapshot, previous) {
 
   // First observation of a historical won deal is not a newly won deal.
   // Emit transition alerts only when a previous trusted snapshot exists.
-  if (snapshot.semantic === "S" && previous && previous.semantic !== "S") {
+  if (allowWonTransition && snapshot.semantic === "S" && previous && previous.semantic !== "S") {
     push("success", "Сделка успешно закрыта", money(snapshot.amount, snapshot.currency));
   }
   // An already-promising historical deal is visible in the prospects
@@ -1544,7 +1544,10 @@ function refreshTimedScores() {
       });
     }
     row.scoreHistory = history.slice(-MAX_HISTORY);
-    row.alerts = addAlert(row, previous);
+    // Timed scoring can reclassify a deal after a stage-dictionary edit.
+    // That is an audit correction, not a new CRM-verified sale. Keep the
+    // corrected history without publishing a fictitious closed-won alert.
+    row.alerts = addAlert(row, previous, { allowWonTransition: false });
     SALES.deals.set(id, row);
     markDirty(id);
   }
