@@ -1066,6 +1066,13 @@ function validPersistedSnapshot(row) {
       typeof row.updatedAt !== "string" || !plausibleVersion(row.updatedAt) ||
       (row.sourceUpdatedAt != null &&
         (typeof row.sourceUpdatedAt !== "string" || !plausibleVersion(row.sourceUpdatedAt))) ||
+      // Sales never records an authoritative CRM source version later than
+      // its displayed update time. Old snapshots may record a later local
+      // observation, so only reject the impossible reverse ordering.
+      // Compare millisecond instants: Bitrix can supply sub-ms precision,
+      // while updatedAt is normalized to a JavaScript ISO timestamp.
+      (row.sourceUpdatedAt != null &&
+        dateValue(row.sourceUpdatedAt) > dateValue(row.updatedAt)) ||
       !optionalPastDate(row.createdAt) ||
       !optionalPastDate(row.modifiedAt) ||
       !optionalPastDate(row.lastActivityAt) ||
