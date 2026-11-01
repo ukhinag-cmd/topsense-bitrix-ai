@@ -1038,7 +1038,13 @@ function validPersistedSnapshot(row) {
       // Preserve older snapshots that do not carry this optional field.
       (row.stageSemanticKnown != null &&
         row.stageSemanticKnown !== (row.semantic !== "")) ||
-      typeof row.currency !== "string" || typeof row.nextStep !== "string" ||
+      typeof row.currency !== "string" ||
+      // Live CRM reads require an explicit currency for nonzero amounts.
+      // Apply that same rule to untrusted Sheet snapshots: otherwise timed
+      // rescoring defaults an empty CURRENCY_ID to RUB, incorrectly adding
+      // RUB-based Prospect/Risk points to a currencyless persisted deal.
+      (row.amount !== 0 && !row.currency.trim()) ||
+      typeof row.nextStep !== "string" ||
       typeof row.open !== "boolean" || row.open !== isOpenSemantic(row.semantic) ||
       typeof row.hasNext !== "boolean" || typeof row.qualificationIssue !== "boolean" ||
       typeof row.amount !== "number" || !Number.isFinite(row.amount) ||
