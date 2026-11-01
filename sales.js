@@ -1077,6 +1077,12 @@ function validPersistedSnapshot(row) {
       !optionalPastDate(row.modifiedAt) ||
       !optionalPastDate(row.lastActivityAt) ||
       !optionalPastDate(row.stageEnteredAt) ||
+      // The recorded stage cannot have started before the deal existed.
+      // A poisoned older stage date otherwise adds phantom stage-age Risk
+      // points on every timed dashboard refresh, even without CRM changes.
+      // Preserve older Sheet rows that do not know the creation date.
+      (row.createdAt != null && row.stageEnteredAt != null &&
+        dateValue(row.stageEnteredAt) < dateValue(row.createdAt)) ||
       !optionalPastDate(row.observedAt) ||
       !optionalScheduledDate(row.nextActivityAt) ||
       !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
