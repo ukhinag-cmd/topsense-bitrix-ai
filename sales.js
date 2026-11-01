@@ -1034,6 +1034,13 @@ function validPersistedSnapshot(row) {
       !["", "P", "S", "F"].includes(row.semantic) ||
       (row.sourceStageSemantic != null &&
         !["", "P", "S", "F"].includes(row.sourceStageSemantic)) ||
+      // When Bitrix supplies a direct P/S/F outcome, scoreDeal uses it as
+      // authoritative even if the stage dictionary disagrees. A saved row
+      // claiming a different semantic is corrupt: hydration would expose
+      // one classification and a timed refresh would silently reverse it.
+      (typeof row.sourceStageSemantic === "string" &&
+        row.sourceStageSemantic !== "" &&
+        row.semantic !== row.sourceStageSemantic) ||
       // The known flag is derived, not an independent source of truth.
       // Preserve older snapshots that do not carry this optional field.
       (row.stageSemanticKnown != null &&
