@@ -81,7 +81,9 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
   const id = String(entityId == null ? '' : entityId).trim();
   if (!/^[1-9]\d{0,14}$/.test(id) || !Number.isSafeInteger(Number(id))) return null;
 
-  if (name === 'ONCRMACTIVITYADD') {
+  // Both create and update events identify the activity, not a deal.
+  // Route each through the same read-only activity.get -> deal.get resolver.
+  if (name === 'ONCRMACTIVITYADD' || name === 'ONCRMACTIVITYUPDATE') {
     return Object.freeze({
       event: name,
       dealId: null,
