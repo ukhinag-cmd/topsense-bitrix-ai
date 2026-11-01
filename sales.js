@@ -600,6 +600,14 @@ function validateDealRow(deal, expectedId = null) {
       throw new Error("Invalid Bitrix deal " + field + " timestamp");
     }
   }
+  // A CRM deal cannot be modified before it was created. Accepting such
+  // a read would give it an impossible stage-entry age, pollute Risk/Next
+  // Step and produce a snapshot that fails validation on the next restart.
+  // DATE_CREATE may be absent on legacy responses, but if supplied it must
+  // not be later than the authoritative DATE_MODIFY source version.
+  if (deal.DATE_CREATE && dateValue(deal.DATE_CREATE) > dateValue(deal.DATE_MODIFY)) {
+    throw new Error("Invalid Bitrix deal DATE_CREATE chronology");
+  }
   // Future scheduled actions are legitimate, but a malformed non-empty
   // activity date would otherwise erase the verified Next Step and inflate
   // Risk Score. Do not impose the past-observation clock limit on plans.
@@ -1074,6 +1082,13 @@ function validPersistedSnapshot(row) {
       (row.sourceUpdatedAt != null &&
         dateValue(row.sourceUpdatedAt) > dateValue(row.updatedAt)) ||
       !optionalPastDate(row.createdAt) ||
+      // The creation instant must not postdate any stored CRM version.
+      // Otherwise hydration accepts a deal that could not have existed at
+      // its claimed update, then timed refresh derives contradictory risk
+      // and persisted history. Older rows may omit optional source dates.
+      (row.createdAt != null &&
+        ["updatedAt", "sourceUpdatedAt", "modifiedAt"].some(field =>
+          row[field] != null && dateValue(row.createdAt) > dateValue(row[field]))) ||
       !optionalPastDate(row.modifiedAt) ||
       !optionalPastDate(row.lastActivityAt) ||
       !optionalPastDate(row.stageEnteredAt) ||
