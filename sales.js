@@ -1080,9 +1080,10 @@ function validPersistedSnapshot(row) {
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
     ["categoryId", "stageId", "stageName", "currency"].every(field => optionalText(entry[field])) &&
-    // Old snapshots have no history semantic; accept them without adding
-    // synthetic entries on the next refresh.
-    (entry.semantic == null || ["P", "S", "F"].includes(entry.semantic)) &&
+    // Old snapshots can omit history semantics; unresolved live Bitrix
+    // stages are written with an empty semantic until a verified dictionary
+    // is available. Accept that canonical unknown value across restarts.
+    (entry.semantic == null || ["", "P", "S", "F"].includes(entry.semantic)) &&
     (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
     row.alerts.every(entry =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
