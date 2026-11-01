@@ -805,9 +805,10 @@ async function snapshotDeal(deal, source = "event") {
   // Re-read after the asynchronous manager lookup. Another event or sync may
   // have stored a newer snapshot while this request was waiting.
   const latest = SALES.deals.get(id) || null;
-  const latestVersion = latest
-    ? (Object.prototype.hasOwnProperty.call(latest, "sourceUpdatedAt") ? latest.sourceUpdatedAt : latest.updatedAt)
-    : "";
+  // Older Sheet snapshots can explicitly store sourceUpdatedAt: null.
+  // An absent source version is not permission to overwrite the trusted
+  // displayed version with an older CRM response; use updatedAt as fallback.
+  const latestVersion = latest ? (latest.sourceUpdatedAt || latest.updatedAt) : "";
   // A resolved user name is independent of a deal's DATE_MODIFY version.
   // Permit an identity-checked metadata correction without applying any
   // other fields from an equal-version (possibly stale) deal response.
