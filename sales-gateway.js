@@ -10,6 +10,16 @@ const {
 
 const PUBLIC_PORT = Number(process.env.PORT || 10000);
 
+const SALES_RESPONSE_SECURITY_HEADERS = Object.freeze({
+  // The Sales dashboard contains private deal and manager information.
+  // It is pure server-rendered HTML: no scripts, frames, or external assets
+  // are needed. Allow only the existing inline stylesheet.
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'x-frame-options': 'DENY',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+});
+
 function dashboardAuthorized(req, expectedToken) {
   if (!expectedToken) return false;
   const credentials = decodeBasicCredentials(req.headers.authorization);
@@ -69,6 +79,12 @@ function createGateway({
     }
 
     if (pathname === '/sales' || pathname.startsWith('/sales/')) {
+      // Apply privacy headers to authenticated AND rejected Sales responses.
+      // In particular, a saved Basic credential must not make the Dashboard
+      // embeddable in a third-party frame.
+      for (const [name, value] of Object.entries(SALES_RESPONSE_SECURITY_HEADERS)) {
+        res.setHeader(name, value);
+      }
       if (!dashboardToken) {
         res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
         return res.end('Dashboard is not configured');
