@@ -1043,6 +1043,14 @@ function validPersistedSnapshot(row) {
   if (!record(row) || row.kind !== "salesDeal" ||
       typeof row.title !== "string" || typeof row.manager !== "string" ||
       typeof row.stageId !== "string" || typeof row.semantic !== "string" ||
+      // Stage IDs are scoped by the canonical Bitrix pipeline number. A
+      // persisted "07", " 7 " or unknown category can miss pipeline 7's
+      // verified stage dictionary, spuriously changing Risk/Next Step.
+      // Missing category remains valid for older stored snapshots.
+      (row.categoryId != null &&
+        (typeof row.categoryId !== "string" ||
+         !/^(0|[1-9][0-9]*)$/.test(row.categoryId) ||
+         !Number.isSafeInteger(Number(row.categoryId)))) ||
       // Only P/S/F are recognized Bitrix outcomes. An empty semantic is
       // legitimate until stage metadata is verified; arbitrary persisted
       // values must not be treated as a valid open/closed classification.
