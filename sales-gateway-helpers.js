@@ -7,6 +7,9 @@ const ALLOWED_EVENTS = new Set([
   'ONCRMDEALADD',
   'ONCRMDEALUPDATE',
   'ONCRMACTIVITYADD',
+  // Bitrix also emits updates when an existing scheduled activity is changed.
+  // The same read-only activity.get -> deal.get path refreshes Next Step.
+  'ONCRMACTIVITYUPDATE',
 ]);
 
 function decodeBasicCredentials(header) {
