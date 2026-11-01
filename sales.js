@@ -1200,7 +1200,11 @@ async function loadPersisted() {
     let count = 0;
     let rejected = 0;
     for (const entry of rows) {
-      const key = String(entry?.key || "");
+      // Store data is untrusted JSON: String() can coerce an array into a
+      // plausible sales:deal:<id> key, or throw for an object with a poisoned
+      // toString, aborting hydration before valid snapshots are restored.
+      // Only the exact string key format may identify a saved Sales deal.
+      const key = typeof entry?.key === "string" ? entry.key : "";
       const row = entry?.payload;
       if (!key.startsWith(SALES_PREFIX)) continue;
 
