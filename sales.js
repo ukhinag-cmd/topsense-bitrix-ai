@@ -776,7 +776,10 @@ function addAlert(snapshot, previous) {
   if (snapshot.semantic === "S" && previous && previous.semantic !== "S") {
     push("success", "Сделка успешно закрыта", money(snapshot.amount, snapshot.currency));
   }
-  if (snapshot.open && snapshot.prospectScore >= 70 && num(previous?.prospectScore) < 70) {
+  // An already-promising historical deal is visible in the prospects
+  // queue, but first observation is not evidence of a fresh score increase.
+  // Emit a prospect alert only for an observed crossing of the threshold.
+  if (snapshot.open && previous && snapshot.prospectScore >= 70 && num(previous.prospectScore) < 70) {
     push("prospect", "Перспективная сделка", "Score " + snapshot.prospectScore + " · " + money(snapshot.amount, snapshot.currency));
   }
   // A high initial risk is visible in the attention queue, but it is not
