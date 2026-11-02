@@ -312,12 +312,25 @@ function isOpenSemantic(semantic) {
 
 function money(value, currency = "RUB") {
   const code = String(currency || "RUB").trim().toUpperCase();
-  const formatted = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(num(value));
+  const amount = num(value);
+  // Bitrix can provide legitimate kopeks and even smaller decimal values.
+  // Rounding to whole units rewrites the displayed deal, history and alerts.
+  const fingerprint = decimalFingerprint(String(amount));
+  const exponent = fingerprint?.includes("e") ? Number(fingerprint.split("e").pop()) : 0;
+  const decimalPlaces = Math.max(0, -exponent);
+  // Intl supports at most 20 decimal places. Preserve tiny nonzero amounts
+  // explicitly rather than rendering them as zero currency.
+  if (decimalPlaces > 20) return String(amount) + " " + code;
+  const options = {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: Math.max(2, decimalPlaces),
+  };
+  const formatted = new Intl.NumberFormat("ru-RU", options).format(amount);
   if (!/^[A-Z]{3}$/.test(code)) return formatted + " " + code;
   try {
     return new Intl.NumberFormat("ru-RU", {
-      style: "currency", currency: code, maximumFractionDigits: 0,
-    }).format(num(value));
+      ...options, style: "currency", currency: code,
+    }).format(amount);
   } catch {
     return formatted + " " + code;
   }
@@ -1735,16 +1748,37 @@ function status() {
   // Dashboard totals are deliberately RUB-only. Other currencies are shown
   // per deal and counted separately; no implicit FX conversion is performed.
   const sumRub = rows => {
-    let total = 0;
+    // Number addition can silently lose fractional RUB even below
+    // MAX_SAFE_INTEGER (5e15 + 0.5), or publish artifacts (0.1 + 0.2).
+    // Sum canonical decimal components exactly. Publish a JSON Number only
+    // if it preserves the resulting decimal value without any rounding.
+    let coefficient = 0n;
+    let exponent = 0;
     for (const row of rows) {
       if (String(row.currency || "").trim().toUpperCase() !== "RUB") continue;
-      const next = total + num(row.amount);
-      // Individually valid amounts can still yield an unsafe aggregate.
-      // Never publish a rounded/overflowed subtotal as if it were exact.
-      if (!Number.isFinite(next) || Math.abs(next) > Number.MAX_SAFE_INTEGER) return null;
-      total = next;
+      const amount = row.amount;
+      if (typeof amount !== "number" || !Number.isFinite(amount) ||
+          Math.abs(amount) > Number.MAX_SAFE_INTEGER) return null;
+      const match = /^(-?)([0-9]+)(?:[.]([0-9]+))?(?:e([+-]?[0-9]+))?$/i.exec(String(amount));
+      if (!match) return null;
+      const fraction = match[3] || "";
+      const power = Number(match[4] || 0) - fraction.length;
+      if (!Number.isSafeInteger(power)) return null;
+      const digits = BigInt((match[1] || "") + match[2] + fraction);
+      if (power < exponent) {
+        coefficient *= 10n ** BigInt(exponent - power);
+        exponent = power;
+      }
+      coefficient += digits * (10n ** BigInt(power - exponent));
     }
-    return total;
+    if (coefficient === 0n) return 0;
+    const result = Number(String(coefficient) + "e" + exponent);
+    if (!Number.isFinite(result) || Math.abs(result) > Number.MAX_SAFE_INTEGER) return null;
+    const decimalDigits = (coefficient < 0n ? -coefficient : coefficient).toString();
+    const significant = decimalDigits.replace(/0+$/, "");
+    const precise = (coefficient < 0n ? "-" : "") + significant + "e" +
+      (exponent + decimalDigits.length - significant.length);
+    return decimalFingerprint(String(result)) === precise ? result : null;
   };
   const excludedCurrencyCount = rows =>
     rows.filter(x => String(x.currency || "").trim().toUpperCase() !== "RUB").length;
