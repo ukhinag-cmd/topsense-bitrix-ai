@@ -1620,10 +1620,10 @@ function status() {
   // Dashboard totals are deliberately RUB-only. Other currencies are shown
   // per deal and counted separately; no implicit FX conversion is performed.
   const sumRub = rows => rows.reduce((acc, x) =>
-    acc + (String(x.currency || "").toUpperCase() === "RUB" ? num(x.amount) : 0), 0);
+    acc + (String(x.currency || "").trim().toUpperCase() === "RUB" ? num(x.amount) : 0), 0);
   const excludedCurrencyCount = rows =>
-    rows.filter(x => String(x.currency || "").toUpperCase() !== "RUB").length;
-  const rubAmount = row => String(row.currency || "").toUpperCase() === "RUB" ? num(row.amount) : -1;
+    rows.filter(x => String(x.currency || "").trim().toUpperCase() !== "RUB").length;
+  const rubAmount = row => String(row.currency || "").trim().toUpperCase() === "RUB" ? num(row.amount) : -1;
   return {
     service: "topsense-sales-mvp",
     startedAt: SALES.startedAt,
