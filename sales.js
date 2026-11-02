@@ -794,6 +794,7 @@ function addAlert(snapshot, previous, {
     alerts.push({
       at: now, type, title, detail,
       titleDeal: snapshot.title, manager: snapshot.manager,
+      amount: snapshot.amount, currency: snapshot.currency,
     });
   };
 
@@ -1205,7 +1206,12 @@ function validPersistedSnapshot(row) {
       typeof entry.detail === "string" &&
       // Legacy alerts omit attribution. New stored attribution must be scalar
       // to prevent poisoned Sheet values leaking into Dashboard rendering.
-      optionalText(entry.titleDeal) && optionalText(entry.manager)) &&
+      optionalText(entry.titleDeal) && optionalText(entry.manager) &&
+      // Legacy alerts have neither monetary field. New observations record
+      // both so future CRM amount/currency edits cannot rewrite the audit.
+      (entry.amount == null || (typeof entry.amount === "number" && Number.isFinite(entry.amount))) &&
+      (entry.currency == null || (typeof entry.currency === "string" && Boolean(entry.currency.trim()))) &&
+      (entry.amount == null) === (entry.currency == null)) &&
     // Each accepted snapshot is emitted with an audit entry whenever its
     // scored state, amount, currency, pipeline, stage or outcome changes.
     // A Sheet row whose final history entry disagrees with its current state
@@ -1670,7 +1676,10 @@ function status() {
       // current-deal fallback rather than losing those notifications.
       titleDeal: typeof a.titleDeal === "string" ? a.titleDeal : x.title,
       manager: typeof a.manager === "string" ? a.manager : x.manager,
-      amount: x.amount, currency: x.currency,
+      // Legacy alerts have no monetary attribution; fall back to the
+      // current deal only for those old records, never for new alerts.
+      amount: typeof a.amount === "number" && Number.isFinite(a.amount) ? a.amount : x.amount,
+      currency: typeof a.currency === "string" ? a.currency : x.currency,
     })))
     .sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0))
     .slice(0, 30);
