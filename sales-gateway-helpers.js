@@ -60,13 +60,15 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     suppliedToken = (body.auth && typeof body.auth === 'object' ? body.auth.application_token : undefined) ?? body.application_token;
   } else {
     const params = new URLSearchParams(bytes.toString('utf8'));
-    event = params.get('event') || params.get('EVENT');
-    entityId = params.get('data[FIELDS][ID]') || params.get('data[ID]') ||
-      params.get('dealId') || params.get('activityId');
+    // URLSearchParams.get returns null for absent keys, and '' for explicit
+    // empty values. Preserve that distinction to reject masked bad fields.
+    event = params.get('event') ?? params.get('EVENT');
+    entityId = params.get('data[FIELDS][ID]') ?? params.get('data[ID]') ??
+      params.get('dealId') ?? params.get('activityId');
     activityProviderId = params.get('data[FIELDS][PROVIDER_ID]');
     activityDirection = params.get('data[FIELDS][DIRECTION]');
     activityOwnerTypeId = params.get('data[FIELDS][OWNER_TYPE_ID]');
-    suppliedToken = params.get('auth[application_token]') || params.get('application_token');
+    suppliedToken = params.get('auth[application_token]') ?? params.get('application_token');
   }
 
   // JSON arrays/objects are never canonical webhook identities or credentials.
