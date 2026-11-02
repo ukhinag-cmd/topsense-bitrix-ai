@@ -47,3 +47,31 @@ test('legitimate scalar JSON deal and activity IDs still work', () => {
     activityProviderId: null, activityDirection: null, activityOwnerTypeId: '2',
   });
 });
+
+// Optional activity metadata is untrusted JSON too. An array can masquerade
+// as a scalar and an object with its own non-callable toString can make
+// String(value) throw, potentially crashing the HTTP webhook handler.
+test('malformed optional JSON activity metadata is rejected without coercion or exceptions', () => {
+  for (const field of ['PROVIDER_ID', 'DIRECTION', 'OWNER_TYPE_ID']) {
+    for (const value of [['2'], { toString: null }, true]) {
+      const raw = asEvent({
+        event: 'ONCRMACTIVITYUPDATE',
+        data: { FIELDS: { ID: '941003', [field]: value } },
+      });
+      assert.doesNotThrow(() => parseBitrixEvent(raw, 'application/json', applicationToken),
+        field + ' must not throw for an untrusted JSON object');
+      assert.equal(parseBitrixEvent(raw, 'application/json', applicationToken), null,
+        field + ' must not accept a non-scalar optional value');
+    }
+  }
+});
+
+test('legitimate numeric JSON activity metadata remains supported', () => {
+  assert.deepEqual(parseBitrixEvent(asEvent({
+    event: 'ONCRMACTIVITYUPDATE',
+    data: { FIELDS: { ID: 941003, PROVIDER_ID: 'CRM', DIRECTION: 2, OWNER_TYPE_ID: 2 } },
+  }), 'application/json', applicationToken), {
+    event: 'ONCRMACTIVITYUPDATE', dealId: null, activityId: '941003',
+    activityProviderId: 'CRM', activityDirection: '2', activityOwnerTypeId: '2',
+  });
+});
