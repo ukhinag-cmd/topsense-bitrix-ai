@@ -197,6 +197,24 @@ function num(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Preserve the *decimal* value supplied by Bitrix before converting a money
+// string to an IEEE-754 Number. MAX_SAFE_INTEGER checks alone miss amounts
+// such as "5000000000000000.50" (converted to 5000000000000000) and tiny
+// nonzero values that underflow to zero. Normalize digits and decimal exponent
+// without constructing enormous BigInts or expanding scientific notation.
+// This also accepts harmless spellings such as "300.10" and "3.001e2".
+function decimalFingerprint(value) {
+  const match = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:e([+-]?\d+))?$/i.exec(value);
+  if (!match) return null;
+  const fraction = match[3] ?? match[4] ?? "";
+  const digits = ((match[2] || "") + fraction).replace(/^0+/, "");
+  if (!digits) return "0";
+  const significant = digits.replace(/0+$/, "");
+  const exponent = Number(match[5] || 0) - fraction.length + digits.length - significant.length;
+  if (!Number.isSafeInteger(exponent)) return null;
+  return (match[1] === "-" ? "-" : "") + significant + "e" + exponent;
+}
+
 function clamp(n, min = 0, max = 100) {
   return Math.max(min, Math.min(max, n));
 }
@@ -531,7 +549,12 @@ function validateDealRow(deal, expectedId = null) {
     // CRM price (9007199254740993 -> 9007199254740992) or overflow totals.
     // Never turn an untrustworthy amount into a score/history observation.
     const validAmount = Number.isFinite(amount) &&
-      Math.abs(amount) <= Number.MAX_SAFE_INTEGER;
+      Math.abs(amount) <= Number.MAX_SAFE_INTEGER &&
+      // A finite Number below MAX_SAFE_INTEGER can still silently discard
+      // the fractional cents or all of a tiny nonzero decimal input.
+      // Compare normalized decimal values, not IEEE-754 binary equality.
+      (typeof opportunity !== "string" ||
+        decimalFingerprint(opportunity.trim()) === decimalFingerprint(String(amount)));
     if (!validAmount) {
       throw new Error("Invalid Bitrix deal OPPORTUNITY amount");
     }
