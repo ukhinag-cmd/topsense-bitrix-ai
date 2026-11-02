@@ -1241,7 +1241,16 @@ async function loadPersisted() {
         if (order === null || order <= 0) continue;
       }
 
-      SALES.deals.set(id, row);
+      // An older Sales build could persist the Bitrix unassigned marker as
+      // manager "#0". Dormant deals outside the recent CRM sync window would
+      // otherwise keep showing a fictitious manager after every restart.
+      // Repair only the presentation label, without fabricating CRM updates,
+      // changing the saved source version or calling user.get for ID 0.
+      const legacyUnassigned = row.managerId === "0" ||
+        ((row.managerId == null || row.managerId === "") && row.manager === "#0");
+      const hydrated = legacyUnassigned && row.manager !== "—"
+        ? { ...row, manager: "—" } : row;
+      SALES.deals.set(id, hydrated);
       count += 1;
     }
     console.log(JSON.stringify({ source: "sales-mvp", action: "store-load-ok", count, rejected }));
