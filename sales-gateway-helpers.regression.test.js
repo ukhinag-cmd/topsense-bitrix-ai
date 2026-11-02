@@ -80,3 +80,33 @@ test('preserves valid unrelated Basic and non-Basic authorization', () => {
   assert.equal(sanitizeProxyHeaders({ authorization: basic('upstream:password') }, 'dashboard-secret').authorization, basic('upstream:password'));
   assert.equal(sanitizeProxyHeaders({ authorization: 'Bearer abc' }, 'dashboard-secret').authorization, 'Bearer abc');
 });
+
+test('form payloads do not mask explicit empty primary fields with fallback aliases', () => {
+  const canonical = [
+    ['event', 'ONCRMDEALUPDATE'],
+    ['data[FIELDS][ID]', '941002'],
+    ['auth[application_token]', token],
+  ];
+  const payload = (changes) => {
+    const params = new URLSearchParams(canonical);
+    for (const [key, value] of changes) params.set(key, value);
+    return params.toString();
+  };
+  const cases = [
+    [['event', ''], ['EVENT', 'ONCRMDEALUPDATE']],
+    [['data[FIELDS][ID]', ''], ['data[ID]', '941002']],
+    [['auth[application_token]', ''], ['application_token', token]],
+  ];
+  for (const changes of cases) {
+    assert.equal(parseBitrixEvent(payload(changes), 'application/x-www-form-urlencoded', token), null,
+      'present-but-empty canonical form field cannot be bypassed via a fallback alias');
+  }
+
+  // A genuinely missing canonical field may still use the documented aliases.
+  const fallback = new URLSearchParams([
+    ['EVENT', 'ONCRMDEALUPDATE'], ['data[ID]', '941002'], ['application_token', token],
+  ]);
+  assert.deepEqual(parseBitrixEvent(fallback.toString(), 'application/x-www-form-urlencoded', token), {
+    event: 'ONCRMDEALUPDATE', dealId: '941002', activityId: null,
+  });
+});
