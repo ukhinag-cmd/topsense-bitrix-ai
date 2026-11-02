@@ -525,9 +525,13 @@ function validateDealRow(deal, expectedId = null) {
   if (opportunity != null && opportunity !== "") {
     const decimal = typeof opportunity === "string" &&
       /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(opportunity.trim());
-    const validAmount = typeof opportunity === "number"
-      ? Number.isFinite(opportunity)
-      : decimal && Number.isFinite(Number(opportunity.trim()));
+    const amount = typeof opportunity === "number"
+      ? opportunity : decimal ? Number(opportunity.trim()) : NaN;
+    // IEEE-754 values above MAX_SAFE_INTEGER can silently round an exact
+    // CRM price (9007199254740993 -> 9007199254740992) or overflow totals.
+    // Never turn an untrustworthy amount into a score/history observation.
+    const validAmount = Number.isFinite(amount) &&
+      Math.abs(amount) <= Number.MAX_SAFE_INTEGER;
     if (!validAmount) {
       throw new Error("Invalid Bitrix deal OPPORTUNITY amount");
     }
@@ -1132,6 +1136,7 @@ function validPersistedSnapshot(row) {
       typeof row.open !== "boolean" || row.open !== isOpenSemantic(row.semantic) ||
       typeof row.hasNext !== "boolean" || typeof row.qualificationIssue !== "boolean" ||
       typeof row.amount !== "number" || !Number.isFinite(row.amount) ||
+      Math.abs(row.amount) > Number.MAX_SAFE_INTEGER ||
       !scoreValid(row.prospectScore) || !scoreValid(row.riskScore) ||
       typeof row.updatedAt !== "string" || !plausibleVersion(row.updatedAt) ||
       (row.sourceUpdatedAt != null &&
@@ -1185,6 +1190,7 @@ function validPersistedSnapshot(row) {
     // Sheet audit row otherwise creates a fictitious pre-creation history.
     (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
+    Math.abs(entry.amount) <= Number.MAX_SAFE_INTEGER &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
     ["categoryId", "stageId", "stageName", "currency", "manager", "titleDeal"].every(field => optionalText(entry[field])) &&
     // Old snapshots can omit history semantics; unresolved live Bitrix
@@ -1209,7 +1215,8 @@ function validPersistedSnapshot(row) {
       optionalText(entry.titleDeal) && optionalText(entry.manager) &&
       // Legacy alerts have neither monetary field. New observations record
       // both so future CRM amount/currency edits cannot rewrite the audit.
-      (entry.amount == null || (typeof entry.amount === "number" && Number.isFinite(entry.amount))) &&
+      (entry.amount == null || (typeof entry.amount === "number" &&
+        Number.isFinite(entry.amount) && Math.abs(entry.amount) <= Number.MAX_SAFE_INTEGER)) &&
       (entry.currency == null || (typeof entry.currency === "string" && Boolean(entry.currency.trim()))) &&
       (entry.amount == null) === (entry.currency == null)) &&
     // Each accepted snapshot is emitted with an audit entry whenever its
