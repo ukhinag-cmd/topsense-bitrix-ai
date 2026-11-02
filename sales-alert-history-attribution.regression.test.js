@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-test('existing Sales alerts retain deal title and manager from the alert observation', async t => {
+test('existing Sales alerts retain deal title, manager, amount and currency from the alert observation', async t => {
   const originalFetch = global.fetch;
   const originalTimeout = global.setTimeout;
   const savedEnv = {
@@ -77,10 +77,12 @@ test('existing Sales alerts retain deal title and manager from the alert observa
   assert.ok(before, 'a real score threshold crossing creates an alert');
   assert.equal(before.titleDeal, originalTitle);
   assert.equal(before.manager, '—');
+  assert.equal(before.amount, 250000);
+  assert.equal(before.currency, 'RUB');
 
   liveDeal = {
     ...liveDeal, TITLE: renamedTitle, ASSIGNED_BY_ID: '7',
-    DATE_MODIFY: new Date(now - 30000).toISOString(),
+    OPPORTUNITY: '400000', DATE_MODIFY: new Date(now - 30000).toISOString(),
   };
   await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: id });
   const afterStatus = sales.status();
@@ -90,10 +92,27 @@ test('existing Sales alerts retain deal title and manager from the alert observa
     'renaming must not retroactively change the historical alert title');
   assert.equal(after.manager, '—',
     'the new manager must not be credited with an earlier alert');
+  assert.equal(after.amount, 250000,
+    'a later CRM amount change must not rewrite the alert amount');
+  assert.equal(after.currency, 'RUB');
   assert.equal(afterStatus.prospects.find(x => x.dealId === id).manager, 'Мария Соколова',
     'the current deal still displays its new real manager');
   assert.equal(afterStatus.prospects.find(x => x.dealId === id).title, renamedTitle);
-  assert.equal(dealReads, 3);
+  assert.equal(afterStatus.prospects.find(x => x.dealId === id).amount, 400000);
+
+  liveDeal = { ...liveDeal, OPPORTUNITY: '1000', CURRENCY_ID: 'USD',
+    DATE_MODIFY: new Date(now - 15000).toISOString() };
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: id });
+  const changedCurrencyStatus = sales.status();
+  const earlierAlert = changedCurrencyStatus.alerts.find(x => x.dealId === id && x.type === 'prospect');
+  assert.equal(earlierAlert.amount, 250000,
+    'the earlier alert must retain its amount after a later currency change');
+  assert.equal(earlierAlert.currency, 'RUB',
+    'the earlier alert must retain its original currency');
+  assert.ok(changedCurrencyStatus.recentHistory.some(x =>
+    x.dealId === id && x.amount === 1000 && x.currency === 'USD'),
+  'current score history must still reflect the newer USD deal');
+  assert.equal(dealReads, 4);
   assert.equal(userReads, 1);
 
   const html = sales.html();
