@@ -53,6 +53,23 @@ test('stored Sales snapshots reject malformed optional scalar fields before Dash
     assert.equal(validate({ ...base, scoreHistory: [{ ...history, [field]: ['spoofed'] }] }),
       false, 'history ' + field + ' must remain scalar');
   }
+  // JSON can persist finite but unsafe monetary values. Reject them in
+  // current amounts, older audit observations and historical alerts alike.
+  // Otherwise JS silently rounds exact CRM money or overflows RUB totals.
+  const unsafe = 1e308;
+  assert.equal(validate({
+    ...base, amount: unsafe, scoreHistory: [{ ...history, amount: unsafe }],
+  }), false, 'persisted current money must stay within safe numeric range');
+  assert.equal(validate({
+    ...base, scoreHistory: [{ ...history, amount: unsafe }, history],
+  }), false, 'earlier audit money must be validated independently of the latest observation');
+  assert.equal(validate({
+    ...base, alerts: [{
+      at: now, type: 'warning', title: 'Risk', detail: 'Review',
+      amount: unsafe, currency: 'RUB',
+    }],
+  }), false, 'historical alert money cannot carry unsafe magnitudes');
+
   // Older snapshots may omit these nonessential metadata fields entirely.
   const legacy = { ...base };
   for (const [field] of malformed) delete legacy[field];
