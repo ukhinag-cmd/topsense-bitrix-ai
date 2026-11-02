@@ -46,8 +46,21 @@ test('restoring an unassigned deal cannot resurrect legacy manager #0', async t 
     hasNext: true, nextOverdue: false,
     qualificationStatus: 'Квалифицировано', clientType: 'dealer',
     nextStep: 'Следующее действие запланировано',
-    qualificationIssue: false, prospectScore: 85, riskScore: 0,
-    scoreHistory: [], alerts: [],
+    qualificationIssue: false, prospectScore: 100, riskScore: 0,
+    // Older builds saved #0 not only on the deal but in immutable audit
+    // observations. Rehydration must not display a fictitious manager there.
+    scoreHistory: [{
+      at: modifiedAt, titleDeal: 'Dormant unassigned deal',
+      categoryId: '0', stageId: 'NEW', semantic: 'P', stageName: 'NEW',
+      manager: '#0', amount: 250000, currency: 'RUB',
+      prospectScore: 100, riskScore: 0,
+    }],
+    alerts: [{
+      at: modifiedAt, type: 'warning', title: 'Нет следующего действия',
+      detail: 'Историческое тестовое уведомление',
+      titleDeal: 'Dormant unassigned deal', manager: '#0',
+      amount: 250000, currency: 'RUB',
+    }],
   };
   // Old code also wrote managerId: '' when Bitrix supplied numeric 0.
   const numericZero = { ...row, dealId: '9990212', managerId: '', manager: '#0' };
@@ -81,6 +94,16 @@ test('restoring an unassigned deal cannot resurrect legacy manager #0', async t 
   assert.ok(other, 'numeric zero legacy snapshot remains visible');
   assert.equal(other.managerId, '');
   assert.equal(other.manager, '—', 'numeric 0 must not resurrect manager #0');
+  for (const dealId of [row.dealId, numericZero.dealId]) {
+    const observation = sales.status().recentHistory.find(item => item.dealId === dealId && item.at === modifiedAt);
+    assert.ok(observation, 'legacy score observation remains available');
+    assert.equal(observation.manager, '—',
+      'legacy #0 must not survive inside historical score observations');
+    const notification = sales.status().alerts.find(item => item.dealId === dealId);
+    assert.ok(notification, 'legacy notification remains available');
+    assert.equal(notification.manager, '—',
+      'legacy #0 must not survive inside historical alerts');
+  }
   assert.equal(stored.sourceUpdatedAt, modifiedAt,
     'restoring a label must never invent a new CRM version');
   assert.deepEqual(methods, ['crm.status.list', 'store.load'],
