@@ -97,3 +97,28 @@ test('explicit false-valued JSON metadata is rejected; numeric zero is retained'
     activityProviderId: null, activityDirection: '0', activityOwnerTypeId: '0',
   }, 'finite numeric metadata must not disappear due to truthiness');
 });
+
+// A JSON sender can include legacy identity or token fallbacks alongside the
+// canonical nested fields. Explicit malformed primary values must never be
+// silently replaced with a valid-looking secondary value.
+test('explicit malformed primary JSON fields cannot be masked by fallback aliases', () => {
+  const cases = [
+    { data: { FIELDS: { ID: false }, ID: 941002 } },
+    { data: { FIELDS: { ID: [] } }, dealId: 941002 },
+    { data: { FIELDS: { ID: 0 }, ID: 941002 } },
+    { event: false, EVENT: 'ONCRMDEALUPDATE' },
+    { auth: { application_token: false }, application_token: applicationToken },
+    { auth: { application_token: [] }, application_token: applicationToken },
+  ];
+  for (const changes of cases) {
+    assert.equal(parseBitrixEvent(asEvent(changes), 'application/json', applicationToken), null,
+      'malformed canonical field must not be hidden by a fallback alias');
+  }
+
+  // Fallbacks remain valid when the primary field is genuinely absent.
+  assert.deepEqual(parseBitrixEvent(JSON.stringify({
+    EVENT: 'ONCRMDEALUPDATE', data: { ID: 941002 }, application_token: applicationToken,
+  }), 'application/json', applicationToken), {
+    event: 'ONCRMDEALUPDATE', dealId: '941002', activityId: null,
+  });
+});
