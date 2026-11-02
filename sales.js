@@ -273,10 +273,11 @@ function sourceStageSemanticForRefresh(snapshot) {
     return SALES.stageCategoriesLoaded.has(stageCategoryId(snapshot.categoryId))
       ? "" : snapshot.semantic;
   }
-  // Older persisted snapshots predate sourceStageSemantic. Prefer a verified
-  // dictionary when available; otherwise retain the last known classification
-  // until the next read-only CRM synchronization supplies provenance.
-  return SALES.stages.has(stageKey(snapshot.categoryId, snapshot.stageId))
+  // Older persisted snapshots predate sourceStageSemantic. A verified
+  // pipeline dictionary is authoritative even when the old stage has been
+  // deleted: retaining its last inferred S/F would fabricate a closed deal.
+  // Only preserve the old inference while that pipeline is still unverified.
+  return SALES.stageCategoriesLoaded.has(stageCategoryId(snapshot.categoryId))
     ? "" : snapshot.semantic;
 }
 
