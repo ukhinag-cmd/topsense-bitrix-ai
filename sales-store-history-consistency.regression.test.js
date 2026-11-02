@@ -57,4 +57,18 @@ test('stored Sales snapshot must agree with its latest scored audit entry', () =
   delete legacy.currency;
   assert.equal(validate({ ...row, scoreHistory: [legacy] }), true,
     'old but consistent scored history remains compatible');
+
+  // New per-observation deal titles survive a restart, including a real
+  // historical rename. The latest title must agree with the current snapshot,
+  // and the untrusted Sheet must not inject a non-scalar audit label.
+  const withCurrentTitle = { ...final, titleDeal: row.title };
+  assert.equal(validate({ ...row, scoreHistory: [
+    { ...final, at: earlier, titleDeal: 'Previous real name' }, withCurrentTitle,
+  ] }), true, 'historical titles must be allowed to differ from the current name');
+  assert.equal(validate({ ...row, scoreHistory: [
+    { ...final, at: earlier }, { ...withCurrentTitle, titleDeal: 'Forged latest title' },
+  ] }), false, 'latest stored audit title must match the current title');
+  assert.equal(validate({ ...row, scoreHistory: [
+    { ...final, at: earlier, titleDeal: { value: 'unsafe' } }, withCurrentTitle,
+  ] }), false, 'stored history titles must be strings, never objects');
 });
