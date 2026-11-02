@@ -75,3 +75,25 @@ test('legitimate numeric JSON activity metadata remains supported', () => {
     activityProviderId: 'CRM', activityDirection: '2', activityOwnerTypeId: '2',
   });
 });
+
+test('explicit false-valued JSON metadata is rejected; numeric zero is retained', () => {
+  // Explicit false is not the same as an absent optional field. A truthy
+  // fallback (|| null) silently drops it before the scalar validator runs.
+  for (const field of ['PROVIDER_ID', 'DIRECTION', 'OWNER_TYPE_ID']) {
+    const raw = asEvent({
+      event: 'ONCRMACTIVITYUPDATE',
+      data: { FIELDS: { ID: '941003', [field]: false } },
+    });
+    assert.equal(parseBitrixEvent(raw, 'application/json', applicationToken), null,
+      field + ' must reject explicit boolean false instead of erasing it');
+  }
+
+  const zero = asEvent({
+    event: 'ONCRMACTIVITYUPDATE',
+    data: { FIELDS: { ID: '941003', DIRECTION: 0, OWNER_TYPE_ID: 0 } },
+  });
+  assert.deepEqual(parseBitrixEvent(zero, 'application/json', applicationToken), {
+    event: 'ONCRMACTIVITYUPDATE', dealId: null, activityId: '941003',
+    activityProviderId: null, activityDirection: '0', activityOwnerTypeId: '0',
+  }, 'finite numeric metadata must not disappear due to truthiness');
+});
