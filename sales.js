@@ -429,7 +429,9 @@ async function ensureStageCategory(categoryId) {
 
 async function managerName(id) {
   const key = String(id || "");
-  if (!key) return "—";
+  // Bitrix uses 0 (as a string or number) for an unassigned deal.
+  // It is not a user ID: never display #0 or issue user.get for it.
+  if (!key || key === "0") return "—";
   if (SALES.managers.has(key)) return SALES.managers.get(key);
 
   // Concurrent event handlers can resolve user.get out of order. Only the
