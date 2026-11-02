@@ -789,7 +789,12 @@ function addAlert(snapshot, previous, {
 
   const push = (type, title, detail) => {
     if (alerts.some(a => a.type === type && a.title === title && (Date.now() - dateValue(a.at)) < 6 * 3600000)) return;
-    alerts.push({ at: now, type, title, detail });
+    // Notifications are audit observations: later CRM renames or reassignment
+    // must not rewrite who owned the deal or what it was called at alert time.
+    alerts.push({
+      at: now, type, title, detail,
+      titleDeal: snapshot.title, manager: snapshot.manager,
+    });
   };
 
   // First observation of a historical won deal is not a newly won deal.
@@ -1197,7 +1202,10 @@ function validPersistedSnapshot(row) {
       // Multiple alerts from one observation may share a timestamp.
       (index === 0 || dateValue(entry.at) >= dateValue(row.alerts[index - 1].at)) &&
       typeof entry.type === "string" && typeof entry.title === "string" &&
-      typeof entry.detail === "string") &&
+      typeof entry.detail === "string" &&
+      // Legacy alerts omit attribution. New stored attribution must be scalar
+      // to prevent poisoned Sheet values leaking into Dashboard rendering.
+      optionalText(entry.titleDeal) && optionalText(entry.manager)) &&
     // Each accepted snapshot is emitted with an audit entry whenever its
     // scored state, amount, currency, pipeline, stage or outcome changes.
     // A Sheet row whose final history entry disagrees with its current state
@@ -1655,7 +1663,15 @@ function status() {
     }
   }
   const alerts = all
-    .flatMap(x => (x.alerts || []).map(a => ({ ...a, dealId: x.dealId, titleDeal: x.title, manager: x.manager, amount: x.amount, currency: x.currency })))
+    .flatMap(x => (x.alerts || []).map(a => ({
+      ...a, dealId: x.dealId,
+      // Preserve the name and owner recorded when the alert was generated.
+      // Old persisted alerts did not have either field, so keep the legacy
+      // current-deal fallback rather than losing those notifications.
+      titleDeal: typeof a.titleDeal === "string" ? a.titleDeal : x.title,
+      manager: typeof a.manager === "string" ? a.manager : x.manager,
+      amount: x.amount, currency: x.currency,
+    })))
     .sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0))
     .slice(0, 30);
 
