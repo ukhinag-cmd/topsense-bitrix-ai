@@ -71,6 +71,13 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
   // Apply the same scalar contract to form and JSON payloads before validation.
   if (typeof event !== 'string' || typeof suppliedToken !== 'string' ||
       (typeof entityId !== 'string' && typeof entityId !== 'number')) return null;
+  // Bitrix activity metadata is optional, but still untrusted input. JSON
+  // arrays can masquerade as scalar IDs via String(['2']), while objects
+  // with a non-callable toString can throw and terminate the HTTP handler.
+  // Form posts are already strings; JSON may legitimately carry numbers.
+  const optionalScalar = value => value == null || typeof value === 'string' ||
+    (typeof value === 'number' && Number.isFinite(value));
+  if (![activityProviderId, activityDirection, activityOwnerTypeId].every(optionalScalar)) return null;
 
   const tokenA = Buffer.from(String(suppliedToken || ''), 'utf8');
   const tokenB = Buffer.from(expected, 'utf8');
