@@ -44,6 +44,41 @@ function aliasesConsistent(values, kind) {
   return normalized.every(value => value === normalized[0]);
 }
 
+// JSON.parse silently discards earlier values when an object repeats a key.
+// Distinct HTTP parsers can then disagree about the event, CRM identity or
+// credential they verified. Scan *parsed-valid* JSON lexically to reject
+// duplicate object names, including equivalent Unicode-escaped spellings.
+// Use an iterative stack to avoid recursion failures on deeply nested input.
+function hasDuplicateJsonObjectKeys(json) {
+  const stack = [];
+  for (let i = 0; i < json.length; i += 1) {
+    const ch = json[i];
+    if (ch === '"') {
+      const start = i;
+      for (i += 1; i < json.length; i += 1) {
+        if (json[i] === '\\') { i += 1; continue; }
+        if (json[i] === '"') break;
+      }
+      const container = stack[stack.length - 1];
+      if (container?.kind === 'object' && container.expectKey) {
+        const key = JSON.parse(json.slice(start, i + 1));
+        if (container.keys.has(key)) return true;
+        container.keys.add(key);
+        container.expectKey = false;
+      }
+    } else if (ch === '{') {
+      stack.push({ kind: 'object', expectKey: true, keys: new Set() });
+    } else if (ch === '[') {
+      stack.push({ kind: 'array' });
+    } else if (ch === '}' || ch === ']') {
+      stack.pop();
+    } else if (ch === ',' && stack[stack.length - 1]?.kind === 'object') {
+      stack[stack.length - 1].expectKey = true;
+    }
+  }
+  return false;
+}
+
 function parseBitrixEvent(raw, contentType, expectedToken) {
   const expected = typeof expectedToken === 'string' ? expectedToken : '';
   if (!expected) return null;
@@ -59,8 +94,10 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
 
   if (String(contentType || '').toLowerCase().includes('application/json')) {
     let body;
-    try { body = JSON.parse(bytes.toString('utf8')); } catch { return null; }
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+    const json = bytes.toString('utf8');
+    try { body = JSON.parse(json); } catch { return null; }
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+        hasDuplicateJsonObjectKeys(json)) return null;
     // Do not silently replace malformed JSON envelopes with empty objects:
     // a valid fallback ID or token could otherwise mask a malformed primary
     // data/FIELDS/auth container. Null or absent containers retain support
