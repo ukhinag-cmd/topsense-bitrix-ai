@@ -68,6 +68,18 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     suppliedToken = (body.auth && typeof body.auth === 'object' ? body.auth.application_token : undefined) ?? body.application_token;
   } else {
     const params = new URLSearchParams(bytes.toString('utf8'));
+    // URLSearchParams.get silently takes the first of several occurrences.
+    // Repeated identity, credential or activity metadata keys are ambiguous:
+    // a conflicting later value must not be ignored when accepting an event.
+    // Leave unrelated vendor-specific repeated fields untouched.
+    for (const key of [
+      'event', 'EVENT', 'data[FIELDS][ID]', 'data[ID]', 'dealId', 'activityId',
+      'auth[application_token]', 'application_token',
+      'data[FIELDS][PROVIDER_ID]', 'data[FIELDS][DIRECTION]',
+      'data[FIELDS][OWNER_TYPE_ID]',
+    ]) {
+      if (params.getAll(key).length > 1) return null;
+    }
     // URLSearchParams.get returns null for absent keys, and '' for explicit
     // empty values. Preserve that distinction to reject masked bad fields.
     event = params.get('event') ?? params.get('EVENT');
