@@ -951,7 +951,10 @@ async function snapshotDeal(deal, source = "event") {
     last.prospectScore !== row.prospectScore ||
     last.riskScore !== row.riskScore ||
     num(last.amount) !== row.amount ||
-    last.currency !== row.currency
+    last.currency !== row.currency ||
+    // A true CRM manager transfer is itself a significant audit change.
+    // Use the identity, not a mutable display-name lookup, as the trigger.
+    (previous && previous.managerId !== row.managerId)
   ) {
     history.push({
       // For an activity-only refresh the CRM DATE_MODIFY is unchanged; use
@@ -963,6 +966,7 @@ async function snapshotDeal(deal, source = "event") {
       stageId: row.stageId,
       semantic: row.semantic,
       stageName: row.stageName,
+      manager: row.manager,
       amount: row.amount,
       currency: row.currency,
       prospectScore: row.prospectScore,
@@ -1175,7 +1179,7 @@ function validPersistedSnapshot(row) {
     (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
-    ["categoryId", "stageId", "stageName", "currency"].every(field => optionalText(entry[field])) &&
+    ["categoryId", "stageId", "stageName", "currency", "manager"].every(field => optionalText(entry[field])) &&
     // Old snapshots can omit history semantics; unresolved live Bitrix
     // stages are written with an empty semantic until a verified dictionary
     // is available. Accept that canonical unknown value across restarts.
@@ -1587,6 +1591,7 @@ function refreshTimedScores() {
         stageId: row.stageId,
         semantic: row.semantic,
         stageName: row.stageName,
+        manager: row.manager,
         amount: row.amount,
         currency: row.currency,
         prospectScore: row.prospectScore,
@@ -1634,7 +1639,11 @@ function status() {
       const tail = recentHistory[recentHistory.length - 1];
       if (recentHistory.length >= historyLimit && at <= (dateValue(tail.at) || 0)) continue;
       recentHistory.push({
-        ...entry, dealId: deal.dealId, titleDeal: deal.title, manager: deal.manager,
+        ...entry, dealId: deal.dealId, titleDeal: deal.title,
+        // Historical observations must not be retroactively attributed to
+        // the current manager after a CRM ownership transfer. Older saved
+        // observations lack this field and retain the legacy fallback.
+        manager: typeof entry.manager === "string" ? entry.manager : deal.manager,
       });
       recentHistory.sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0));
       if (recentHistory.length > historyLimit) recentHistory.pop();
