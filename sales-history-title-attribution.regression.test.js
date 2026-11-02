@@ -65,20 +65,32 @@ test('score history keeps the title seen at each observation after a CRM rename'
   assert.equal(history[0].titleDeal, originalTitle);
 
   // Renaming a deal can leave the scores, stage, amount and manager unchanged.
-  // An audit history must nevertheless preserve the original name and record
-  // the new name instead of retroactively relabeling the old observation.
+  // The score-only audit history must preserve its old title without inventing
+  // another scoring observation for a title-only CRM edit.
   liveDeal = {
     ...base, TITLE: renamedTitle,
     DATE_MODIFY: new Date(now - 60000).toISOString(),
   };
   await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: id });
   history = sales.status().recentHistory;
-  assert.equal(history.length, 2, 'the real CRM title change belongs in the audit trail');
+  assert.equal(history.length, 1, 'a title-only rename must not fabricate a score observation');
+  assert.equal(history[0].titleDeal, originalTitle,
+    'the original observation must keep its title even after the current deal is renamed');
+  assert.equal(sales.status().prospects.find(row => row.dealId === id).title, renamedTitle);
+
+  // A later real amount/score change does create a new observation. It should
+  // retain the title at that point without rewriting the older observation.
+  liveDeal = {
+    ...liveDeal, OPPORTUNITY: '250000',
+    DATE_MODIFY: new Date(now - 30000).toISOString(),
+  };
+  await sales.handleEvent({ event: 'ONCRMDEALUPDATE', dealId: id });
+  history = sales.status().recentHistory;
+  assert.equal(history.length, 2);
   assert.equal(history[0].titleDeal, renamedTitle);
   assert.equal(history[1].titleDeal, originalTitle);
-  assert.equal(history[0].prospectScore, history[1].prospectScore);
-  assert.equal(history[0].riskScore, history[1].riskScore);
-  assert.equal(reads, 2, 'all CRM requests must be mock-only reads');
+  assert.notEqual(history[0].prospectScore, history[1].prospectScore);
+  assert.equal(reads, 3, 'all CRM requests must be mock-only reads');
 
   const html = sales.html();
   assert.ok(html.includes('&lt;svg onload=alert(1)&gt;'));
