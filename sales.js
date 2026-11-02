@@ -1711,8 +1711,18 @@ function status() {
 
   // Dashboard totals are deliberately RUB-only. Other currencies are shown
   // per deal and counted separately; no implicit FX conversion is performed.
-  const sumRub = rows => rows.reduce((acc, x) =>
-    acc + (String(x.currency || "").trim().toUpperCase() === "RUB" ? num(x.amount) : 0), 0);
+  const sumRub = rows => {
+    let total = 0;
+    for (const row of rows) {
+      if (String(row.currency || "").trim().toUpperCase() !== "RUB") continue;
+      const next = total + num(row.amount);
+      // Individually valid amounts can still yield an unsafe aggregate.
+      // Never publish a rounded/overflowed subtotal as if it were exact.
+      if (!Number.isFinite(next) || Math.abs(next) > Number.MAX_SAFE_INTEGER) return null;
+      total = next;
+    }
+    return total;
+  };
   const excludedCurrencyCount = rows =>
     rows.filter(x => String(x.currency || "").trim().toUpperCase() !== "RUB").length;
   const rubAmount = row => String(row.currency || "").trim().toUpperCase() === "RUB" ? num(row.amount) : -1;
@@ -1779,7 +1789,9 @@ function html() {
   const syncAge = s.lastSyncAt ? Date.now() - Date.parse(s.lastSyncAt) : Infinity;
   const syncState = s.lastError ? "bad" : s.syncPartial ? "partial" : !s.lastSyncAt ? "pending" : syncAge <= 5 * 60 * 1000 ? "ok" : "stale";
   const syncLabel = s.lastError ? "Ошибка последней операции" : s.syncPartial ? "Частичная синхронизация — загрузка продолжается" : !s.lastSyncAt ? "Ожидание первой синхронизации" : syncAge <= 5 * 60 * 1000 ? "Синхронизация актуальна" : "Синхронизация устарела";
-  const sumHint = key => money(s.sums[key], "RUB") + " · только RUB" +
+  const sumHint = key => (s.sums[key] === null
+    ? "— · превышен предел точности"
+    : money(s.sums[key], "RUB")) + " · только RUB" +
     (s.excludedCurrencyCounts[key] ? " · " + s.excludedCurrencyCounts[key] + " вне суммы" : "");
   const prospectRows = s.prospects.map(x => `<tr>
     <td><a href="${escapeHtml(dealLink(x.dealId))}" target="_blank" rel="noopener">#${escapeHtml(x.dealId)} · ${escapeHtml(x.title)}</a></td>
