@@ -46,8 +46,16 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     let body;
     try { body = JSON.parse(bytes.toString('utf8')); } catch { return null; }
     if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-    const data = body.data && typeof body.data === 'object' ? body.data : {};
-    const fields = data.FIELDS && typeof data.FIELDS === 'object' ? data.FIELDS : {};
+    // Do not silently replace malformed JSON envelopes with empty objects:
+    // a valid fallback ID or token could otherwise mask a malformed primary
+    // data/FIELDS/auth container. Null or absent containers retain support
+    // for legacy flat Bitrix event payloads.
+    const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (body.data != null && !isRecord(body.data)) return null;
+    const data = body.data ?? {};
+    if (data.FIELDS != null && !isRecord(data.FIELDS)) return null;
+    const fields = data.FIELDS ?? {};
+    if (body.auth != null && !isRecord(body.auth)) return null;
     // A present but malformed primary field must not be erased by an
     // otherwise valid fallback alias. Only null/missing values fall back.
     event = body.event ?? body.EVENT;
