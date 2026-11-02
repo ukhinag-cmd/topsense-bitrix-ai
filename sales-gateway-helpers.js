@@ -50,9 +50,11 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     const fields = data.FIELDS && typeof data.FIELDS === 'object' ? data.FIELDS : {};
     event = body.event || body.EVENT;
     entityId = fields.ID || data.ID || body.dealId || body.activityId;
-    activityProviderId = fields.PROVIDER_ID || null;
-    activityDirection = fields.DIRECTION || null;
-    activityOwnerTypeId = fields.OWNER_TYPE_ID || null;
+    // Preserve explicit JSON values until type validation. Truthy fallbacks
+    // silently discard false (invalid) and 0 (valid finite number).
+    activityProviderId = fields.PROVIDER_ID ?? null;
+    activityDirection = fields.DIRECTION ?? null;
+    activityOwnerTypeId = fields.OWNER_TYPE_ID ?? null;
     suppliedToken = (body.auth && typeof body.auth === 'object' && body.auth.application_token) || body.application_token;
   } else {
     const params = new URLSearchParams(bytes.toString('utf8'));
