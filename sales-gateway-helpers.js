@@ -29,6 +29,21 @@ function decodeBasicCredentials(header) {
   return { username: decoded.slice(0, separator), password: decoded.slice(separator + 1) };
 }
 
+// Multiple documented aliases describe one event identity. Reject ambiguous
+// input rather than silently trusting the first name in parser precedence.
+// A malformed shadow field must not be rescued by a valid canonical value.
+function aliasesConsistent(values, kind) {
+  const present = values.filter(value => value != null);
+  if (present.length < 2) return true;
+  const scalar = kind === 'id'
+    ? value => typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))
+    : value => typeof value === 'string';
+  if (!present.every(scalar)) return false;
+  const normalized = present.map(value =>
+    kind === 'event' ? value.toUpperCase() : String(value));
+  return normalized.every(value => value === normalized[0]);
+}
+
 function parseBitrixEvent(raw, contentType, expectedToken) {
   const expected = typeof expectedToken === 'string' ? expectedToken : '';
   if (!expected) return null;
@@ -56,6 +71,11 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     if (data.FIELDS != null && !isRecord(data.FIELDS)) return null;
     const fields = data.FIELDS ?? {};
     if (body.auth != null && !isRecord(body.auth)) return null;
+    if (!aliasesConsistent([body.event, body.EVENT], 'event') ||
+        !aliasesConsistent([fields.ID, data.ID, body.dealId, body.activityId], 'id') ||
+        !aliasesConsistent([body.auth?.application_token, body.application_token], 'token')) {
+      return null;
+    }
     // A present but malformed primary field must not be erased by an
     // otherwise valid fallback alias. Only null/missing values fall back.
     event = body.event ?? body.EVENT;
@@ -79,6 +99,16 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
       'data[FIELDS][OWNER_TYPE_ID]',
     ]) {
       if (params.getAll(key).length > 1) return null;
+    }
+    if (!aliasesConsistent([params.get('event'), params.get('EVENT')], 'event') ||
+        !aliasesConsistent([
+          params.get('data[FIELDS][ID]'), params.get('data[ID]'),
+          params.get('dealId'), params.get('activityId'),
+        ], 'id') ||
+        !aliasesConsistent([
+          params.get('auth[application_token]'), params.get('application_token'),
+        ], 'token')) {
+      return null;
     }
     // URLSearchParams.get returns null for absent keys, and '' for explicit
     // empty values. Preserve that distinction to reject masked bad fields.
