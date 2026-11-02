@@ -29,6 +29,9 @@ test('persisted alerts are validated even when historical score observations are
   };
   assert.equal(validate(row), true, 'valid legacy empty history with an alert is accepted');
   assert.equal(validate({ ...row, alerts: [] }), true, 'empty alert/history arrays are accepted');
+  assert.equal(validate({ ...row, alerts: [{
+    ...good, titleDeal: 'Старое название', manager: 'Старый менеджер',
+  }] }), true, 'valid historical alert attribution survives a Sheet restart');
 
   for (const invalid of [
     [null],
@@ -37,6 +40,8 @@ test('persisted alerts are validated even when historical score observations are
     [{ ...good, at: 'not a date' }],
     [{ ...good, at: new Date(Date.now() + 86400000).toISOString() }],
     [{ ...good, type: null }],
+    [{ ...good, titleDeal: { unexpected: 'object' } }],
+    [{ ...good, manager: ['not a scalar'] }],
     [{ ...good }, { ...good, at: earlier }],
   ]) {
     assert.equal(validate({ ...row, alerts: invalid }), false,
