@@ -76,7 +76,9 @@ test('malformed live Bitrix opportunity amounts cannot replace trusted Sales sco
   assert.equal(trusted.amount, 300000);
   assert.equal(trusted.sourceUpdatedAt, baselineVersion);
 
-  for (const invalidAmount of ['not-a-number', 'Infinity', { unexpected: true }]) {
+  // Finite IEEE-754 values can still be too large to represent money safely.
+  // 9007199254740993 silently rounds, while 1e308 can overflow RUB totals.
+  for (const invalidAmount of ['not-a-number', 'Infinity', '9007199254740993', '1e308', { unexpected: true }]) {
     dealResponse = {
       ...base, TITLE: 'Corrupt amount', OPPORTUNITY: invalidAmount,
       DATE_MODIFY: newerVersion,
