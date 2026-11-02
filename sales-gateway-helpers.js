@@ -48,14 +48,16 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
     const data = body.data && typeof body.data === 'object' ? body.data : {};
     const fields = data.FIELDS && typeof data.FIELDS === 'object' ? data.FIELDS : {};
-    event = body.event || body.EVENT;
-    entityId = fields.ID || data.ID || body.dealId || body.activityId;
+    // A present but malformed primary field must not be erased by an
+    // otherwise valid fallback alias. Only null/missing values fall back.
+    event = body.event ?? body.EVENT;
+    entityId = fields.ID ?? data.ID ?? body.dealId ?? body.activityId;
     // Preserve explicit JSON values until type validation. Truthy fallbacks
     // silently discard false (invalid) and 0 (valid finite number).
     activityProviderId = fields.PROVIDER_ID ?? null;
     activityDirection = fields.DIRECTION ?? null;
     activityOwnerTypeId = fields.OWNER_TYPE_ID ?? null;
-    suppliedToken = (body.auth && typeof body.auth === 'object' && body.auth.application_token) || body.application_token;
+    suppliedToken = (body.auth && typeof body.auth === 'object' ? body.auth.application_token : undefined) ?? body.application_token;
   } else {
     const params = new URLSearchParams(bytes.toString('utf8'));
     event = params.get('event') || params.get('EVENT');
