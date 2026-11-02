@@ -1276,9 +1276,27 @@ async function loadPersisted() {
       // Repair only the presentation label, without fabricating CRM updates,
       // changing the saved source version or calling user.get for ID 0.
       const legacyUnassigned = row.managerId === "0" ||
-        ((row.managerId == null || row.managerId === "") && row.manager === "#0");
-      const hydrated = legacyUnassigned && row.manager !== "—"
-        ? { ...row, manager: "—" } : row;
+        ((row.managerId == null || row.managerId === "") &&
+          (row.manager === "#0" || row.manager === "—"));
+      // The same obsolete #0 label was also persisted inside historical
+      // score observations and alerts. Correct only that known unassigned
+      // identity, never a real historical manager after reassignment.
+      const historyHasZero = legacyUnassigned &&
+        row.scoreHistory.some(entry => entry.manager === "#0");
+      const alertsHaveZero = legacyUnassigned &&
+        row.alerts.some(entry => entry.manager === "#0");
+      const hydrated = legacyUnassigned &&
+        (row.manager !== "—" || historyHasZero || alertsHaveZero)
+        ? {
+            ...row, manager: "—",
+            scoreHistory: historyHasZero
+              ? row.scoreHistory.map(entry => entry.manager === "#0" ? { ...entry, manager: "—" } : entry)
+              : row.scoreHistory,
+            alerts: alertsHaveZero
+              ? row.alerts.map(entry => entry.manager === "#0" ? { ...entry, manager: "—" } : entry)
+              : row.alerts,
+          }
+        : row;
       SALES.deals.set(id, hydrated);
       count += 1;
     }
