@@ -311,6 +311,14 @@ function shortDate(value) {
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(t));
 }
 
+function shortDateTime(value) {
+  const t = dateValue(value);
+  if (t === null) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).format(new Date(t));
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -1613,6 +1621,25 @@ function status() {
   const noNext = open.filter(x => !x.hasNext);
   const qualIssues = open.filter(x => x.qualificationIssue);
   const won = all.filter(x => x.semantic === "S");
+  // The original Dashboard exposed per-deal history only for deals that
+  // happened to be in a prospect, attention or won queue. A closed-lost deal
+  // therefore disappeared from the visible audit trail. Keep a bounded,
+  // read-only cross-deal timeline that includes every outcome and first read.
+  // Bounded insertion avoids flattening every stored score record per refresh.
+  const recentHistory = [];
+  const historyLimit = 25;
+  for (const deal of all) {
+    for (const entry of (Array.isArray(deal.scoreHistory) ? deal.scoreHistory : [])) {
+      const at = dateValue(entry.at) || 0;
+      const tail = recentHistory[recentHistory.length - 1];
+      if (recentHistory.length >= historyLimit && at <= (dateValue(tail.at) || 0)) continue;
+      recentHistory.push({
+        ...entry, dealId: deal.dealId, titleDeal: deal.title, manager: deal.manager,
+      });
+      recentHistory.sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0));
+      if (recentHistory.length > historyLimit) recentHistory.pop();
+    }
+  }
   const alerts = all
     .flatMap(x => (x.alerts || []).map(a => ({ ...a, dealId: x.dealId, titleDeal: x.title, manager: x.manager, amount: x.amount, currency: x.currency })))
     .sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0))
@@ -1667,6 +1694,7 @@ function status() {
       .sort((a,b) => b.riskScore - a.riskScore || rubAmount(b) - rubAmount(a))
       .slice(0, 30),
     wins: won.slice(0, 20),
+    recentHistory,
     alerts,
   };
 }
@@ -1710,6 +1738,19 @@ function html() {
     <td>${escapeHtml(x.nextStep)}</td>
   </tr>`).join("");
 
+  const outcomeLabel = semantic => semantic === "S" ? "Продажа" :
+    semantic === "F" ? "Закрыта без продажи" : semantic === "P" ? "В работе" : "Не определено";
+  const historyRows = s.recentHistory.map(x => `<tr>
+    <td>${shortDateTime(x.at)}</td>
+    <td><a href="${escapeHtml(dealLink(x.dealId))}" target="_blank" rel="noopener">${escapeHtml(x.titleDeal)}</a></td>
+    <td>${escapeHtml(x.manager)}</td>
+    <td>${escapeHtml(x.stageName || x.stageId || "—")}</td>
+    <td>${escapeHtml(outcomeLabel(x.semantic))}</td>
+    <td><span class="score good">${x.prospectScore}</span></td>
+    <td><span class="score ${x.riskScore >= 60 ? "bad" : "warn"}">${x.riskScore}</span></td>
+    <td>${escapeHtml(money(x.amount, x.currency))}</td>
+  </tr>`).join("");
+
   const alertRows = s.alerts.slice(0,12).map(a => `<div class="alert">
     <span class="dot ${badgeClass(a.type)}"></span>
     <div><b>${escapeHtml(a.title)}</b><br><a href="${escapeHtml(dealLink(a.dealId))}" target="_blank" rel="noopener">${escapeHtml(a.titleDeal)}</a><br><small>${escapeHtml(a.manager)} · ${escapeHtml(money(a.amount, a.currency))} · ${shortDate(a.at)}</small></div>
@@ -1741,6 +1782,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 <div class="layout"><main>
 <div class="panel"><h2>⭐ Перспективные сделки</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Score</th><th>Этап</th><th>Последний контакт</th><th>Next Step</th><th>Что делать</th></tr></thead><tbody>${prospectRows || '<tr><td colspan="8">Пока нет сделок с score ≥60. База заполняется из Bitrix.</td></tr>'}</tbody></table></div></div>
 <div class="panel"><h2>🔴 Требуют внимания</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Risk</th><th>Next Step</th><th>Квалификация</th><th>Действие</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7">Критичных отклонений не найдено.</td></tr>'}</tbody></table></div></div>
+<div class="panel"><h2>История оценок</h2><div class="tablewrap"><table><thead><tr><th>Время</th><th>Сделка</th><th>Менеджер</th><th>Этап</th><th>Результат</th><th>Prospect</th><th>Risk</th><th>Сумма</th></tr></thead><tbody>${historyRows || '<tr><td colspan="8">История появится после загрузки сделок.</td></tr>'}</tbody></table></div><div class="note">Последние 25 наблюдений: первичная загрузка, изменение стадии или оценок.</div></div>
 </main><aside><div class="panel"><h2>Уведомления</h2><div class="alerts">${alertRows || '<div class="note">События появятся после изменений сделок.</div>'}</div></div>
 <div class="panel"><h2>Статус</h2><div class="note">Отслеживается: ${s.counts.tracked} сделок<br>Последний webhook: ${escapeHtml(s.lastEventAt || "—")}<br>Последняя синхронизация: ${escapeHtml(s.lastSyncAt || "—")}<br>Ошибка: ${escapeHtml(s.lastError?.message || "нет")}</div></div></aside></div>
 </div></body></html>`;
