@@ -49,6 +49,8 @@ test('restoring an unassigned deal cannot resurrect legacy manager #0', async t 
     qualificationIssue: false, prospectScore: 85, riskScore: 0,
     scoreHistory: [], alerts: [],
   };
+  // Old code also wrote managerId: '' when Bitrix supplied numeric 0.
+  const numericZero = { ...row, dealId: '9990212', managerId: '', manager: '#0' };
   const methods = [];
   global.fetch = async (input, options = {}) => {
     const url = String(input);
@@ -61,7 +63,9 @@ test('restoring an unassigned deal cannot resurrect legacy manager #0', async t 
       assert.equal(body.action, 'load', 'mock store is strictly read-only');
       methods.push('store.load');
       return { ok: true, status: 200, text: async () => JSON.stringify({
-        rows: [{ key: 'sales:deal:' + row.dealId, payload: row }],
+        rows: [row, numericZero].map(payload => ({
+          key: 'sales:deal:' + payload.dealId, payload,
+        })),
       }) };
     }
     throw new Error('Unexpected request: ' + url);
@@ -72,7 +76,13 @@ test('restoring an unassigned deal cannot resurrect legacy manager #0', async t 
   const stored = sales.status().prospects.find(item => item.dealId === row.dealId);
   assert.ok(stored, 'an old dormant deal is still visible');
   assert.equal(stored.managerId, '0', 'stored Bitrix assignment is preserved');
-  assert.equal(stored.manager, '—', 'no manager means no #0 after restart');
+  assert.equal(stored.manager, '—', 'string 0 means no manager after restart');
+  const other = sales.status().prospects.find(item => item.dealId === numericZero.dealId);
+  assert.ok(other, 'numeric zero legacy snapshot remains visible');
+  assert.equal(other.managerId, '');
+  assert.equal(other.manager, '—', 'numeric 0 must not resurrect manager #0');
+  assert.equal(stored.sourceUpdatedAt, modifiedAt,
+    'restoring a label must never invent a new CRM version');
   assert.deepEqual(methods, ['crm.status.list', 'store.load'],
     'restoring manager metadata must not make user.get or CRM write calls');
 });
