@@ -773,6 +773,7 @@ function scoreDeal(deal, previous) {
 function addAlert(snapshot, previous, {
   allowWonTransition = true,
   allowScoreTransitions = true,
+  allowWarningTransitions = true,
 } = {}) {
   const alerts = Array.isArray(previous?.alerts) ? previous.alerts.slice(-MAX_ALERTS) : [];
   const now = new Date().toISOString();
@@ -798,10 +799,10 @@ function addAlert(snapshot, previous, {
   if (allowScoreTransitions && snapshot.open && previous && snapshot.riskScore >= 60 && num(previous.riskScore) < 60) {
     push("risk", "Сделка вошла в красную зону", "Risk " + snapshot.riskScore + " · " + snapshot.nextStep);
   }
-  if (snapshot.open && !snapshot.hasNext && previous?.hasNext !== false) {
+  if (allowWarningTransitions && snapshot.open && !snapshot.hasNext && previous?.hasNext !== false) {
     push("warning", "Нет следующего действия", snapshot.nextStep);
   }
-  if (snapshot.qualificationIssue && !previous?.qualificationIssue) {
+  if (allowWarningTransitions && snapshot.qualificationIssue && !previous?.qualificationIssue) {
     push("warning", "Проверить квалификацию", "Высокий потенциал при неполной квалификации");
   }
 
@@ -1592,6 +1593,9 @@ function refreshTimedScores() {
     row.alerts = addAlert(row, previous, {
       allowWonTransition: false,
       allowScoreTransitions: previous.semantic === row.semantic,
+      // Stage-dictionary-only reopening can expose an existing qualification
+      // gap. That is a corrected audit classification, not a new CRM warning.
+      allowWarningTransitions: previous.semantic === row.semantic,
     });
     SALES.deals.set(id, row);
     markDirty(id);
