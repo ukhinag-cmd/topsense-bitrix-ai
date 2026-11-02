@@ -32,6 +32,12 @@ test('persisted alerts are validated even when historical score observations are
   assert.equal(validate({ ...row, alerts: [{
     ...good, titleDeal: 'Старое название', manager: 'Старый менеджер',
   }] }), true, 'valid historical alert attribution survives a Sheet restart');
+  assert.equal(validate({ ...row, alerts: [{
+    ...good, amount: 250000, currency: 'RUB',
+  }] }), true, 'new alerts retain their historical money values after restart');
+  assert.equal(validate({ ...row, alerts: [{
+    ...good, amount: 0, currency: 'USD',
+  }] }), true, 'zero-value alerts remain valid when their currency is explicit');
 
   for (const invalid of [
     [null],
@@ -42,6 +48,13 @@ test('persisted alerts are validated even when historical score observations are
     [{ ...good, type: null }],
     [{ ...good, titleDeal: { unexpected: 'object' } }],
     [{ ...good, manager: ['not a scalar'] }],
+    [{ ...good, amount: { bad: 'nested' }, currency: 'RUB' }],
+    [{ ...good, amount: Infinity, currency: 'RUB' }],
+    [{ ...good, amount: '250000', currency: 'RUB' }],
+    [{ ...good, amount: 250000, currency: ['RUB'] }],
+    [{ ...good, amount: 250000, currency: '' }],
+    [{ ...good, amount: 250000 }],
+    [{ ...good, currency: 'RUB' }],
     [{ ...good }, { ...good, at: earlier }],
   ]) {
     assert.equal(validate({ ...row, alerts: invalid }), false,
