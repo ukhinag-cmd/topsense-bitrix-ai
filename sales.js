@@ -952,8 +952,6 @@ async function snapshotDeal(deal, source = "event") {
     last.riskScore !== row.riskScore ||
     num(last.amount) !== row.amount ||
     last.currency !== row.currency ||
-    // A deal rename is also a real CRM audit change even when scores stay equal.
-    (previous && previous.title !== row.title) ||
     // A true CRM manager transfer is itself a significant audit change.
     // Use the identity, not a mutable display-name lookup, as the trigger.
     (previous && previous.managerId !== row.managerId)
@@ -1215,10 +1213,7 @@ function validPersistedSnapshot(row) {
         (latest.categoryId == null || row.categoryId == null ||
           latest.categoryId === row.categoryId) &&
         (latest.semantic == null || latest.semantic === row.semantic) &&
-        (latest.currency == null || latest.currency === row.currency) &&
-        // The most recent observation must use the currently recorded name;
-        // older snapshots without title metadata remain backward compatible.
-        (latest.titleDeal == null || latest.titleDeal === row.title)
+        (latest.currency == null || latest.currency === row.currency)
       );
     })();
 }
