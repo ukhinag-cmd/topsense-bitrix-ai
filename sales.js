@@ -952,6 +952,8 @@ async function snapshotDeal(deal, source = "event") {
     last.riskScore !== row.riskScore ||
     num(last.amount) !== row.amount ||
     last.currency !== row.currency ||
+    // A deal rename is also a real CRM audit change even when scores stay equal.
+    (previous && previous.title !== row.title) ||
     // A true CRM manager transfer is itself a significant audit change.
     // Use the identity, not a mutable display-name lookup, as the trigger.
     (previous && previous.managerId !== row.managerId)
@@ -962,6 +964,7 @@ async function snapshotDeal(deal, source = "event") {
       at: chronologicalHistoryAt(
         activityOnlyRefresh ? row.observedAt : row.updatedAt, last?.at, row.observedAt
       ),
+      titleDeal: row.title,
       categoryId: row.categoryId,
       stageId: row.stageId,
       semantic: row.semantic,
@@ -1179,7 +1182,7 @@ function validPersistedSnapshot(row) {
     (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
-    ["categoryId", "stageId", "stageName", "currency", "manager"].every(field => optionalText(entry[field])) &&
+    ["categoryId", "stageId", "stageName", "currency", "manager", "titleDeal"].every(field => optionalText(entry[field])) &&
     // Old snapshots can omit history semantics; unresolved live Bitrix
     // stages are written with an empty semantic until a verified dictionary
     // is available. Accept that canonical unknown value across restarts.
@@ -1212,7 +1215,10 @@ function validPersistedSnapshot(row) {
         (latest.categoryId == null || row.categoryId == null ||
           latest.categoryId === row.categoryId) &&
         (latest.semantic == null || latest.semantic === row.semantic) &&
-        (latest.currency == null || latest.currency === row.currency)
+        (latest.currency == null || latest.currency === row.currency) &&
+        // The most recent observation must use the currently recorded name;
+        // older snapshots without title metadata remain backward compatible.
+        (latest.titleDeal == null || latest.titleDeal === row.title)
       );
     })();
 }
@@ -1587,6 +1593,7 @@ function refreshTimedScores() {
         last.prospectScore !== row.prospectScore || last.riskScore !== row.riskScore) {
       history.push({
         at: chronologicalHistoryAt(new Date().toISOString(), last?.at),
+        titleDeal: row.title,
         categoryId: row.categoryId,
         stageId: row.stageId,
         semantic: row.semantic,
@@ -1639,7 +1646,10 @@ function status() {
       const tail = recentHistory[recentHistory.length - 1];
       if (recentHistory.length >= historyLimit && at <= (dateValue(tail.at) || 0)) continue;
       recentHistory.push({
-        ...entry, dealId: deal.dealId, titleDeal: deal.title,
+        ...entry, dealId: deal.dealId,
+        // Legacy saved histories did not record a per-observation title.
+        // New entries retain the real name at observation time across renames.
+        titleDeal: typeof entry.titleDeal === "string" ? entry.titleDeal : deal.title,
         // Historical observations must not be retroactively attributed to
         // the current manager after a CRM ownership transfer. Older saved
         // observations lack this field and retain the legacy fallback.
