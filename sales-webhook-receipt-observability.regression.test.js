@@ -78,3 +78,62 @@ test('read-only gateway logs authenticated Bitrix receipts and processing outcom
   assert.equal(logs.length, beforeRejected,
     'unauthenticated events must not create trusted receipt or processing logs');
 });
+
+
+test('failed Bitrix read is not mislabeled as a harmless no-deal webhook', async t => {
+  // No real CRM request is made: all reads fail inside this local stub.
+  const originalUrl = process.env.BITRIX_WEBHOOK_BASE;
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const events = [];
+  process.env.BITRIX_WEBHOOK_BASE = 'https://example.bitrix24.ru/rest/12345/test-only/';
+  global.fetch = async () => { throw new Error('mock CRM read unavailable'); };
+  const capture = (...args) => {
+    for (const arg of args) {
+      try {
+        const event = JSON.parse(String(arg));
+        if (event.source === 'sales-mvp') events.push(event);
+      } catch {}
+    }
+  };
+  console.log = capture;
+  console.warn = capture;
+  t.after(() => {
+    if (originalUrl === undefined) delete process.env.BITRIX_WEBHOOK_BASE;
+    else process.env.BITRIX_WEBHOOK_BASE = originalUrl;
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    console.warn = originalWarn;
+  });
+
+  const sales = require('./sales');
+  const gateway = createGateway({
+    bitrixToken: token,
+    dashboardToken: 'test-dashboard-token',
+    salesModule: sales,
+  });
+  const port = await new Promise(resolve =>
+    gateway.listen(0, '127.0.0.1', () => resolve(gateway.address().port))
+  );
+  t.after(() => new Promise(resolve => gateway.close(resolve)));
+
+  const received = await send(port, {
+    event: 'ONCRMDEALUPDATE',
+    data: { FIELDS: { ID: '887452' } },
+    auth: { application_token: token },
+  });
+  assert.equal(received.status, 200, 'HTTP receipt is independent of asynchronous CRM read');
+  for (let attempt = 0; attempt < 100 &&
+      !events.some(event => event.action === 'event-processing-failed'); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  // Flush the gateway's promise continuation after the sales handler exits.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(events.some(event => event.action === 'webhook-accepted'));
+  assert.ok(events.some(event => event.action === 'event-processing-failed'));
+  assert.equal(events.some(event => event.action === 'webhook-processed'), false);
+  assert.equal(events.some(event => event.action === 'webhook-no-deal-snapshot'), false,
+    'a failed CRM read must not be reported as a successful no-deal event');
+  assert.equal(sales.status().lastError?.source, 'sales-event');
+});
