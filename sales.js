@@ -258,8 +258,13 @@ function dateValue(value) {
     if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1] ||
         (match[4] !== undefined &&
           (Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 59)) ||
+        // Date.parse accepts fictitious offsets such as +23:59. Bitrix
+        // datetimes represent actual civil time zones (UTC offset <= 14h).
+        // Reject impossible zones before they can shift score history,
+        // DATE_MODIFY ordering, contact risk or Next Step dates.
         (match[7] !== undefined &&
-          (Number(match[8]) > 23 || Number(match[9]) > 59))) return null;
+          (Number(match[8]) > 14 || Number(match[9]) > 59 ||
+           (Number(match[8]) === 14 && Number(match[9]) !== 0)))) return null;
   }
   const t = value ? new Date(value).getTime() : NaN;
   return Number.isFinite(t) ? t : null;
