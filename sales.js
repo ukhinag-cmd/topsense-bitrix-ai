@@ -87,7 +87,12 @@ async function bitrixRaw(method, params = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.error) {
-    throw new Error(payload?.error_description || payload?.error || ("HTTP " + response.status));
+    // Bitrix and intermediary error descriptions are untrusted text. They
+    // can contain the credential embedded in BITRIX_WEBHOOK_BASE or other
+    // private request details. Health output and Render logs must never
+    // repeat provider-supplied error strings. The safe REST method and HTTP
+    // status still identify the failed read for diagnostics.
+    throw new Error("Bitrix REST " + method + " failed (HTTP " + response.status + ")");
   }
   // HTTP 200 with an HTML/JSON intermediary response is not a successful
   // Bitrix REST read. Treat a missing result as an error, not as an empty deal.
