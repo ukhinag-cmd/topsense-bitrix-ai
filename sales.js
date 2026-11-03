@@ -1743,6 +1743,13 @@ function refreshTimedScores() {
     if (keys.every(key => scored[key] === previous[key])) continue;
 
     const row = { ...previous, ...scored };
+    // Age diagnostics change with time even when the trusted deal state does
+    // not. A dashboard GET must not write the same snapshot to Google Sheets
+    // merely because a displayed age rounded to another tenth of a day.
+    // Persist actual stage, score, qualification and Next Step transitions.
+    const ageDiagnostics = new Set(["stageAgeDays", "dealAgeDays", "lastActivityAgeDays"]);
+    const shouldPersist = keys.some(key =>
+      !ageDiagnostics.has(key) && scored[key] !== previous[key]);
     const history = Array.isArray(previous.scoreHistory) ? previous.scoreHistory.slice(-MAX_HISTORY) : [];
     const last = history[history.length - 1];
     if (!last || previous.semantic !== row.semantic ||
@@ -1775,7 +1782,7 @@ function refreshTimedScores() {
       allowWarningTransitions: previous.semantic === row.semantic,
     });
     SALES.deals.set(id, row);
-    markDirty(id);
+    if (shouldPersist) markDirty(id);
   }
 }
 
