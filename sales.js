@@ -242,6 +242,25 @@ function clamp(n, min = 0, max = 100) {
 }
 
 function dateValue(value) {
+  if (typeof value === "string") {
+    // Date.parse is permissive: "1" becomes January 2001 and an impossible
+    // 2026-02-30 becomes March 2. Neither is an authentic Bitrix date.
+    // Accept ISO dates and Bitrix/ISO datetimes (including explicit offsets),
+    // then verify the Gregorian calendar before comparing CRM versions,
+    // scoring stale contact, or hydrating persisted history.
+    const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))?)?$/.exec(value);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1] ||
+        (match[4] !== undefined &&
+          (Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 59)) ||
+        (match[7] !== undefined &&
+          (Number(match[8]) > 23 || Number(match[9]) > 59))) return null;
+  }
   const t = value ? new Date(value).getTime() : NaN;
   return Number.isFinite(t) ? t : null;
 }
