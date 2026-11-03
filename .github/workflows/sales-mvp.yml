@@ -1,0 +1,23 @@
+name: TOP-SENS Sales MVP read-only tests
+
+# Branch-only test signal. Never deploy or run against live Bitrix/Render.
+on:
+  push:
+    branches: [sales-mvp]
+
+permissions:
+  contents: read
+
+jobs:
+  sales-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm run test:sales
