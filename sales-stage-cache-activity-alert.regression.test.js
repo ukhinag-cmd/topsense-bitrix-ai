@@ -45,13 +45,13 @@ test('same-version activity recovery after a stage-cache correction does not fab
   const baseline = {
     ID: id, TITLE: 'Unchanged source deal', CATEGORY_ID: '0',
     STAGE_ID: 'C1:ACTIVE', STAGE_SEMANTIC_ID: '',
-    OPPORTUNITY: '250000', CURRENCY_ID: 'RUB',
+    OPPORTUNITY: '55000', CURRENCY_ID: 'RUB',
     ASSIGNED_BY_ID: '',
     DATE_CREATE: new Date(now - 86400000).toISOString(),
     DATE_MODIFY: version,
     LAST_ACTIVITY_TIME: new Date(now - 2 * 3600000).toISOString(),
     ACTIVITY_TIME: new Date(now + 3 * 3600000).toISOString(),
-    UF_CRM_AI_CLIENT_TYPE: 'dealer',
+    UF_CRM_AI_CLIENT_TYPE: '',
     UF_CRM_AI_QUAL_STATUS: 'Квалифицировано',
   };
   const refreshed = {
@@ -59,6 +59,7 @@ test('same-version activity recovery after a stage-cache correction does not fab
     LAST_ACTIVITY_TIME: new Date(now - 10 * 60000).toISOString(),
   };
   let stageSemantic = 'P';
+  let listedDeal = refreshed;
   const calls = [];
   global.fetch = async (url, options = {}) => {
     assert.equal(options.method, 'POST');
@@ -72,7 +73,7 @@ test('same-version activity recovery after a stage-cache correction does not fab
     } else if (method === 'crm.deal.get.json') {
       result = baseline;
     } else if (method === 'crm.deal.list.json') {
-      return { ok: true, status: 200, json: async () => ({ result: [refreshed], total: 1 }) };
+      return { ok: true, status: 200, json: async () => ({ result: [listedDeal], total: 1 }) };
     } else {
       throw new Error('Unexpected mocked REST method: ' + method);
     }
@@ -101,6 +102,21 @@ test('same-version activity recovery after a stage-cache correction does not fab
   assert.deepEqual(won.scoreHistory.map(x => x.semantic), ['P', 'S']);
   assert.equal(won.alerts.some(a => a.type === 'success'), false,
     'a stage-dictionary-only outcome correction is not a newly won CRM deal');
+  // A later dictionary correction can reopen the same unchanged deal.
+  // Its Prospect Score crosses 70 because the stage semantics, not the CRM
+  // deal version, changed. A newer contact may still be recovered safely.
+  stageSemantic = 'P';
+  listedDeal = { ...baseline,
+    LAST_ACTIVITY_TIME: new Date(now - 60 * 1000).toISOString() };
+  elapsed = 62 * 60000;
+  await sync();
+  const reopened = sales.status().prospects.find(row => row.dealId === id);
+  assert.ok(reopened && reopened.prospectScore >= 70);
+  assert.equal(reopened.sourceUpdatedAt, version);
+  assert.equal(reopened.lastActivityAt, listedDeal.LAST_ACTIVITY_TIME);
+  assert.deepEqual(reopened.scoreHistory.map(x => x.semantic), ['P', 'S', 'P']);
+  assert.equal(reopened.alerts.some(a => a.type === 'prospect'), false,
+    'dictionary-only reopening cannot be treated as a new prospect transition');
   assert.deepEqual([...new Set(calls)].sort(),
     ['crm.status.list.json', 'crm.deal.get.json', 'crm.deal.list.json'].sort());
 });
