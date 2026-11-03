@@ -1,6 +1,11 @@
 const SALES = {
   startedAt: new Date().toISOString(),
   lastEventAt: null,
+  // Receipt and read-only processing are distinct: HTTP 200 does not
+  // prove a CRM read completed. Track outcomes without storing payloads.
+  lastProcessedEventAt: null,
+  lastFailedEventAt: null,
+  lastIgnoredEventAt: null,
   lastSyncAt: null,
   // A bounded page scan is incomplete until Bitrix stops returning next.
   syncPartial: false,
@@ -1430,10 +1435,18 @@ async function handleEvent(evt, { propagateError = false } = {}) {
     }
     // Clear an earlier event-processing error only after a real successful
     // read. Ignored events and errors from sync/store must not be hidden.
-    if (result && SALES.lastError?.source === "sales-event") SALES.lastError = null;
+    if (result) {
+      SALES.lastProcessedEventAt = new Date().toISOString();
+      if (SALES.lastError?.source === "sales-event") SALES.lastError = null;
+    } else {
+      // An activity belonging to a lead/company, not a deal, is deliberately
+      // ignored. This must not be counted as a completed deal snapshot.
+      SALES.lastIgnoredEventAt = new Date().toISOString();
+    }
     return result;
   } catch (error) {
-    SALES.lastError = { at: new Date().toISOString(), source: "sales-event", message: String(error.message || error) };
+    SALES.lastFailedEventAt = new Date().toISOString();
+    SALES.lastError = { at: SALES.lastFailedEventAt, source: "sales-event", message: String(error.message || error) };
     // Gateway processing must reject on a failed CRM read so its receipt
     // audit cannot label the event as a harmless no-deal snapshot. Direct
     // callers retain the original null-return/error-log behavior.
@@ -1837,6 +1850,9 @@ function status() {
     service: "topsense-sales-mvp",
     startedAt: SALES.startedAt,
     lastEventAt: SALES.lastEventAt,
+    lastProcessedEventAt: SALES.lastProcessedEventAt,
+    lastFailedEventAt: SALES.lastFailedEventAt,
+    lastIgnoredEventAt: SALES.lastIgnoredEventAt,
     lastSyncAt: SALES.lastSyncAt,
     syncPartial: SALES.syncPartial,
     // A successful deal read may clear the latest sales-event error even
@@ -1967,7 +1983,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 <div class="panel"><h2>🔴 Требуют внимания</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Risk</th><th>Next Step</th><th>Квалификация</th><th>Действие</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7">Критичных отклонений не найдено.</td></tr>'}</tbody></table></div></div>
 <div class="panel"><h2>История оценок</h2><div class="tablewrap"><table><thead><tr><th>Время</th><th>Сделка</th><th>Менеджер</th><th>Этап</th><th>Результат</th><th>Prospect</th><th>Risk</th><th>Сумма</th></tr></thead><tbody>${historyRows || '<tr><td colspan="8">История появится после загрузки сделок.</td></tr>'}</tbody></table></div><div class="note">Последние 25 наблюдений: первичная загрузка, изменение стадии или оценок.</div></div>
 </main><aside><div class="panel"><h2>Уведомления</h2><div class="alerts">${alertRows || '<div class="note">События появятся после изменений сделок.</div>'}</div></div>
-<div class="panel"><h2>Статус</h2><div class="note">Отслеживается: ${s.counts.tracked} сделок<br>Последний webhook: ${escapeHtml(s.lastEventAt || "—")}<br>Последняя синхронизация: ${escapeHtml(s.lastSyncAt || "—")}<br>Ошибка: ${escapeHtml(s.lastError?.message || "нет")}</div></div></aside></div>
+<div class="panel"><h2>Статус</h2><div class="note">Отслеживается: ${s.counts.tracked} сделок<br>Последний webhook: ${escapeHtml(s.lastEventAt || "—")}<br>Обработан CRM: ${escapeHtml(s.lastProcessedEventAt || "—")}<br>Ошибка обработки: ${escapeHtml(s.lastFailedEventAt || "—")}<br>Пропущен без сделки: ${escapeHtml(s.lastIgnoredEventAt || "—")}<br>Последняя синхронизация: ${escapeHtml(s.lastSyncAt || "—")}<br>Ошибка: ${escapeHtml(s.lastError?.message || "нет")}</div></div></aside></div>
 </div></body></html>`;
 }
 
