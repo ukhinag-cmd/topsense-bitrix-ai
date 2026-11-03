@@ -60,6 +60,16 @@ test('Sales rejects impossible or non-CRM date strings without corrupting a trus
   assert.equal(sales.status().counts.tracked, 0,
     'loose Date.parse strings must not be accepted as CRM versions');
 
+  // Date.parse accepts offsets as large as +23:59, although actual
+  // Bitrix/CRM civil time zones cannot be more than 14 hours from UTC.
+  // Such an impossible offset can move a source version to another day.
+  for (const offset of ['+14:01', '-14:01', '+23:59']) {
+    deal = { ...deal, DATE_CREATE: null, DATE_MODIFY: '2026-10-20T12:00:00' + offset };
+    await sales.handleEvent(event);
+    assert.equal(sales.status().counts.tracked, 0,
+      'impossible CRM UTC offset ' + offset + ' must not create a trusted snapshot');
+  }
+
   deal = { ...deal, DATE_CREATE: '2024-02-29T10:45:00+03:00', DATE_MODIFY: goodVersion };
   await sales.handleEvent(event);
   const trusted = sales.status().prospects.find(row => row.dealId === id);
