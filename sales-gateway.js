@@ -148,11 +148,11 @@ function createGateway({
         upstream.pipe(res);
       });
 
-      proxy.on('error', error => {
+      proxy.on('error', () => {
         if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: false, error: 'upstream unavailable' }));
         console.error(JSON.stringify({
-          source: 'sales-mvp', action: 'gateway-error', error: error.message,
+          source: 'sales-mvp', action: 'gateway-error', error: 'Legacy upstream request failed',
         }));
       });
 
@@ -255,10 +255,10 @@ function createGateway({
 
 function start() {
   const sales = require('./sales');
-  sales.start().catch(error => {
+  sales.start().catch(() => {
     console.error(JSON.stringify({
       source: 'sales-mvp', action: 'startup-error',
-      error: error instanceof Error ? error.message : String(error),
+      error: 'Sales startup failed',
     }));
   });
 
