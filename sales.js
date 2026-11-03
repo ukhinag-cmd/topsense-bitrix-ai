@@ -1615,6 +1615,16 @@ async function syncRecentDeals(limitPages = 4) {
         throw new Error("Bitrix deal list pagination omitted previously announced deals");
       }
 
+      // A full 50-record page with neither next nor total is ambiguous:
+      // an intermediary may have dropped both pagination markers while
+      // more records remain. Probe the next offset before declaring the scan
+      // complete; an empty follow-up page also confirms a genuine 50-row end.
+      // A verified total equal to the consumed count needs no extra read.
+      if (nextStart < 0 && validatedRows.length === 50 &&
+          observedTotal === null && expectedTotal === null) {
+        nextStart = start + validatedRows.length;
+      }
+
       for (const deal of validatedRows) {
         await snapshotDeal(deal, "sync");
       }
