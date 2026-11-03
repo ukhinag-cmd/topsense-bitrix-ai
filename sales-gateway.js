@@ -187,14 +187,27 @@ function createGateway({
           return res.end('Invalid or unsupported Bitrix event');
         }
 
+        // Log only validated event identity, never the raw body or application
+        // token. An HTTP 200 is a receipt, not proof that read-only CRM
+        // processing completed; Render logs must distinguish both outcomes.
+        const audit = {
+          source: 'sales-mvp', event: event.event,
+          dealId: event.dealId, activityId: event.activityId,
+        };
+        console.log(JSON.stringify({ ...audit, action: 'webhook-accepted' }));
+
         // Acknowledged authenticated events are processed by the read-only
         // Sales module only. NEVER pass events to the legacy server.js, whose
         // activity/deal handlers may create or modify Bitrix CRM records.
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
         res.end(JSON.stringify({ ok: true, event: event.event, dealId: event.dealId, activityId: event.activityId }));
-        Promise.resolve().then(() => salesApi.handleEvent(event)).catch(error => {
+        Promise.resolve().then(() => salesApi.handleEvent(event)).then(result => {
+          console.log(JSON.stringify({
+            ...audit, action: result ? 'webhook-processed' : 'webhook-no-deal-snapshot',
+          }));
+        }).catch(error => {
           console.warn(JSON.stringify({
-            source: 'sales-mvp', action: 'event-processing-failed',
+            ...audit, action: 'event-processing-failed',
             error: error instanceof Error ? error.message : String(error),
           }));
         });
