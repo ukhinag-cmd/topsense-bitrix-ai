@@ -1372,7 +1372,7 @@ async function processActivityId(activityId) {
   return processDealId(activity.OWNER_ID, "activity");
 }
 
-async function handleEvent(evt) {
+async function handleEvent(evt, { propagateError = false } = {}) {
   SALES.lastEventAt = new Date().toISOString();
   const upper = String(evt?.event || "").toUpperCase();
   try {
@@ -1388,6 +1388,10 @@ async function handleEvent(evt) {
     return result;
   } catch (error) {
     SALES.lastError = { at: new Date().toISOString(), source: "sales-event", message: String(error.message || error) };
+    // Gateway processing must reject on a failed CRM read so its receipt
+    // audit cannot label the event as a harmless no-deal snapshot. Direct
+    // callers retain the original null-return/error-log behavior.
+    if (propagateError) throw error;
     console.warn(JSON.stringify({
       source: "sales-mvp",
       action: "event-processing-failed",
