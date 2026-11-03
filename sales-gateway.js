@@ -53,7 +53,8 @@ function canonicalRequestPath(rawPath) {
 function isProtectedPath(pathname) {
   const withoutMatrixParams = pathname.split('/').map(segment => segment.split(';', 1)[0]).join('/');
   const lower = withoutMatrixParams.toLowerCase();
-  return lower === '/sales' || lower.startsWith('/sales/') || lower === '/bitrix/events';
+  return lower === '/sales' || lower.startsWith('/sales/') ||
+    lower === '/bitrix/events' || lower.startsWith('/bitrix/events/');
 }
 
 function createGateway({
@@ -234,6 +235,15 @@ function createGateway({
         });
       });
       return;
+    }
+
+    // Treat the whole Bitrix event namespace as read-only and isolated.
+    // Unknown child routes must not fall through to a legacy CRM handler,
+    // which might interpret them as mutating webhook or admin actions.
+    if (pathname.startsWith('/bitrix/events/')) {
+      req.resume();
+      res.writeHead(404, { 'cache-control': 'no-store' });
+      return res.end('Unknown Bitrix event route');
     }
 
     forward(null);
