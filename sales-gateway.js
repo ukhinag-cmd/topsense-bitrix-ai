@@ -151,6 +151,15 @@ function createGateway({
       else req.pipe(proxy);
     }
 
+    // The Bitrix webhook has one permitted method: authenticated POST.
+    // Even an explicitly configured legacy upstream must never receive
+    // GET/PUT/PATCH/DELETE/OPTIONS on this CRM event route. The legacy
+    // handler may perform writes; proxying unexpected methods is unsafe.
+    if (pathname === '/bitrix/events' && req.method !== 'POST') {
+      res.writeHead(405, { allow: 'POST', 'cache-control': 'no-store' });
+      return res.end('Method not allowed');
+    }
+
     // Never let the existing handler accept events when its shared token is
     // absent; server.js intentionally preserves its legacy optional-token mode.
     if (req.method === 'POST' && pathname === '/bitrix/events' && req.url !== '/bitrix/events') {
