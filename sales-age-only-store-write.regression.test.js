@@ -92,4 +92,19 @@ test('read-only dashboard age diagnostics do not trigger redundant Sheet writes'
     'age-only status GET must not schedule a redundant external persistence request');
   assert.equal(writes.length, 1);
   assert.equal(crmReads, 1);
+
+  // A real time-driven Risk Score transition must still queue persistence:
+  // age-only optimization cannot swallow the newest audit observation.
+  Date.now = () => baseNow + 16 * day;
+  const stale = sales.status().prospects.find(row => row.dealId === id);
+  assert.ok(stale && stale.riskScore > after.riskScore);
+  assert.equal(stale.sourceUpdatedAt, version);
+  assert.equal(stale.scoreHistory.length, 2);
+  assert.equal(scheduled.length, 2,
+    'a genuine Risk Score transition must still persist its history');
+  scheduled[1]();
+  await new Promise(resolve => saved.setTimeout(resolve, 0));
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1][0].payload.scoreHistory.length, 2);
+  assert.equal(crmReads, 1, 'Dashboard must not call live CRM during temporal rescoring');
 });
