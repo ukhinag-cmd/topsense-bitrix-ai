@@ -1074,7 +1074,18 @@ async function snapshotDeal(deal, source = "event") {
     });
   }
   row.scoreHistory = history.slice(-MAX_HISTORY);
-  row.alerts = addAlert(row, previous);
+  // An unchanged deal DATE_MODIFY can accompany a legitimate contact/Next
+  // Step refresh. If a separately refreshed stage dictionary also changed
+  // the inferred outcome, that classification is an audit correction, not
+  // evidence of a newly won deal or a fresh score/qualification transition.
+  // Preserve genuine contact-only alerts when stage meaning did not change.
+  const correctedStageWithoutDealVersion =
+    activityOnlyRefresh && previous && previous.semantic !== row.semantic;
+  row.alerts = addAlert(row, previous, {
+    allowWonTransition: !correctedStageWithoutDealVersion,
+    allowScoreTransitions: !correctedStageWithoutDealVersion,
+    allowWarningTransitions: !correctedStageWithoutDealVersion,
+  });
 
   const changed = !previous || [
     "title","managerId","sourceId","categoryId","stageId","semantic","sourceStageSemantic","stageSemanticKnown","amount","currency","sourceUpdatedAt",
