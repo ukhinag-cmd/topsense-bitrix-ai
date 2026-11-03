@@ -19,5 +19,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
-      - run: npm install --ignore-scripts --no-audit --no-fund
+      # Sales uses only Node built-ins; avoid installing the legacy CRM's
+      # unused pdf-parse dependency in this isolated security test job.
       - run: npm run test:sales
