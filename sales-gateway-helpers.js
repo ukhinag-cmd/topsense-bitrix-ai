@@ -116,7 +116,12 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     // A present but malformed primary field must not be erased by an
     // otherwise valid fallback alias. Only null/missing values fall back.
     event = body.event ?? body.EVENT;
-    entityId = fields.ID ?? data.ID ?? body.dealId ?? body.activityId;
+    // The legacy flat-ID fallback must match the event entity type. A
+    // deal event carrying only activityId (or the reverse) is not a valid
+    // identifier for the claimed event, even with a matching shared token.
+    const activityEvent = typeof event === 'string' &&
+      /^ONCRMACTIVITY(?:ADD|UPDATE)$/i.test(event);
+    entityId = fields.ID ?? data.ID ?? (activityEvent ? body.activityId : body.dealId);
     // Preserve explicit JSON values until type validation. Truthy fallbacks
     // silently discard false (invalid) and 0 (valid finite number).
     activityProviderId = fields.PROVIDER_ID ?? null;
@@ -150,8 +155,10 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     // URLSearchParams.get returns null for absent keys, and '' for explicit
     // empty values. Preserve that distinction to reject masked bad fields.
     event = params.get('event') ?? params.get('EVENT');
+    const activityEvent = typeof event === 'string' &&
+      /^ONCRMACTIVITY(?:ADD|UPDATE)$/i.test(event);
     entityId = params.get('data[FIELDS][ID]') ?? params.get('data[ID]') ??
-      params.get('dealId') ?? params.get('activityId');
+      (activityEvent ? params.get('activityId') : params.get('dealId'));
     activityProviderId = params.get('data[FIELDS][PROVIDER_ID]');
     activityDirection = params.get('data[FIELDS][DIRECTION]');
     activityOwnerTypeId = params.get('data[FIELDS][OWNER_TYPE_ID]');
