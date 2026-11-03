@@ -65,7 +65,16 @@ function createGateway({
 } = {}) {
   const salesApi = salesModule || require('./sales');
   return http.createServer((req, res) => {
-    const rawPath = String(req.url || '/').split('?', 1)[0] || '/';
+    // Proxy-style absolute-form targets (http://host/sales) and ambiguous
+    // network-path targets (//host/bitrix/events) can hide a protected route
+    // from canonicalRequestPath, then be forwarded unchanged to the legacy
+    // CRM upstream. Accept only ordinary, unambiguous origin-form paths.
+    const requestTarget = String(req.url || '');
+    if (!requestTarget.startsWith('/') || requestTarget.startsWith('//')) {
+      res.writeHead(400, { 'cache-control': 'no-store' });
+      return res.end('Unsupported HTTP request target');
+    }
+    const rawPath = requestTarget.split('?', 1)[0] || '/';
     const pathname = canonicalRequestPath(rawPath);
     if (!pathname) {
       res.writeHead(400, { 'cache-control': 'no-store' });
