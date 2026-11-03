@@ -116,6 +116,14 @@ function createGateway({
       return res.end(body);
     }
 
+    // Only /sales and /sales/status are implemented. An authenticated GET
+    // to any other Sales path must never fall through to a legacy upstream:
+    // older routes may expose private CRM data or cause unintended effects.
+    if (pathname === '/sales' || pathname.startsWith('/sales/')) {
+      res.writeHead(404, { 'cache-control': 'no-store' });
+      return res.end('Unknown read-only Sales route');
+    }
+
     function forward(bodyBuffer) {
       // The Sales process is isolated by default: no legacy server is started.
       // Only tests or an explicitly constructed gateway may provide upstreamPort.
