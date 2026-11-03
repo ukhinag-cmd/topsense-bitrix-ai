@@ -951,10 +951,12 @@ async function snapshotDeal(deal, source = "event") {
     if (!incomingVersion) return latest;
     if (latestVersion) {
       const order = compareBitrixTimestamp(incomingVersion, latestVersion);
-      if (order === 0 && source === "activity") {
-        // Bitrix can add a scheduled action without changing the deal's
-        // DATE_MODIFY or last contact. Accept strictly newer contact/next times,
-        // but never regress either field from an out-of-order activity read.
+      if (order === 0 && (source === "activity" || source === "sync")) {
+        // Bitrix may update contact or schedule without changing the deal's
+        // DATE_MODIFY. A missed activity webhook must be recoverable through
+        // scheduled read-only sync. Accept strictly newer contact/next times
+        // from either source, but never regress values or borrow unversioned
+        // title, money or stage fields from an equal-version read.
         // An earlier reschedule needs a newer source version to disambiguate.
         const incomingLast = dateValue(deal.LAST_ACTIVITY_TIME);
         const currentLast = dateValue(latest.lastActivityAt);
