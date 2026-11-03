@@ -201,7 +201,11 @@ function createGateway({
         // activity/deal handlers may create or modify Bitrix CRM records.
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
         res.end(JSON.stringify({ ok: true, event: event.event, dealId: event.dealId, activityId: event.activityId }));
-        Promise.resolve().then(() => salesApi.handleEvent(event)).then(result => {
+        // The real Sales handler normally absorbs CRM read errors to protect
+        // direct callers. In the gateway request path, propagate them so an
+        // unsuccessful read cannot be mistaken for a benign activity without
+        // a deal owner in the receipt audit.
+        Promise.resolve().then(() => salesApi.handleEvent(event, { propagateError: true })).then(result => {
           console.log(JSON.stringify({
             ...audit, action: result ? 'webhook-processed' : 'webhook-no-deal-snapshot',
           }));
