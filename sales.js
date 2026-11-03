@@ -76,15 +76,22 @@ async function bitrixRaw(method, params = {}) {
     throw new Error("Read-only Bitrix method blocked");
   }
   const url = new URL(method + ".json", bitrixBaseUrl());
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(params),
-    // The Bitrix webhook credential is in the URL path. Do not follow
-    // redirects that might forward CRM data outside the configured origin.
-    redirect: "error",
-    signal: AbortSignal.timeout(15000),
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify(params),
+      // The Bitrix webhook credential is in the URL path. Do not follow
+      // redirects that might forward CRM data outside the configured origin.
+      redirect: "error",
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    // Fetch/redirect/timeout exceptions may contain the credential-bearing
+    // Bitrix URL. Never expose their raw message in Sales health or logs.
+    throw new Error("Bitrix REST " + method + " transport failed");
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.error) {
     // Bitrix and intermediary error descriptions are untrusted text. They
@@ -148,7 +155,13 @@ async function storeRequest(action, rows = null) {
   };
   let response;
   for (let hops = 0; hops < 5; hops += 1) {
-    response = await fetch(targetUrl, options);
+    try {
+      response = await fetch(targetUrl, options);
+    } catch {
+      // Transport failures are untrusted: some clients include request URLs
+      // and other credentials in their exception text.
+      throw new Error("Sales store transport failed");
+    }
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     // Never replay the store secret in a POST, even to the same origin.
     if (response.status === 307 || response.status === 308) {
@@ -178,14 +191,18 @@ async function storeRequest(action, rows = null) {
   if ([301, 302, 303, 307, 308].includes(response?.status)) {
     throw new Error("Sales store redirect limit exceeded");
   }
-  const text = await response.text();
+  let text;
+  try { text = await response.text(); }
+  catch { throw new Error("Sales store response read failed"); }
   let payload;
   try { payload = JSON.parse(text); } catch { throw new Error("Invalid Sales store response"); }
   // HTTP 200 alone is not an acknowledgement: redirects, login pages or
   // malformed JSON must never cause pending score history to be discarded.
   if (!response.ok || !payload || typeof payload !== "object" ||
       Array.isArray(payload) || payload.ok === false) {
-    throw new Error(typeof payload?.error === "string" ? payload.error : "Sales store response failed");
+    // Store-provided errors can echo its shared secret or sensitive URLs.
+    // Report the failure without copying untrusted response fields.
+    throw new Error("Sales store response failed");
   }
   // Existing read-only load responses may have rows without an ok flag.
   // Writes are different: never clear dirty history without explicit ok:true.
