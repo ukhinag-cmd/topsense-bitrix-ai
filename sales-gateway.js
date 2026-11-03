@@ -227,10 +227,13 @@ function createGateway({
           console.log(JSON.stringify({
             ...audit, action: result ? 'webhook-processed' : 'webhook-no-deal-snapshot',
           }));
-        }).catch(error => {
+        }).catch(() => {
+          // Exceptions from REST clients and intermediaries may embed the
+          // credential-bearing Bitrix webhook URL in their message. Keep the
+          // failure signal but never put raw exception text in Render logs.
           console.warn(JSON.stringify({
             ...audit, action: 'event-processing-failed',
-            error: error instanceof Error ? error.message : String(error),
+            error: 'Read-only CRM processing failed',
           }));
         });
       });
