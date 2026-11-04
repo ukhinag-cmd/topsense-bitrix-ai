@@ -103,3 +103,27 @@ test('missing bindings never permits an unproven, foreign or malformed primary o
     await assert.rejects(probeDealNextActivity(async () => ({result:[row]}), 72));
   }
 });
+
+
+test('rejects normalized impossible calendar dates and impossible timezone offsets', async () => {
+  // Date.parse silently converts 2026-02-30 into March 2 on Node.js.
+  // A malformed provider deadline must not become a real next step.
+  for (const deadline of [
+    '2026-02-30T09:30:00+03:00',
+    '2026-11-31T09:30:00+03:00',
+    '2026-01-01T24:00:00+03:00',
+    '2026-11-07T09:30:00+15:00',
+    '2026-11-07T09:30:00+14:30',
+  ]) {
+    await assert.rejects(
+      probeDealNextActivity(async () => ({result:[activity(99, deadline)]}), 72),
+      /deadline/i, 'reject invalid deadline ' + deadline
+    );
+  }
+  assert.equal(
+    (await probeDealNextActivity(async () =>
+      ({result:[activity(99, '2028-02-29T09:30:00+03:00')]}), 72)).nextActivityAt,
+    '2028-02-29T06:30:00.000Z',
+    'valid leap-day deadlines still work'
+  );
+});
