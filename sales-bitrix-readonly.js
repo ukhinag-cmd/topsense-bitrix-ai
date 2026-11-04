@@ -31,7 +31,7 @@ function adapter(request){
     const text=(typeof data.total==="number"||typeof data.total==="string")
      ?String(data.total).trim():"";
     const total=Number(text);
-    if(!/^(0|[1-9]\\d*)$/.test(text)||!Number.isSafeInteger(total)||
+    if(!/^(0|[1-9]\d*)$/.test(text)||!Number.isSafeInteger(total)||
        total<consumed||(expectedTotal!==null&&total!==expectedTotal))
      throw new Error("Inconsistent CRM pagination total");
     expectedTotal=total;
@@ -42,7 +42,7 @@ function adapter(request){
     const text=(typeof data.next==="number"||typeof data.next==="string")
      ?String(data.next).trim():"";
     next=Number(text);
-    if(!/^[1-9]\\d*$/.test(text)||!Number.isSafeInteger(next)||
+    if(!/^[1-9]\d*$/.test(text)||!Number.isSafeInteger(next)||
        next!==consumed||next<=start||
        (expectedTotal!==null&&next>expectedTotal))
      throw new Error("Invalid CRM pagination cursor");
