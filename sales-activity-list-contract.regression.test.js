@@ -70,3 +70,36 @@ test('never certifies a partial, duplicated or contradictory multi-page result',
     result: Array.from({length:50}, (_,i)=>activity(p.start+i+1, later)), next:p.start+50,
   }), 72), /page limit/);
 });
+
+
+test('accepts documented primary-owner rows without BINDINGS and treats 9999-12-31 as no deadline', async () => {
+  // Bitrix's published crm.activity.list tutorial selects OWNER_ID but not BINDINGS.
+  // No deadline is represented by the special year-9999 date, not only null.
+  const row = {
+    ID: '10120', OWNER_TYPE_ID: '2', OWNER_ID: '72', COMPLETED: 'N',
+    DEADLINE: '2026-11-07T09:30:00+03:00',
+  };
+  const request = async () => ({result:[row], total:1});
+  assert.deepEqual(await probeDealNextActivity(request, 72), {
+    nextActivityAt: '2026-11-07T06:30:00.000Z', activitiesWithNoDeadline: 0, checked: 1,
+  });
+  row.DEADLINE = '9999-12-31T00:00:00+03:00';
+  assert.deepEqual(await probeDealNextActivity(request, 72), {
+    nextActivityAt: null, activitiesWithNoDeadline: 1, checked: 1,
+  });
+});
+
+test('missing bindings never permits an unproven, foreign or malformed primary owner', async () => {
+  const common = {ID: '10120', COMPLETED: 'N', DEADLINE: earlier};
+  for (const row of [
+    {...common, OWNER_TYPE_ID: '2', OWNER_ID: '73'},
+    {...common, OWNER_TYPE_ID: '3', OWNER_ID: '72'},
+    {...common, OWNER_ID: '72'},
+    {...common, OWNER_TYPE_ID: ['2'], OWNER_ID: '72'},
+    {...common, OWNER_TYPE_ID: '2', OWNER_ID: {toString: null}},
+    {...common, OWNER_TYPE_ID: '2', OWNER_ID: '72', BINDINGS: []},
+    {...common, OWNER_TYPE_ID: '2', OWNER_ID: '72', BINDINGS: [{OWNER_TYPE_ID: 2, OWNER_ID: 73}]},
+  ]) {
+    await assert.rejects(probeDealNextActivity(async () => ({result:[row]}), 72));
+  }
+});
