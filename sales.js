@@ -1293,7 +1293,7 @@ function validPersistedSnapshot(row) {
   // A store row with otherwise plausible, but out-of-order, timestamps can
   // break the score timeline after the next webhook or temporal refresh.
   // Preserve equal-millisecond observations; reject reversed sequences.
-  return row.scoreHistory.every((entry, index) =>
+  if (!row.scoreHistory.every((entry, index) =>
     record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
     // Score observations cannot predate the deal that was scored. A poisoned
     // Sheet audit row otherwise creates a fictitious pre-creation history.
@@ -1306,8 +1306,11 @@ function validPersistedSnapshot(row) {
     // stages are written with an empty semantic until a verified dictionary
     // is available. Accept that canonical unknown value across restarts.
     (entry.semantic == null || ["", "P", "S", "F"].includes(entry.semantic)) &&
-    (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at))) &&
-    row.alerts.every((entry, index) =>
+    (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at)))) {
+    return false;
+  }
+  // Validate alerts independently: legacy deals may have an empty score history.
+  if (!row.alerts.every((entry, index) =>
       record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
       // Sales alerts are generated only after the underlying CRM deal exists.
       // Old snapshots without a creation timestamp remain compatible.
@@ -1327,13 +1330,15 @@ function validPersistedSnapshot(row) {
       (entry.amount == null || (typeof entry.amount === "number" &&
         Number.isFinite(entry.amount) && Math.abs(entry.amount) <= Number.MAX_SAFE_INTEGER)) &&
       (entry.currency == null || (typeof entry.currency === "string" && Boolean(entry.currency.trim()))) &&
-      (entry.amount == null) === (entry.currency == null)) &&
-    // Each accepted snapshot is emitted with an audit entry whenever its
+      (entry.amount == null) === (entry.currency == null))) {
+    return false;
+  }
+  // Each accepted snapshot is emitted with an audit entry whenever its
     // scored state, amount, currency, pipeline, stage or outcome changes.
     // A Sheet row whose final history entry disagrees with its current state
     // would otherwise display a forged or stale score/outcome progression.
     // Older history may omit optional semantic/category/currency metadata.
-    (() => {
+  return (() => {
       const latest = row.scoreHistory[row.scoreHistory.length - 1];
       return !latest || (
         latest.amount === row.amount &&
