@@ -6,7 +6,7 @@
 // https://apidocs.bitrix24.com/api-reference/crm/timeline/activities/activity-base/crm-activity-list.html
 const PAGE_SIZE = 50;
 const MAX_PAGES = 10;
-const DATE_WITH_ZONE = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?(Z|([+-])(\\d{2}):(\\d{2}))$/;
+const DATE_WITH_ZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 function validDeadline(value) {
   const match = DATE_WITH_ZONE.exec(value);
