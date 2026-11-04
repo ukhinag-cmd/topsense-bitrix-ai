@@ -56,13 +56,22 @@ function adapter(request){
    for(const row of items){
     const field=method==="crm.status.list"?"STATUS_ID":"id";
     const identity=row&&typeof row==="object"&&!Array.isArray(row)?row[field]:null;
-    if(identity===undefined||identity===null)continue;
+    // A requested CRM row with no identity must not disappear from the
+    // trusted snapshot. Reject the entire page instead of silently dropping
+    // the row and undercounting the Sales queues.
+    if(identity===undefined||identity===null)
+      throw new Error("Missing CRM list row identity");
     if(typeof identity!=="string"&&!(typeof identity==="number"&&Number.isSafeInteger(identity)))
       throw new Error("Invalid CRM list row identity");
     // Bitrix may serialize numeric IDs as numbers or strings. Normalize both
     // so e.g. 50 and "50" (or legacy "050") cannot evade duplicate detection.
     const normalized=field==="id"?Number(identity):null;
-    if(field==="id"&&(!Number.isSafeInteger(normalized)||normalized<0))
+    // Category zero identifies the default pipeline, but a CRM item ID must
+    // be positive; a missing or zero item ID is not a valid scanned record.
+    if(field==="id"&&(!Number.isSafeInteger(normalized)||
+       normalized<(method==="crm.item.list"?1:0)))
+      throw new Error("Invalid CRM list row identity");
+    if(field==="STATUS_ID"&&String(identity).trim()==="")
       throw new Error("Invalid CRM list row identity");
     const identityKey=field==="id"?String(normalized):String(identity);
     if(seenRowIdentities.has(identityKey))throw new Error("Duplicate CRM list row identity");
