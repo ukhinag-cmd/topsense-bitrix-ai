@@ -754,6 +754,15 @@ function validateActivityRow(activity, expectedId) {
   return activity;
 }
 
+// Bitrix crm.activity.list uses 9999-12-31 for an activity without a
+// deadline. A legacy/extended deal response may carry that sentinel in an
+// activity-time field; it must not appear as a future Next Step, increase
+// Prospect Score, or suppress Risk Score. Prefer the alternate real field.
+function scheduledActivityTime(deal) {
+  return [deal.ACTIVITY_TIME, deal.NEXT_ACTIVITY_TIME].find(value =>
+    value && !(typeof value === "string" && value.slice(0, 10) === "9999-12-31")) || null;
+}
+
 function scoreDeal(deal, previous) {
   const semantic = stageSemantic(deal);
   const stageSemanticKnown = semantic === "P" || semantic === "S" || semantic === "F";
@@ -767,7 +776,7 @@ function scoreDeal(deal, previous) {
   const createdAt = deal.DATE_CREATE || null;
   const modifiedAt = deal.DATE_MODIFY || null;
   const lastActivityAt = deal.LAST_ACTIVITY_TIME || null;
-  const nextActivityAt = deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME || null;
+  const nextActivityAt = scheduledActivityTime(deal);
   const lastAge = daysSince(lastActivityAt);
   const dealAge = daysSince(createdAt);
   const nextTs = dateValue(nextActivityAt);
@@ -969,7 +978,7 @@ async function snapshotDeal(deal, source = "event") {
         // An earlier reschedule needs a newer source version to disambiguate.
         const incomingLast = dateValue(deal.LAST_ACTIVITY_TIME);
         const currentLast = dateValue(latest.lastActivityAt);
-        const incomingNext = dateValue(deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME);
+        const incomingNext = dateValue(scheduledActivityTime(deal));
         const currentNext = dateValue(latest.nextActivityAt);
         activityContactAdvanced = incomingLast !== null &&
           (currentLast === null || incomingLast > currentLast);
@@ -1012,7 +1021,7 @@ async function snapshotDeal(deal, source = "event") {
       // At an unchanged source version only a strictly later scheduled time
       // can be trusted; blank/older values cannot erase the known Next Step.
       ACTIVITY_TIME: activityNextAdvanced ?
-        (deal.ACTIVITY_TIME || deal.NEXT_ACTIVITY_TIME) : latest.nextActivityAt,
+        scheduledActivityTime(deal) : latest.nextActivityAt,
       UF_CRM_AI_CLIENT_TYPE: latest.clientType,
       UF_CRM_AI_QUAL_STATUS: latest.qualificationStatus,
     };
