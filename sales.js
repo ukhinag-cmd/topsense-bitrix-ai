@@ -46,6 +46,14 @@ const MAX_ALERTS = 8;
 // Bitrix stage edits do not necessarily update any deal's DATE_MODIFY.
 // Poll successful dictionaries periodically rather than freezing them forever.
 const STAGE_CACHE_TTL_MS = 30 * 60 * 1000;
+// Render hosts may run in UTC, but TOP-SENS business dates are Moscow-local.
+// Do not let the host's timezone shift Next Step days or score audit times.
+// An optional IANA zone can be supplied for a different business locale.
+const SALES_DISPLAY_TIME_ZONE = (() => {
+  const configured = String(process.env.SALES_TIME_ZONE || "").trim() || "Europe/Moscow";
+  try { new Intl.DateTimeFormat("ru-RU", { timeZone: configured }); return configured; }
+  catch { return "Europe/Moscow"; }
+})();
 
 function bitrixBaseUrl() {
   const raw = String(process.env.BITRIX_WEBHOOK_BASE || "").trim();
@@ -390,7 +398,7 @@ function money(value, currency = "RUB") {
 function shortDate(value) {
   const t = dateValue(value);
   if (!t) return "—";
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(t));
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: SALES_DISPLAY_TIME_ZONE }).format(new Date(t));
 }
 
 function shortDateTime(value) {
@@ -398,6 +406,7 @@ function shortDateTime(value) {
   if (t === null) return "—";
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit",
+    timeZone: SALES_DISPLAY_TIME_ZONE,
   }).format(new Date(t));
 }
 
