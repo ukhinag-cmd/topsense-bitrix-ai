@@ -23,7 +23,15 @@ function pageNumber(value) {
 }
 
 function boundToDeal(activity, id) {
+  // Bitrix's documented crm.activity.list response may omit BINDINGS even
+  // when a BINDINGS filter was used. Accept the primary owner only when both
+  // typed identity fields prove this activity belongs to the requested deal.
+  if (activity.BINDINGS === undefined) {
+    return canonicalId(activity.OWNER_TYPE_ID) === '2' && canonicalId(activity.OWNER_ID) === id;
+  }
   if (!Array.isArray(activity.BINDINGS)) throw new Error('Invalid Bitrix activity bindings');
+  // When explicit bindings are supplied they are authoritative; never
+  // override contradictory bindings just because the primary ID matches.
   return activity.BINDINGS.some(binding =>
     binding && typeof binding === 'object' && !Array.isArray(binding) &&
     canonicalId(binding.OWNER_TYPE_ID) === '2' && canonicalId(binding.OWNER_ID) === id);
@@ -83,6 +91,12 @@ async function probeDealNextActivity(request, dealId) {
         throw new Error('Invalid Bitrix activity deadline');
       const timestamp = Date.parse(activity.DEADLINE);
       if (!Number.isFinite(timestamp)) throw new Error('Invalid Bitrix activity deadline');
+      // Bitrix documents 9999-12-31 as the placeholder for no deadline.
+      // Do not report it as a scheduled action in the year 9999.
+      if (activity.DEADLINE.slice(0, 10) === '9999-12-31') {
+        activitiesWithNoDeadline += 1;
+        continue;
+      }
       if (earliest === null || timestamp < earliest) earliest = timestamp;
     }
     const next = response.next == null ? null : pageNumber(response.next);
