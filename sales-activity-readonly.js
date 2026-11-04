@@ -6,7 +6,32 @@
 // https://apidocs.bitrix24.com/api-reference/crm/timeline/activities/activity-base/crm-activity-list.html
 const PAGE_SIZE = 50;
 const MAX_PAGES = 10;
-const DATE_WITH_ZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+const DATE_WITH_ZONE = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?(Z|([+-])(\\d{2}):(\\d{2}))$/;
+
+function validDeadline(value) {
+  const match = DATE_WITH_ZONE.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  // Date.parse normalizes impossible civil dates and 24:00. Reject them
+  // before they can become a misleading CRM next-action deadline.
+  if (!year || month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1] ||
+      hour > 23 || minute > 59 || second > 59) return false;
+  if (match[8] !== 'Z') {
+    const offsetHour = Number(match[10]);
+    const offsetMinute = Number(match[11]);
+    // Real UTC offsets cannot exceed 14 hours. +14:30 is invalid.
+    if (offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0))
+      return false;
+  }
+  return Number.isFinite(Date.parse(value));
+}
 
 function canonicalId(value) {
   if (typeof value !== 'string' && !(typeof value === 'number' && Number.isSafeInteger(value))) return null;
@@ -87,7 +112,7 @@ async function probeDealNextActivity(request, dealId) {
         activitiesWithNoDeadline += 1;
         continue;
       }
-      if (typeof activity.DEADLINE !== 'string' || !DATE_WITH_ZONE.test(activity.DEADLINE))
+      if (typeof activity.DEADLINE !== 'string' || !validDeadline(activity.DEADLINE))
         throw new Error('Invalid Bitrix activity deadline');
       const timestamp = Date.parse(activity.DEADLINE);
       if (!Number.isFinite(timestamp)) throw new Error('Invalid Bitrix activity deadline');
