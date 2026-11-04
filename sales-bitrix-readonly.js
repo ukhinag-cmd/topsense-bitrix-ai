@@ -111,6 +111,15 @@ function adapter(request){
    commercialRisk:null,discipline:null,qualificationQuality:null,
    assessment:"Недостаточно данных для оценки"};
  }
+ // Treat category IDs as canonical nonnegative integers. In particular,
+ // Number(null) and Number([0]) both equal zero but are not real pipeline IDs.
+ function categoryIdOf(value){
+  const text=typeof value==="number"&&Number.isSafeInteger(value)?String(value):
+   typeof value==="string"?value:null;
+  if(text===null||!/^(0|[1-9][0-9]*)$/.test(text))return null;
+  const id=Number(text);
+  return Number.isSafeInteger(id)?id:null;
+ }
  function recent(a,b){return (Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0)||b.id-a.id}
  async function snapshot({pipelineIds}={}){
   const categories=await pages("crm.category.list",{entityTypeId:2},"categories");
@@ -128,7 +137,7 @@ function adapter(request){
     filter:{"@stageId":leadStages.map(x=>x.id)},order:{createdTime:"DESC",id:"DESC"}},"items");
    for(const row of raw){
     const stage=leadMap.get(String(row.stageId||""));
-    if(!stage)continue;
+    if(!stage)throw new Error("CRM lead row violates requested stage filter");
     const lead=item(row,"lead",stage,null);
     if(lead){lead.isNewLead=stage.id===leadStages[0].id;leads.push(lead)}
    }
@@ -144,9 +153,9 @@ function adapter(request){
     filter:{categoryId:pipeline.id,"@stageId":active.map(x=>x.id)},
     order:{createdTime:"DESC",id:"DESC"}},"items");
    for(const row of raw){
-    if(Number(row.categoryId)!==pipeline.id)continue;
+    if(categoryIdOf(row.categoryId)!==pipeline.id)throw new Error("CRM deal row violates requested pipeline filter");
     const stage=stageMap.get(String(row.stageId||""));
-    if(!stage)continue;
+    if(!stage)throw new Error("CRM deal row violates requested stage filter");
     const deal=item(row,"deal",stage,pipeline);
     if(deal)deals.push(deal);
    }
