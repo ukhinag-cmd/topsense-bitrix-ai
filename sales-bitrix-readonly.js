@@ -166,10 +166,14 @@ function adapter(request){
   const activeLeads=cleanLeads.filter(x=>!x.isNewLead).sort(recent);
   const activeDeals=cleanDeals.sort((a,b)=>(b.amountRUB??-1)-(a.amountRUB??-1)||recent(a,b));
   const queue=[...newLeads,...activeLeads,...activeDeals];
+  // A sum can exceed reliable JS numeric precision even if every individual
+  // CRM amount is finite. Never publish an unsafe subtotal as exact RUB.
+  const totalRUB=cleanDeals.reduce((n,d)=>n+(d.amountRUB||0),0);
+  const safeTotalRUB=Number.isFinite(totalRUB)&&totalRUB<=Number.MAX_SAFE_INTEGER?totalRUB:null;
   return {mode:"read-only-preparation",connected:false,
    funnels:selected,counts:{newLeads:newLeads.length,activeLeads:activeLeads.length,
      activeDeals:activeDeals.length,queue:queue.length},
-   activeDealAmountRUB:cleanDeals.reduce((n,d)=>n+(d.amountRUB||0),0),
+   activeDealAmountRUB:safeTotalRUB,
    nonRubDealCount:cleanDeals.filter(d=>d.currency!=="RUB").length,
    priorityQueue:queue,assessment:"Недостаточно данных для реального скоринга"};
  }
