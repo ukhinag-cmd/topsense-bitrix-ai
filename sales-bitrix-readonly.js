@@ -147,9 +147,13 @@ function adapter(request){
  async function snapshot({pipelineIds}={}){
   const categories=await pages("crm.category.list",{entityTypeId:2},"categories");
   if(!categories.length)throw new Error("No deal pipelines returned");
-  const pipelines=categories.map(p=>({id:Number(p.id),name:String(p.name||"Без названия")}));
-  if(pipelines.some(p=>!Number.isInteger(p.id)||p.id<0))throw new Error("Invalid pipeline ID");
-  if(pipelineIds!==undefined&&(!Array.isArray(pipelineIds)||pipelineIds.some(id=>!Number.isInteger(id)||id<0)))
+  // Keep pipeline identifiers canonical before constructing a trusted queue:
+  // Number("01"), Number("1e0") and Number(" 0 ") alias genuine Bitrix IDs.
+  // Number.isInteger alone also accepts unsafe, rounded caller selections.
+  const pipelines=categories.map(p=>({id:categoryIdOf(p.id),name:String(p.name||"Без названия")}));
+  if(pipelines.some(p=>p.id===null))throw new Error("Invalid pipeline ID");
+  if(pipelineIds!==undefined&&(!Array.isArray(pipelineIds)||
+     pipelineIds.some(id=>typeof id!=="number"||categoryIdOf(id)===null)))
     throw new TypeError("Invalid pipelineIds");
   const selected=pipelines.filter(p=>pipelineIds===undefined||pipelineIds.includes(p.id));
   const leadStages=(await stages("STATUS")).filter(s=>s.state==="P").sort((a,b)=>a.sort-b.sort);
