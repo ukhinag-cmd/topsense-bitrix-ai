@@ -1,0 +1,72 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { probeDealNextActivity } = require('./sales-activity-readonly');
+
+const bind = (id, additional = []) => [{ OWNER_TYPE_ID: 2, OWNER_ID: id }, ...additional];
+const activity = (id, deadline, dealId = 72, completed = 'N') => ({
+  ID: id, OWNER_TYPE_ID: 3, OWNER_ID: 100, BINDINGS: bind(dealId, [{ OWNER_TYPE_ID: 3, OWNER_ID: 100 }]),
+  COMPLETED: completed, DEADLINE: deadline,
+});
+const later = '2026-11-08T11:30:00+03:00';
+const earlier = '2026-11-07T09:30:00+03:00';
+
+test('read-only activity probe scans all pages and picks earliest incomplete bound deadline', async () => {
+  const calls = [];
+  const list = Array.from({ length: 50 }, (_, i) => activity(i+1, later));
+  const transport = async (method, params) => {
+    calls.push({method, params});
+    return params.start === 0
+      ? { result: list, total: 51, next: 50 }
+      : { result: [activity(51, earlier)], total: 51 };
+  };
+  const found = await probeDealNextActivity(transport, '72');
+  assert.deepEqual(found, {nextActivityAt: '2026-11-07T06:30:00.000Z', activitiesWithNoDeadline: 0, checked: 51});
+  assert.deepEqual(calls.map(x=>x.method), ['crm.activity.list', 'crm.activity.list']);
+  for (const {params} of calls) {
+    assert.deepEqual(params.filter, { BINDINGS: [{OWNER_TYPE_ID:2, OWNER_ID:72}], COMPLETED: 'N' });
+    assert.ok(params.select.includes('BINDINGS'));
+    assert.ok(params.select.includes('DEADLINE'));
+  }
+});
+
+test('probe reflects earlier reschedules, cancellations and activities without deadlines', async () => {
+  let rows = [activity(81, later), activity(82, earlier)];
+  const transport = async () => ({ result: rows, total: rows.length });
+  assert.equal((await probeDealNextActivity(transport, 72)).nextActivityAt, '2026-11-07T06:30:00.000Z');
+  rows = [activity(81, '2026-11-06T13:00:00+03:00')];
+  assert.equal((await probeDealNextActivity(transport, 72)).nextActivityAt, '2026-11-06T10:00:00.000Z');
+  rows = [activity(83, null)];
+  assert.deepEqual(await probeDealNextActivity(transport, 72), {
+    nextActivityAt: null, activitiesWithNoDeadline: 1, checked: 1,
+  });
+  rows = [];
+  assert.deepEqual(await probeDealNextActivity(transport, 72), {
+    nextActivityAt: null, activitiesWithNoDeadline: 0, checked: 0,
+  });
+});
+
+test('rejects foreign binding, completed records, malformed dates and malformed identity', async () => {
+  for (const row of [
+    activity(1, earlier, 73), activity(1, earlier, 72, 'Y'),
+    activity(1, '2026-11-07T09:30:00'), activity('01', earlier),
+    activity(1, 'not a date'), { ...activity(1, earlier), BINDINGS: null },
+  ]) {
+    await assert.rejects(probeDealNextActivity(async () => ({result:[row]}), 72));
+  }
+  for (const id of ['0', '072', '12e2', {}, [], 9007199254740992]) {
+    await assert.rejects(probeDealNextActivity(async () => {throw Error('not reached');}, id), /Invalid Bitrix deal ID/);
+  }
+});
+
+test('never certifies a partial, duplicated or contradictory multi-page result', async () => {
+  const fifty = Array.from({length:50},(_,i)=>activity(i+1, later));
+  await assert.rejects(probeDealNextActivity(async (_m,p)=>p.start===0
+    ? {result:fifty, next:50, total:51} : {result: [], total:51}, 72), /Inconsistent|Incomplete/);
+  await assert.rejects(probeDealNextActivity(async (_m,p)=>p.start===0
+    ? {result:fifty, next:50} : {result:[activity(1, earlier)]}, 72), /duplicate/i);
+  await assert.rejects(probeDealNextActivity(async () => ({result:fifty, next:100}), 72), /pagination/);
+  await assert.rejects(probeDealNextActivity(async (_m,p) => ({
+    result: Array.from({length:50}, (_,i)=>activity(p.start+i+1, later)), next:p.start+50,
+  }), 72), /page limit/);
+});
