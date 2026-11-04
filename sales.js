@@ -1562,6 +1562,13 @@ async function syncRecentDeals(limitPages = 4) {
       if (!Array.isArray(rows)) {
         throw new Error("Invalid Bitrix deal list response");
       }
+      // Bitrix crm.deal.list returns at most 50 rows per offset page.
+      // Reject an oversized/malformed page before loading metadata or
+      // applying any deal: otherwise it could certify an invalid scan as
+      // healthy and consume unbounded work on unexpected REST data.
+      if (rows.length > 50) {
+        throw new Error("Oversized Bitrix deal list page");
+      }
       // Check the entire page before mutating any trusted Sales snapshot.
       // Otherwise an invalid later row or cursor can leave earlier rows
       // applied even though the scan correctly reports a sync failure.
