@@ -19,16 +19,42 @@ function adapter(request){
   return out;
  }
  async function pages(method,params,key){
-  const all=[];let start=0;
+  const all=[];let start=0;let expectedTotal=null;
   for(let n=0;n<100;n++){
    const data=await read(method,{...params,start});
    const items=key?data.result&&data.result[key]:data.result;
-   if(!Array.isArray(items))throw new Error("Invalid CRM list response");
+   if(!Array.isArray(items)||items.length>50)throw new Error("Invalid CRM list page");
+   const consumed=start+items.length;
+   // The API must never skip unseen rows with a jumped cursor or certify a
+   // partial response as complete. Treat Bitrix totals as scan-wide promises.
+   if(data.total!==undefined&&data.total!==null){
+    const text=(typeof data.total==="number"||typeof data.total==="string")
+     ?String(data.total).trim():"";
+    const total=Number(text);
+    if(!/^(0|[1-9]\\d*)$/.test(text)||!Number.isSafeInteger(total)||
+       total<consumed||(expectedTotal!==null&&total!==expectedTotal))
+     throw new Error("Inconsistent CRM pagination total");
+    expectedTotal=total;
+   }
+   const hasNext=data.next!==undefined&&data.next!==null;
+   let next=null;
+   if(hasNext){
+    const text=(typeof data.next==="number"||typeof data.next==="string")
+     ?String(data.next).trim():"";
+    next=Number(text);
+    if(!/^[1-9]\\d*$/.test(text)||!Number.isSafeInteger(next)||
+       next!==consumed||next<=start||
+       (expectedTotal!==null&&next>expectedTotal))
+     throw new Error("Invalid CRM pagination cursor");
+   }else if(expectedTotal!==null&&consumed!==expectedTotal){
+    throw new Error("Incomplete CRM pagination total");
+   }
    all.push(...items);
-   if(data.next===undefined||data.next===null)return all;
-   const next=Number(data.next);
-   if(!Number.isInteger(next)||next<=start||next-start>50)throw new Error("Invalid CRM pagination cursor");
-   start=next;
+   if(hasNext){start=next;continue;}
+   // A full page without either pagination marker is ambiguous: probe the
+   // following offset once, without trusting the first 50 as a complete list.
+   if(items.length===50&&expectedTotal===null){start=consumed;continue;}
+   return all;
   }
   throw new Error("CRM page limit reached; incomplete snapshot rejected");
  }
