@@ -20,6 +20,10 @@ function adapter(request){
  }
  async function pages(method,params,key){
   const all=[];let start=0;let expectedTotal=null;
+  // A stable Bitrix total does not guard against offset drift: the same CRM
+  // record can appear twice on different pages while another is skipped.
+  // Never certify such a scan as a complete read-only snapshot.
+  const seenRowIdentities=new Set();
   for(let n=0;n<100;n++){
    const data=await read(method,{...params,start});
    const items=key?data.result&&data.result[key]:data.result;
@@ -48,6 +52,21 @@ function adapter(request){
      throw new Error("Invalid CRM pagination cursor");
    }else if(expectedTotal!==null&&consumed!==expectedTotal){
     throw new Error("Incomplete CRM pagination total");
+   }
+   for(const row of items){
+    const field=method==="crm.status.list"?"STATUS_ID":"id";
+    const identity=row&&typeof row==="object"&&!Array.isArray(row)?row[field]:null;
+    if(identity===undefined||identity===null)continue;
+    if(typeof identity!=="string"&&!(typeof identity==="number"&&Number.isSafeInteger(identity)))
+      throw new Error("Invalid CRM list row identity");
+    // Bitrix may serialize numeric IDs as numbers or strings. Normalize both
+    // so e.g. 50 and "50" (or legacy "050") cannot evade duplicate detection.
+    const normalized=field==="id"?Number(identity):null;
+    if(field==="id"&&(!Number.isSafeInteger(normalized)||normalized<0))
+      throw new Error("Invalid CRM list row identity");
+    const identityKey=field==="id"?String(normalized):String(identity);
+    if(seenRowIdentities.has(identityKey))throw new Error("Duplicate CRM list row identity");
+    seenRowIdentities.add(identityKey);
    }
    all.push(...items);
    if(hasNext){start=next;continue;}
