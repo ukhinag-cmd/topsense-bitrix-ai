@@ -127,3 +127,29 @@ test('rejects normalized impossible calendar dates and impossible timezone offse
     'valid leap-day deadlines still work'
   );
 });
+
+
+test('out-of-order activity pages never certify a complete next-action scan', async () => {
+  // An offset scan can drift under concurrent CRM changes while the number of
+  // returned rows and total remain plausible. The request explicitly orders
+  // by ascending ID, so an inversion must be treated as an incomplete scan.
+  const firstPage = Array.from({ length: 50 }, (_, i) => activity(i + 2, later));
+  const request = async (_method, params) => params.start === 0
+    ? { result: firstPage, total: 51, next: 50 }
+    : { result: [activity(1, earlier)], total: 51 };
+  await assert.rejects(probeDealNextActivity(request, 72), /out-of-order/i);
+
+  await assert.rejects(
+    probeDealNextActivity(async () => ({
+      result: [activity(10, later), activity(2, earlier)], total: 2,
+    }), 72),
+    /out-of-order/i,
+    'reversed IDs within a single page must also fail closed'
+  );
+
+  const valid = await probeDealNextActivity(async () => ({
+    result: [activity(2, later), activity(10, earlier)], total: 2,
+  }), 72);
+  assert.equal(valid.nextActivityAt, '2026-11-07T06:30:00.000Z',
+    'ascending IDs are compared numerically rather than lexically');
+});
