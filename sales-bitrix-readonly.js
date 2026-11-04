@@ -10,6 +10,19 @@
 */
 const ALLOWED=new Set(["crm.item.list","crm.status.list","crm.category.list"]);
 const FIELDS=["id","title","stageId","assignedById","createdTime","updatedTime","opportunity","currencyId"];
+// Money is summed in integer kopecks: floating point addition (0.10 + 0.20)
+// is not an exact monetary subtotal. The symbol stays out of public JSON.
+const RUB_KOPECKS=Symbol("RUB_KOPECKS");
+const MAX_SAFE_RUB_KOPECKS=BigInt(Number.MAX_SAFE_INTEGER)*100n;
+function parseRubKopecks(value){
+ const text=typeof value==="string"?value.trim():
+  typeof value==="number"&&Number.isFinite(value)?String(value):null;
+ // Accept only nonnegative monetary decimals with at most two kopecks digits.
+ // Do not coerce JSON arrays, empty strings, objects or sub-kopeck values to 0.
+ if(text===null||text.length>64||/^\d+(?:\.\d{1,2})?$/.test(text)===false)return null;
+ const [rub,kopecks=""]=text.split(".");
+ return BigInt(rub)*100n+BigInt((kopecks+"00").slice(0,2));
+}
 function adapter(request){
  if(typeof request!=="function")throw new TypeError("Missing explicit read-only transport");
  async function read(method,params){
@@ -99,9 +112,10 @@ function adapter(request){
   const id=Number(row.id);
   if(!Number.isInteger(id)||id<=0)return null;
   const currency=String(row.currencyId||"").toUpperCase();
-  const amount=Number(row.opportunity);
-  const rub=currency==="RUB"&&row.opportunity!=null&&Number.isFinite(amount)&&amount>=0?amount:null;
-  return {key:type+":"+id,id,type,title:String(row.title||""),stageId:stage.id,
+  const cents=currency==="RUB"?parseRubKopecks(row.opportunity):null;
+  const rub=cents!==null&&cents<=MAX_SAFE_RUB_KOPECKS
+   ?Number(cents/100n)+Number(cents%100n)/100:null;
+  const out={key:type+":"+id,id,type,title:String(row.title||""),stageId:stage.id,
    stageName:stage.name,pipelineId:pipeline?pipeline.id:null,
    pipelineName:pipeline?pipeline.name:"Лиды",
    managerId:row.assignedById==null?null:String(row.assignedById),
@@ -110,6 +124,8 @@ function adapter(request){
    amountRUB:rub,currency,
    commercialRisk:null,discipline:null,qualificationQuality:null,
    assessment:"Недостаточно данных для оценки"};
+  Object.defineProperty(out,RUB_KOPECKS,{value:cents});
+  return out;
  }
  // Treat category IDs as canonical nonnegative integers. In particular,
  // Number(null) and Number([0]) both equal zero but are not real pipeline IDs.
@@ -168,8 +184,17 @@ function adapter(request){
   const queue=[...newLeads,...activeLeads,...activeDeals];
   // A sum can exceed reliable JS numeric precision even if every individual
   // CRM amount is finite. Never publish an unsafe subtotal as exact RUB.
-  const totalRUB=cleanDeals.reduce((n,d)=>n+(d.amountRUB||0),0);
-  const safeTotalRUB=Number.isFinite(totalRUB)&&totalRUB<=Number.MAX_SAFE_INTEGER?totalRUB:null;
+  let totalKopecks=0n, incompleteRubTotal=false;
+  for(const deal of cleanDeals){
+   if(deal.currency!=="RUB")continue;
+   if(deal[RUB_KOPECKS]===null){incompleteRubTotal=true;break;}
+   totalKopecks+=deal[RUB_KOPECKS];
+   // Check exact cents before converting to Number: adding 0.01 to
+   // MAX_SAFE_INTEGER RUB otherwise rounds away the overflow.
+   if(totalKopecks>MAX_SAFE_RUB_KOPECKS){incompleteRubTotal=true;break;}
+  }
+  const safeTotalRUB=incompleteRubTotal?null:
+   Number(totalKopecks/100n)+Number(totalKopecks%100n)/100;
   return {mode:"read-only-preparation",connected:false,
    funnels:selected,counts:{newLeads:newLeads.length,activeLeads:activeLeads.length,
      activeDeals:activeDeals.length,queue:queue.length},
