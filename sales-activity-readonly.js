@@ -73,6 +73,7 @@ async function probeDealNextActivity(request, dealId) {
   const id = canonicalId(dealId);
   if (!id) throw new TypeError('Invalid Bitrix deal ID');
   const seen = new Set();
+  let lastActivityId = 0;
   let earliest = null;
   let checked = 0;
   let activitiesWithNoDeadline = 0;
@@ -102,6 +103,14 @@ async function probeDealNextActivity(request, dealId) {
         throw new Error('Invalid Bitrix activity record');
       const activityId = canonicalId(activity.ID);
       if (!activityId || seen.has(activityId)) throw new Error('Invalid or duplicate Bitrix activity ID');
+      // An ID-ascending scan can drift across offset pages as CRM data changes.
+      // Unique IDs and a stable total alone do not prove a complete scan if
+      // results arrive out of order. Fail closed rather than certify a false
+      // Next Step from a potentially skipped activity.
+      const numericActivityId = Number(activityId);
+      if (numericActivityId <= lastActivityId)
+        throw new Error('Out-of-order Bitrix activity list');
+      lastActivityId = numericActivityId;
       seen.add(activityId);
       // A search result may be bound to a company/contact as well as a deal.
       // Require evidence of the requested deal binding before using its date.
