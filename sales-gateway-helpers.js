@@ -121,6 +121,9 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     // identifier for the claimed event, even with a matching shared token.
     const activityEvent = typeof event === 'string' &&
       /^ONCRMACTIVITY(?:ADD|UPDATE)$/i.test(event);
+    // A correctly typed FIELDS.ID must not hide an alias belonging to the
+    // opposite CRM entity. Reject the foreign alias even if IDs coincide.
+    if ((activityEvent ? body.dealId : body.activityId) != null) return null;
     entityId = fields.ID ?? data.ID ?? (activityEvent ? body.activityId : body.dealId);
     // Preserve explicit JSON values until type validation. Truthy fallbacks
     // silently discard false (invalid) and 0 (valid finite number).
@@ -157,6 +160,7 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
     event = params.get('event') ?? params.get('EVENT');
     const activityEvent = typeof event === 'string' &&
       /^ONCRMACTIVITY(?:ADD|UPDATE)$/i.test(event);
+    if ((activityEvent ? params.get('dealId') : params.get('activityId')) !== null) return null;
     entityId = params.get('data[FIELDS][ID]') ?? params.get('data[ID]') ??
       (activityEvent ? params.get('activityId') : params.get('dealId'));
     activityProviderId = params.get('data[FIELDS][PROVIDER_ID]');
