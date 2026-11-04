@@ -23,6 +23,14 @@ function parseRubKopecks(value){
  const [rub,kopecks=""]=text.split(".");
  return BigInt(rub)*100n+BigInt((kopecks+"00").slice(0,2));
 }
+// JSON numbers cannot express all cent values near the JS precision limit.
+// Verify the exact kopecks survive Number -> JSON decimal serialization;
+// otherwise show an unknown amount rather than a fabricated cent value.
+function safeRubNumber(kopecks){
+ if(kopecks===null||kopecks>MAX_SAFE_RUB_KOPECKS)return null;
+ const rub=Number(kopecks/100n)+Number(kopecks%100n)/100;
+ return parseRubKopecks(String(rub))===kopecks?rub:null;
+}
 function adapter(request){
  if(typeof request!=="function")throw new TypeError("Missing explicit read-only transport");
  async function read(method,params){
@@ -113,8 +121,7 @@ function adapter(request){
   if(!Number.isInteger(id)||id<=0)return null;
   const currency=String(row.currencyId||"").toUpperCase();
   const cents=currency==="RUB"?parseRubKopecks(row.opportunity):null;
-  const rub=cents!==null&&cents<=MAX_SAFE_RUB_KOPECKS
-   ?Number(cents/100n)+Number(cents%100n)/100:null;
+  const rub=safeRubNumber(cents);
   const out={key:type+":"+id,id,type,title:String(row.title||""),stageId:stage.id,
    stageName:stage.name,pipelineId:pipeline?pipeline.id:null,
    pipelineName:pipeline?pipeline.name:"Лиды",
@@ -193,8 +200,7 @@ function adapter(request){
    // MAX_SAFE_INTEGER RUB otherwise rounds away the overflow.
    if(totalKopecks>MAX_SAFE_RUB_KOPECKS){incompleteRubTotal=true;break;}
   }
-  const safeTotalRUB=incompleteRubTotal?null:
-   Number(totalKopecks/100n)+Number(totalKopecks%100n)/100;
+  const safeTotalRUB=incompleteRubTotal?null:safeRubNumber(totalKopecks);
   return {mode:"read-only-preparation",connected:false,
    funnels:selected,counts:{newLeads:newLeads.length,activeLeads:activeLeads.length,
      activeDeals:activeDeals.length,queue:queue.length},
