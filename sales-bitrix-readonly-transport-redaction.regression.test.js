@@ -57,3 +57,31 @@ test('ordinary read-only category/stage response still succeeds', async () => {
   assert.equal(snapshot.counts.queue, 0);
   assert.deepEqual(calls, ['crm.category.list', 'crm.status.list', 'crm.status.list']);
 });
+
+test('nested CRM response accessors cannot disclose a Bitrix credential after a read succeeds', async t => {
+  // HTTP clients return parsed JSON. This mock guards against custom
+  // transports accidentally passing untrusted objects with throwing getters.
+  // The secret is synthetic; all provider data stays in memory.
+  for (const path of ['result', 'total', 'next', 'category-id', 'category-name']) {
+    await t.test(path, async () => {
+      const response = {
+        result: { categories: [{ id: 0, name: 'Default' }] },
+        total: 1,
+      };
+      const category = response.result.categories[0];
+      const target = path === 'category-id' || path === 'category-name'
+        ? category : response;
+      const key = path === 'category-id' ? 'id'
+        : path === 'category-name' ? 'name' : path;
+      Object.defineProperty(target, key, {
+        enumerable: true,
+        configurable: true,
+        get() { throw new Error('Untrusted CRM metadata ' + SECRET); },
+      });
+      await rejectWithoutCredentialLeak(async method => {
+        assert.equal(method, 'crm.category.list');
+        return response;
+      });
+    });
+  }
+});
