@@ -716,7 +716,10 @@ function validateDealRow(deal, expectedId = null) {
   // Step and produce a snapshot that fails validation on the next restart.
   // DATE_CREATE may be absent on legacy responses, but if supplied it must
   // not be later than the authoritative DATE_MODIFY source version.
-  if (deal.DATE_CREATE && dateValue(deal.DATE_CREATE) > dateValue(deal.DATE_MODIFY)) {
+  // Date.parse/dateValue keep only milliseconds. Bitrix can return more
+  // fractional digits, and a same-millisecond update may actually predate
+  // its creation. Reuse the source-version comparator's full precision.
+  if (deal.DATE_CREATE && compareBitrixTimestamp(deal.DATE_CREATE, deal.DATE_MODIFY) > 0) {
     throw new Error("Invalid Bitrix deal DATE_CREATE chronology");
   }
   // Future scheduled actions are legitimate, but a malformed non-empty
