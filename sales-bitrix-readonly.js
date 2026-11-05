@@ -187,6 +187,16 @@ function adapter(request){
     if(deal)deals.push(deal);
    }
   }
+  // Separate read-only pipeline scans are not one atomic CRM transaction.
+  // A deal may move pipelines between requests and satisfy both filters,
+  // despite consistent per-page totals. Never publish that partial view as
+  // an authoritative count or subtotal by silently de-duplicating it.
+  const seenDealKeys=new Set();
+  for(const deal of deals){
+   if(seenDealKeys.has(deal.key))
+    throw new Error("Duplicate CRM deal identity across pipeline scans");
+   seenDealKeys.add(deal.key);
+  }
   const unique=rows=>[...new Map(rows.map(x=>[x.key,x])).values()];
   const cleanLeads=unique(leads),cleanDeals=unique(deals);
   const newLeads=cleanLeads.filter(x=>x.isNewLead).sort(recent);
