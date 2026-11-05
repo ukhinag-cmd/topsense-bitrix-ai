@@ -35,6 +35,11 @@ test('malformed CRM timestamps must not silently become missing queue/history da
     ['updatedTime', false],
     ['createdTime', 'not-a-date'],
     ['updatedTime', '2026'],
+    // ISO without a timezone is interpreted in the *host* timezone and can
+    // reorder Sales history across UTC/Moscow/CI hosts. Bitrix timestamps
+    // used for provenance must encode an explicit offset or UTC Z.
+    ['createdTime', '2026-11-05T09:00:00'],
+    ['updatedTime', '2026-11-05T09:00:00.123'],
   ]) {
     await t.test(field + ': ' + JSON.stringify(value), async () => {
       await assert.rejects(adapterFor({ [field]: value }).snapshot(),
