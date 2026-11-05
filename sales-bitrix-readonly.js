@@ -202,6 +202,11 @@ function adapter(request){
   if(pipelineIds!==undefined&&(!Array.isArray(pipelineIds)||
      pipelineIds.some(id=>typeof id!=="number"||categoryIdOf(id)===null)))
     throw new TypeError("Invalid pipelineIds");
+  // An explicit funnel selection is a correctness contract, not an optional
+  // best-effort filter. If Bitrix omits a requested ID (stale configuration or
+  // missing CRM visibility), publishing zero deals would be misleading.
+  if(pipelineIds!==undefined&&pipelineIds.some(id=>!pipelines.some(p=>p.id===id)))
+   throw new Error("Requested pipeline ID missing from CRM categories");
   const selected=pipelines.filter(p=>pipelineIds===undefined||pipelineIds.includes(p.id));
   const leadStages=(await stages("STATUS")).filter(s=>s.state==="P").sort((a,b)=>a.sort-b.sort);
   const leadMap=new Map(leadStages.map(x=>[x.id,x]));
