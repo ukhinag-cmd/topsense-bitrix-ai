@@ -10,6 +10,7 @@ const persistedProfiles=new Map(),deferredCompanies=[];
 let restoring=false,restored=false,restoredProfiles=0;
 let pagesScanned=0,checkedSites=0,lastProgressLogged=0;
 let active=0,lastAt=0;
+let checkpointPaused=false,checkpointPauseTimer=null;
 // The one-CPU web process has repeatedly OOM-crashed at six active
 // crawls. Keep a maximum of two until a dedicated crawler is provisioned.
 // A configured higher value cannot override the safety ceiling.
@@ -242,6 +243,27 @@ async function one(c){
  }
 }
 function pump(){
+ // A stalled Apps Script bridge must not cause unlimited in-memory
+ // profiles/checkpoints while the durable store is failing to keep up.
+ const checkpoint=evidenceStore.stats();
+ const pending=Number(checkpoint.pendingWrites||0);
+ const blocked=checkpoint.configured&&queue.length&&
+  (pending>=96||(checkpointPaused&&pending>48));
+ if(blocked){
+  if(!checkpointPaused)console.log(JSON.stringify({component:"site-profiler",
+   event:"checkpoint-backpressure",pendingWrites:pending,queued:queue.length}));
+  checkpointPaused=true;
+  if(!checkpointPauseTimer){
+   checkpointPauseTimer=setTimeout(()=>{checkpointPauseTimer=null;pump()},10000);
+   checkpointPauseTimer.unref?.();
+  }
+  return;
+ }
+ if(checkpointPaused){
+  checkpointPaused=false;
+  console.log(JSON.stringify({component:"site-profiler",
+   event:"checkpoint-backpressure-released",pendingWrites:pending,queued:queue.length}));
+ }
  while(active<MAX_ACTIVE&&queue.length){
   const now=Date.now();if(now-lastAt<START_GAP_MS){setTimeout(pump,START_GAP_MS+20);return}
   const c=queue.shift();if(completion.isComplete(c.id))continue;
