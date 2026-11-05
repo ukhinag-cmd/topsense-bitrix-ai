@@ -133,6 +133,11 @@ function adapter(request){
    // apology long semantics. Unknown strings were silently classified as
    // closed, making real active deals vanish from an apparently healthy queue.
    const short=s.SEMANTICS, long=s.EXTRA&&s.EXTRA.SEMANTICS;
+   // Missing both semantic markers leaves the stage's active/closed state
+   // unknown. Never silently suppress deals and certify a zero Sales queue.
+   // Explicit SEMANTICS:null remains an active stage; long-only is valid.
+   if(short===undefined&&long==null)
+    throw new Error("Invalid CRM stage semantics");
    if(short!=null&&short!=="S"&&short!=="F")
     throw new Error("Invalid CRM stage semantics");
    if(long!=null&&!["process","success","failure","apology"].includes(long))
