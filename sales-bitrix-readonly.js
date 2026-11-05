@@ -114,6 +114,12 @@ function adapter(request){
  async function stages(entityId){
   const rows=await pages("crm.status.list",{filter:{ENTITY_ID:entityId},order:{SORT:"ASC"}},null);
   return rows.map(s=>{
+   // Bitrix status listings are scoped by ENTITY_ID. A misrouted stage from
+   // another pipeline can misclassify a deal even when the returned item
+   // itself satisfies its requested stage/category filters. A missing entity
+   // label is tolerated for older API responses, never an incorrect one.
+   if(s.ENTITY_ID!=null&&(typeof s.ENTITY_ID!=="string"||s.ENTITY_ID!==entityId))
+    throw new Error("Invalid CRM stage entity filter");
    // Stage metadata controls which CRM records enter the read-only queue and
    // which lead is classified as new. Never coerce arrays/objects to scalar
    // semantics or SORT, or silently hide malformed open stages.
