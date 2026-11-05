@@ -45,5 +45,9 @@ test('missing currency remains unknown, not silently assumed to be RUB', async (
   const snapshot = await adapterFor([null]).snapshot();
   assert.equal(snapshot.counts.activeDeals, 1);
   assert.equal(snapshot.priorityQueue[0].amountRUB, null);
-  assert.equal(snapshot.activeDealAmountRUB, 0);
+  // Missing currency is not proven foreign. The old zero subtotal was
+  // misleading when the unknown-currency deal could itself be RUB.
+  assert.equal(snapshot.activeDealAmountRUB, null);
+  assert.equal(snapshot.nonRubDealCount, 0);
+  assert.equal(snapshot.unknownCurrencyDealCount, 1);
 });
