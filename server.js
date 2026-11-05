@@ -7424,6 +7424,12 @@ server.listen(PORT, "0.0.0.0", () => {
     if (!analyticsReadOnly() ||
         String(process.env.TOPSENSE_PAID_CLASSIFICATION_ENABLED||"").trim()!=="1"||
         paidClientCheckRunning||Date.now()<paidClientNextCheck)return;
+    // The old paid cohort is nearly exhausted. Avoid another full private
+    // Google Sheet load while the site crawler and its checkpoint are busy:
+    // those overlapping loads have repeatedly timed out before OOM crashes.
+    const crawler=require("./website-profiler").stats();
+    if(!crawler.restorationComplete||crawler.queued>0||crawler.active>0||
+       Number(crawler.checkpoint?.pendingWrites||0)>0)return;
     paidClientCheckRunning=true;
     try{
       const summary=await require("./pilot4").runPilot();
@@ -7431,7 +7437,7 @@ server.listen(PORT, "0.0.0.0", () => {
       // thousands of same Bitrix/Sheet records every 12 minutes wastes CPU.
       // Daily CRM change monitoring remains independent and enabled.
       if(summary?.status==="queue_drained"&&Number(summary.remainingCandidates||0)===0)
-        paidClientNextCheck=Date.now()+3*60*60*1000;
+        paidClientNextCheck=Date.now()+12*60*60*1000;
     }catch(error){
       console.error(JSON.stringify({component:"topsense-paid-v4",event:"cycle-error",
         message:String(error?.message||error).slice(0,180),at:new Date().toISOString()}));
