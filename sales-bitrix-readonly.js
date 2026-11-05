@@ -279,6 +279,11 @@ function adapter(request){
    throw new Error("Requested pipeline ID missing from CRM categories");
   const selected=pipelines.filter(p=>pipelineIds===undefined||pipelineIds.includes(p.id));
   const leadStages=(await stages("STATUS")).filter(s=>s.state==="P").sort((a,b)=>a.sort-b.sort);
+  // If two active lead stages share the minimum SORT, Bitrix's response order
+  // does not prove which stage means "new". Never publish a fabricated
+  // new-lead count based on an arbitrary tie-breaker.
+  if(leadStages.length>1&&leadStages[0].sort===leadStages[1].sort)
+   throw new Error("Ambiguous CRM initial lead stage sort");
   const leadMap=new Map(leadStages.map(x=>[x.id,x]));
   const leads=[];
   if(leadStages.length){
