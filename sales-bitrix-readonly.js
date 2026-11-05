@@ -86,10 +86,14 @@ function adapter(request){
       throw new Error("Invalid CRM list row identity");
     // Bitrix may serialize numeric IDs as numbers or strings. Normalize both
     // so e.g. 50 and "50" (or legacy "050") cannot evade duplicate detection.
-    const normalized=field==="id"?Number(identity):null;
-    // Category zero identifies the default pipeline, but a CRM item ID must
-    // be positive; a missing or zero item ID is not a valid scanned record.
-    if(field==="id"&&(!Number.isSafeInteger(normalized)||
+    // CRM numeric identities must be canonical decimal scalars. Number("007"),
+    // Number("7e0") and Number(" 7 ") all alias the genuine ID 7; accepting
+    // those provider values could corrupt cross-page and cross-pipeline counts.
+    // Category zero is valid, while a CRM lead/deal item ID must be positive.
+    const idText=field==="id"?String(identity):null;
+    const normalized=field==="id"?Number(idText):null;
+    if(field==="id"&&(!/^(0|[1-9]\\d*)$/.test(idText)||
+       !Number.isSafeInteger(normalized)||
        normalized<(method==="crm.item.list"?1:0)))
       throw new Error("Invalid CRM list row identity");
     if(field==="STATUS_ID"&&String(identity).trim()==="")
