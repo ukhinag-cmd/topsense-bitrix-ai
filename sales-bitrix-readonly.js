@@ -35,8 +35,16 @@ function adapter(request){
  if(typeof request!=="function")throw new TypeError("Missing explicit read-only transport");
  async function read(method,params){
   if(!ALLOWED.has(method))throw new Error("Write/unknown CRM method blocked");
-  const out=await request(method,params);
-  if(!out||typeof out!=="object"||out.error)throw new Error("CRM read failed");
+  // Injected transport exceptions may contain Bitrix webhook credentials in
+  // their URL or provider message. Do not expose those untrusted exceptions,
+  // their causes, or malformed response getters to callers/logs.
+  let out;
+  try{
+   out=await request(method,params);
+   if(!out||typeof out!=="object"||out.error)throw new Error("CRM read failed");
+  }catch{
+   throw new Error("CRM read failed");
+  }
   return out;
  }
  async function pages(method,params,key){
