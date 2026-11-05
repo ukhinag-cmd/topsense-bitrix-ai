@@ -42,6 +42,13 @@ function adapter(request){
   try{
    out=await request(method,params);
    if(!out||typeof out!=="object"||out.error)throw new Error("CRM read failed");
+   // Materialize the provider response before leaving the protected read
+   // boundary. A custom transport can accidentally expose accessors that
+   // throw credential-bearing exceptions only when pages()/item() read a
+   // nested field. structuredClone evaluates those getters here, inside
+   // the redaction catch, without rewriting invalid numeric JSON values.
+   // Ordinary parsed Bitrix JSON remains equivalent and contains no getters.
+   out=structuredClone(out);
   }catch{
    throw new Error("CRM read failed");
   }
