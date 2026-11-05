@@ -288,7 +288,16 @@ function adapter(request){
   // Keep pipeline identifiers canonical before constructing a trusted queue:
   // Number("01"), Number("1e0") and Number(" 0 ") alias genuine Bitrix IDs.
   // Number.isInteger alone also accepts unsafe, rounded caller selections.
-  const pipelines=categories.map(p=>({id:categoryIdOf(p.id),name:scalarLabel(p.name,"Без названия","pipeline label")}));
+  // crm.category.list is explicitly filtered to deal entityTypeId 2. A
+  // cross-entity category from a misrouted/partial CRM response can reuse
+  // pipeline ID 0 and fabricate authoritative deal queues. Verify the
+  // returned entity type when supplied; older Bitrix responses may omit it.
+  // Do not coerce arrays or objects (including ["2"]) into entity 2.
+  const pipelines=categories.map(p=>{
+   if(p.entityTypeId!=null&&p.entityTypeId!==2&&p.entityTypeId!=="2")
+    throw new Error("Invalid CRM pipeline entity");
+   return {id:categoryIdOf(p.id),name:scalarLabel(p.name,"Без названия","pipeline label")};
+  });
   if(pipelines.some(p=>p.id===null))throw new Error("Invalid pipeline ID");
   if(pipelineIds!==undefined&&(!Array.isArray(pipelineIds)||
      pipelineIds.some(id=>typeof id!=="number"||categoryIdOf(id)===null)))
