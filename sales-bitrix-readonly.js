@@ -119,7 +119,12 @@ function adapter(request){
  function item(row,type,stage,pipeline){
   const id=Number(row.id);
   if(!Number.isInteger(id)||id<=0)return null;
-  const currency=String(row.currencyId||"").toUpperCase();
+  // A JSON array such as ["RUB"] stringifies to "RUB", fabricating a
+  // monetary classification for invalid provider data. Only CRM strings
+  // (or absent currency metadata) are safe to interpret.
+  if(row.currencyId!=null&&typeof row.currencyId!=="string")
+   throw new Error("Invalid CRM item currency");
+  const currency=(row.currencyId||"").toUpperCase();
   const cents=currency==="RUB"?parseRubKopecks(row.opportunity):null;
   const rub=safeRubNumber(cents);
   const out={key:type+":"+id,id,type,title:String(row.title||""),stageId:stage.id,
@@ -143,6 +148,12 @@ function adapter(request){
   const id=Number(text);
   return Number.isSafeInteger(id)?id:null;
  }
+ function scalarStageId(value){
+  // Arrays like ["NEW"] must never masquerade as the requested scalar stage.
+  if(typeof value==="string")return value;
+  if(typeof value==="number"&&Number.isSafeInteger(value))return String(value);
+  return null;
+ }
  function recent(a,b){return (Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0)||b.id-a.id}
  async function snapshot({pipelineIds}={}){
   const categories=await pages("crm.category.list",{entityTypeId:2},"categories");
@@ -163,7 +174,9 @@ function adapter(request){
    const raw=await pages("crm.item.list",{entityTypeId:1,select:[...FIELDS,"sourceId"],
     filter:{"@stageId":leadStages.map(x=>x.id)},order:{createdTime:"DESC",id:"DESC"}},"items");
    for(const row of raw){
-    const stage=leadMap.get(String(row.stageId||""));
+    const stageId=scalarStageId(row.stageId);
+    if(stageId===null)throw new Error("Invalid CRM item stage");
+    const stage=leadMap.get(stageId);
     if(!stage)throw new Error("CRM lead row violates requested stage filter");
     const lead=item(row,"lead",stage,null);
     if(lead){lead.isNewLead=stage.id===leadStages[0].id;leads.push(lead)}
@@ -181,7 +194,9 @@ function adapter(request){
     order:{createdTime:"DESC",id:"DESC"}},"items");
    for(const row of raw){
     if(categoryIdOf(row.categoryId)!==pipeline.id)throw new Error("CRM deal row violates requested pipeline filter");
-    const stage=stageMap.get(String(row.stageId||""));
+    const stageId=scalarStageId(row.stageId);
+    if(stageId===null)throw new Error("Invalid CRM item stage");
+    const stage=stageMap.get(stageId);
     if(!stage)throw new Error("CRM deal row violates requested stage filter");
     const deal=item(row,"deal",stage,pipeline);
     if(deal)deals.push(deal);
