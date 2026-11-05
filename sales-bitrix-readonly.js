@@ -152,7 +152,9 @@ function adapter(request){
     throw new Error("Invalid CRM stage sort");
    let state=null;
    if(s.SEMANTICS==="S"||s.SEMANTICS==="F")state=s.SEMANTICS;
-   else if(s.EXTRA&&s.EXTRA.SEMANTICS==="process")state="P";
+   // Bitrix's documented short null marker means an in-progress stage,
+   // even when the optional EXTRA.SEMANTICS field is absent.
+   else if(s.SEMANTICS===null||(s.EXTRA&&s.EXTRA.SEMANTICS==="process"))state="P";
    return {id:String(s.STATUS_ID||""),name:scalarLabel(s.NAME,"","stage label"),state,sort:Number(sortText)};
   }).filter(s=>s.id);
  }
