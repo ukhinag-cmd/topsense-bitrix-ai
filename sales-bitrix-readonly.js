@@ -211,6 +211,21 @@ function adapter(request){
    throw new Error("Invalid CRM item "+field+" time");
   return value;
  }
+ // Date.parse retains only milliseconds. Bitrix may send additional fractional
+ // digits, so two distinct CRM instants can compare equal after truncation.
+ // Compare those remaining decimal digits if their epoch milliseconds tie.
+ // Offset-normalized timestamps have the same UTC second on an ms tie.
+ function compareItemTimes(a,b){
+  const difference=Date.parse(a)-Date.parse(b);
+  if(difference!==0)return difference;
+  const fraction=s=>(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/.exec(s)||[])[1]||"";
+  const left=fraction(a),right=fraction(b);
+  for(let i=0;i<Math.max(left.length,right.length);i++){
+   const diff=(left.charCodeAt(i)||48)-(right.charCodeAt(i)||48);
+   if(diff!==0)return diff;
+  }
+  return 0;
+ }
  function item(row,type,stage,pipeline){
   const id=Number(row.id);
   if(!Number.isInteger(id)||id<=0)return null;
@@ -232,7 +247,7 @@ function adapter(request){
   const updatedAt=scalarItemTime(row.updatedTime,"updated");
   // An update cannot precede the record's creation. Check UTC instants
   // rather than text, since Bitrix can return equivalent zoned ISO dates.
-  if(createdAt!==null&&updatedAt!==null&&Date.parse(updatedAt)<Date.parse(createdAt))
+  if(createdAt!==null&&updatedAt!==null&&compareItemTimes(updatedAt,createdAt)<0)
    throw new Error("Invalid CRM item chronology");
   const out={key:type+":"+id,id,type,title:scalarLabel(row.title,"","item title"),stageId:stage.id,
    stageName:stage.name,pipelineId:pipeline?pipeline.id:null,
@@ -260,7 +275,13 @@ function adapter(request){
   if(typeof value==="number"&&Number.isSafeInteger(value))return String(value);
   return null;
  }
- function recent(a,b){return (Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0)||b.id-a.id}
+ function recent(a,b){
+  if(a.createdAt!==null&&b.createdAt!==null)
+   return compareItemTimes(b.createdAt,a.createdAt)||b.id-a.id;
+  // An absent CRM creation date cannot be treated as a known epoch instant.
+  if(a.createdAt!==null||b.createdAt!==null)return b.createdAt!==null?1:-1;
+  return b.id-a.id;
+ }
  async function snapshot({pipelineIds}={}){
   const categories=await pages("crm.category.list",{entityTypeId:2},"categories");
   if(!categories.length)throw new Error("No deal pipelines returned");
