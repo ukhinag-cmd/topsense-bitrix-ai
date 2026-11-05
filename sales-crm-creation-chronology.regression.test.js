@@ -35,6 +35,22 @@ test('CRM source and persisted deal creation cannot occur after the last source 
     /DATE_CREATE|chronolog|timeline/i,
     'a pre-creation CRM version must fail closed rather than corrupt stage age');
 
+  // Date.parse truncates fractions after three digits. A CRM update 0.0001s
+  // into a second must not predate creation 0.0009s into that same second.
+  // Source versions keep the full Bitrix fractional precision elsewhere.
+  const sameSecond = new Date(now - 86400000).toISOString().slice(0, 19);
+  assert.throws(() => validateDealRow({
+    ...live,
+    DATE_CREATE: sameSecond + '.0009Z',
+    DATE_MODIFY: sameSecond + '.0001Z',
+  }), /DATE_CREATE chronology/i,
+  'sub-millisecond pre-creation updates must fail closed');
+  assert.equal(validateDealRow({
+    ...live,
+    DATE_CREATE: sameSecond + '.0001+00:00',
+    DATE_MODIFY: sameSecond + '.0009Z',
+  }).ID, live.ID, 'genuinely later sub-millisecond update remains valid');
+
   const stored = {
     kind: 'salesDeal', dealId: live.ID, title: live.TITLE, manager: '—',
     categoryId: '0', stageId: 'NEW', semantic: 'P',
