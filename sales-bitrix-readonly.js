@@ -216,7 +216,11 @@ function adapter(request){
    throw new Error("Invalid CRM item currency");
   // Provider padding must not make RUB amounts disappear from the subtotal.
   // Match the active read-only Dashboard currency normalization (trim/case).
-  const currency=(row.currencyId||"").trim().toUpperCase();
+  // An unreported currency cannot be identified as foreign. A verified
+   // zero amount is currency-neutral; retain the active Dashboard convention
+   // of using RUB for such zero-value CRM deals.
+   const rawCurrency=(row.currencyId||"").trim().toUpperCase();
+   const currency=rawCurrency||(parseRubKopecks(row.opportunity)===0n?"RUB":"");
   const cents=currency==="RUB"?parseRubKopecks(row.opportunity):null;
   const rub=safeRubNumber(cents);
   const createdAt=scalarItemTime(row.createdTime,"created");
@@ -322,7 +326,8 @@ function adapter(request){
   const queue=[...newLeads,...activeLeads,...activeDeals];
   // A sum can exceed reliable JS numeric precision even if every individual
   // CRM amount is finite. Never publish an unsafe subtotal as exact RUB.
-  let totalKopecks=0n, incompleteRubTotal=false;
+  const unknownCurrencyDealCount=cleanDeals.filter(d=>!d.currency).length;
+   let totalKopecks=0n, incompleteRubTotal=unknownCurrencyDealCount>0;
   for(const deal of cleanDeals){
    if(deal.currency!=="RUB")continue;
    if(deal[RUB_KOPECKS]===null){incompleteRubTotal=true;break;}
@@ -336,7 +341,8 @@ function adapter(request){
    funnels:selected,counts:{newLeads:newLeads.length,activeLeads:activeLeads.length,
      activeDeals:activeDeals.length,queue:queue.length},
    activeDealAmountRUB:safeTotalRUB,
-   nonRubDealCount:cleanDeals.filter(d=>d.currency!=="RUB").length,
+   nonRubDealCount:cleanDeals.filter(d=>d.currency&&d.currency!=="RUB").length,
+    unknownCurrencyDealCount,
    priorityQueue:queue,assessment:"Недостаточно данных для реального скоринга"};
  }
  return Object.freeze({snapshot});
