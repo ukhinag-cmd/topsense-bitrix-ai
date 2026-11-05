@@ -155,7 +155,9 @@ function adapter(request){
    // Bitrix's documented short null marker means an in-progress stage,
    // even when the optional EXTRA.SEMANTICS field is absent.
    else if(s.SEMANTICS===null||(s.EXTRA&&s.EXTRA.SEMANTICS==="process"))state="P";
-   return {id:String(s.STATUS_ID||""),name:scalarLabel(s.NAME,"","stage label"),state,sort:Number(sortText)};
+   // STATUS_ID may be a scalar numeric zero. The identity was validated by
+   // pages(); do not turn a valid zero into an empty ID using a falsy fallback.
+   return {id:String(s.STATUS_ID),name:scalarLabel(s.NAME,"","stage label"),state,sort:Number(sortText)};
   }).filter(s=>s.id);
  }
  // A provider array such as ["Working"] stringifies to an apparently valid
