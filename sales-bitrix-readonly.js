@@ -214,7 +214,9 @@ function adapter(request){
   // (or absent currency metadata) are safe to interpret.
   if(row.currencyId!=null&&typeof row.currencyId!=="string")
    throw new Error("Invalid CRM item currency");
-  const currency=(row.currencyId||"").toUpperCase();
+  // Provider padding must not make RUB amounts disappear from the subtotal.
+  // Match the active read-only Dashboard currency normalization (trim/case).
+  const currency=(row.currencyId||"").trim().toUpperCase();
   const cents=currency==="RUB"?parseRubKopecks(row.opportunity):null;
   const rub=safeRubNumber(cents);
   const createdAt=scalarItemTime(row.createdTime,"created");
