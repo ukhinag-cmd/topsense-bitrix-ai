@@ -120,6 +120,17 @@ function adapter(request){
    return {id:String(s.STATUS_ID||""),name:String(s.NAME||""),state,sort:Number(s.SORT||0)};
   }).filter(s=>s.id);
  }
+ // Bitrix ownership must be a canonical scalar identity. In particular,
+ // ["9"] and "09" must not silently masquerade as manager 9 in a trusted queue.
+ function scalarManagerId(value){
+  if(value===undefined||value===null||value==="")return null;
+  const text=typeof value==="string"?value:
+   typeof value==="number"&&Number.isSafeInteger(value)?String(value):null;
+  if(text===null||!/^(0|[1-9][0-9]*)$/.test(text)||
+     !Number.isSafeInteger(Number(text)))
+   throw new Error("Invalid CRM item manager identity");
+  return text;
+ }
  function item(row,type,stage,pipeline){
   const id=Number(row.id);
   if(!Number.isInteger(id)||id<=0)return null;
@@ -134,7 +145,7 @@ function adapter(request){
   const out={key:type+":"+id,id,type,title:String(row.title||""),stageId:stage.id,
    stageName:stage.name,pipelineId:pipeline?pipeline.id:null,
    pipelineName:pipeline?pipeline.name:"Лиды",
-   managerId:row.assignedById==null?null:String(row.assignedById),
+   managerId:scalarManagerId(row.assignedById),
    createdAt:typeof row.createdTime==="string"?row.createdTime:null,
    updatedAt:typeof row.updatedTime==="string"?row.updatedTime:null,
    amountRUB:rub,currency,
