@@ -235,6 +235,14 @@ function adapter(request){
   return 0;
  }
  function item(row,type,stage,pipeline){
+  // crm.item.list is scoped by entityTypeId, but a contradictory provider
+  // row could still reuse another entity's ID/stage and corrupt the trusted
+  // read-only Sales counts. Optional metadata may be absent in older replies;
+  // when present it must match the requested lead (1) or deal (2) entity.
+  const expectedEntityType=type==="lead"?1:2;
+  if(row.entityTypeId!=null&&row.entityTypeId!==expectedEntityType&&
+     row.entityTypeId!==String(expectedEntityType))
+   throw new Error("Invalid CRM item entity");
   const id=Number(row.id);
   if(!Number.isInteger(id)||id<=0)return null;
   // A JSON array such as ["RUB"] stringifies to "RUB", fabricating a
