@@ -58,7 +58,19 @@ test('explicit closed short semantics remain closed without EXTRA', async () => 
   }
 });
 
-test('unknown semantics without either field are not silently assumed active', async () => {
-  const snapshot = await adapterFor(undefined).snapshot();
-  assert.equal(snapshot.counts.queue, 0);
+test('missing stage semantics cannot silently certify an empty Sales queue', async t => {
+  for (const extra of [undefined, {}, { SEMANTICS: null }]) {
+    await t.test('EXTRA ' + JSON.stringify(extra), async () => {
+      await assert.rejects(adapterFor(undefined, extra).snapshot(),
+        /invalid crm stage semantics/i,
+        'missing both semantic markers must invalidate the CRM snapshot');
+    });
+  }
+});
+
+test('explicit long-only stage semantics remain supported', async () => {
+  const result = await adapterFor(undefined, { SEMANTICS: 'process' }).snapshot();
+  assert.equal(result.counts.newLeads, 1);
+  assert.equal(result.counts.activeDeals, 1);
+  assert.equal(result.activeDealAmountRUB, 125.5);
 });
