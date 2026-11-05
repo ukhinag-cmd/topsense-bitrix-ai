@@ -129,6 +129,21 @@ function adapter(request){
     throw new Error("Invalid CRM stage metadata");
    if(s.EXTRA&&s.EXTRA.SEMANTICS!=null&&typeof s.EXTRA.SEMANTICS!=="string")
     throw new Error("Invalid CRM stage semantics");
+   // Bitrix publishes null/S/F short semantics and process/success/failure/
+   // apology long semantics. Unknown strings were silently classified as
+   // closed, making real active deals vanish from an apparently healthy queue.
+   const short=s.SEMANTICS, long=s.EXTRA&&s.EXTRA.SEMANTICS;
+   if(short!=null&&short!=="S"&&short!=="F")
+    throw new Error("Invalid CRM stage semantics");
+   if(long!=null&&!["process","success","failure","apology"].includes(long))
+    throw new Error("Invalid CRM stage semantics");
+   // An explicitly returned null short marker means process, not success or
+   // failure. Absent (undefined) short metadata is left compatible with
+   // responses providing only the long semantic value.
+   if((short===null&&long!=null&&long!=="process")||
+      (short==="S"&&long!=null&&long!=="success")||
+      (short==="F"&&long!=null&&long!=="failure"&&long!=="apology"))
+    throw new Error("Invalid CRM stage semantics");
    const sortInput=s.SORT;
    const sortText=typeof sortInput==="string"?sortInput:
     typeof sortInput==="number"&&Number.isSafeInteger(sortInput)?String(sortInput):null;
