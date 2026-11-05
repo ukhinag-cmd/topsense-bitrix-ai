@@ -138,8 +138,16 @@ function adapter(request){
    let state=null;
    if(s.SEMANTICS==="S"||s.SEMANTICS==="F")state=s.SEMANTICS;
    else if(s.EXTRA&&s.EXTRA.SEMANTICS==="process")state="P";
-   return {id:String(s.STATUS_ID||""),name:String(s.NAME||""),state,sort:Number(sortText)};
+   return {id:String(s.STATUS_ID||""),name:scalarLabel(s.NAME,"","stage label"),state,sort:Number(sortText)};
   }).filter(s=>s.id);
+ }
+ // A provider array such as ["Working"] stringifies to an apparently valid
+ // stage name, and non-JSON objects can even throw during String coercion.
+ // Display provenance must be a scalar string or explicitly absent.
+ function scalarLabel(value,fallback,field){
+  if(value===undefined||value===null)return fallback;
+  if(typeof value!=="string")throw new Error("Invalid CRM "+field);
+  return value||fallback;
  }
  // Bitrix ownership must be a canonical scalar identity. In particular,
  // ["9"] and "09" must not silently masquerade as manager 9 in a trusted queue.
@@ -163,7 +171,7 @@ function adapter(request){
   const currency=(row.currencyId||"").toUpperCase();
   const cents=currency==="RUB"?parseRubKopecks(row.opportunity):null;
   const rub=safeRubNumber(cents);
-  const out={key:type+":"+id,id,type,title:String(row.title||""),stageId:stage.id,
+  const out={key:type+":"+id,id,type,title:scalarLabel(row.title,"","item title"),stageId:stage.id,
    stageName:stage.name,pipelineId:pipeline?pipeline.id:null,
    pipelineName:pipeline?pipeline.name:"Лиды",
    managerId:scalarManagerId(row.assignedById),
@@ -197,7 +205,7 @@ function adapter(request){
   // Keep pipeline identifiers canonical before constructing a trusted queue:
   // Number("01"), Number("1e0") and Number(" 0 ") alias genuine Bitrix IDs.
   // Number.isInteger alone also accepts unsafe, rounded caller selections.
-  const pipelines=categories.map(p=>({id:categoryIdOf(p.id),name:String(p.name||"Без названия")}));
+  const pipelines=categories.map(p=>({id:categoryIdOf(p.id),name:scalarLabel(p.name,"Без названия","pipeline label")}));
   if(pipelines.some(p=>p.id===null))throw new Error("Invalid pipeline ID");
   if(pipelineIds!==undefined&&(!Array.isArray(pipelineIds)||
      pipelineIds.some(id=>typeof id!=="number"||categoryIdOf(id)===null)))
