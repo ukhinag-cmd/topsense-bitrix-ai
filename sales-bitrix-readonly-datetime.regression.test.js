@@ -40,6 +40,12 @@ test('malformed CRM timestamps must not silently become missing queue/history da
     // used for provenance must encode an explicit offset or UTC Z.
     ['createdTime', '2026-11-05T09:00:00'],
     ['updatedTime', '2026-11-05T09:00:00.123'],
+    // JS Date.parse accepts offsets beyond any real civil timezone, while
+    // the read-only activity adapter already rejects them. Such timestamps
+    // can fabricate chronology for a seemingly healthy Sales snapshot.
+    ['createdTime', '2026-11-05T09:00:00+15:00'],
+    ['updatedTime', '2026-11-05T09:00:00-23:59'],
+    ['createdTime', '2026-11-05T09:00:00+14:30'],
   ]) {
     await t.test(field + ': ' + JSON.stringify(value), async () => {
       await assert.rejects(adapterFor({ [field]: value }).snapshot(),
@@ -57,4 +63,31 @@ test('valid Bitrix ISO timestamps and explicitly absent dates remain compatible'
   assert.equal(legacy.counts.activeDeals, 1);
   assert.equal(legacy.priorityQueue[0].createdAt, null);
   assert.equal(legacy.priorityQueue[0].updatedAt, null);
+});
+
+test('updatedTime must not precede createdTime in a trusted CRM snapshot', async () => {
+  await assert.rejects(
+    adapterFor({
+      createdTime: '2026-11-06T09:00:00+03:00',
+      updatedTime: '2026-11-05T10:00:00+03:00',
+    }).snapshot(),
+    /invalid crm item chronology/i
+  );
+  // Compare instants rather than lexical timestamps: different valid offsets
+  // may encode the same UTC instant. Missing dates remain optional.
+  const equalInstant = await adapterFor({
+    createdTime: '2026-11-05T09:00:00+03:00',
+    updatedTime: '2026-11-05T06:00:00Z',
+  }).snapshot();
+  assert.equal(equalInstant.counts.activeDeals, 1);
+  const missing = await adapterFor({ createdTime: null }).snapshot();
+  assert.equal(missing.counts.activeDeals, 1);
+});
+
+test('real boundary timezone offsets remain supported', async () => {
+  const snapshot = await adapterFor({
+    createdTime: '2026-11-05T00:00:00+14:00',
+    updatedTime: '2026-11-05T23:59:59-12:00',
+  }).snapshot();
+  assert.equal(snapshot.counts.activeDeals, 1);
 });
