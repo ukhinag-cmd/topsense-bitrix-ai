@@ -182,10 +182,13 @@ function adapter(request){
  // Queue dates are provenance, not display-only text: a malformed array,
  // object or non-ISO string must never silently become a missing/epoch date
  // and reorder live leads or deals in an apparently trustworthy snapshot.
+ // A timezone-less ISO date is also ambiguous: Date.parse interprets it in
+ // the host timezone (e.g. UTC in CI and Moscow in production). Require an
+ // explicit Z or numeric UTC offset for stable CRM chronology.
  function scalarItemTime(value,field){
   if(value===undefined||value===null)return null;
   const iso=typeof value==="string"
-   ?/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/.exec(value):null;
+   ?/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value):null;
   if(!iso||!Number.isFinite(Date.parse(value)))
    throw new Error("Invalid CRM item "+field+" time");
   const year=Number(iso[1]),month=Number(iso[2]),day=Number(iso[3]);
