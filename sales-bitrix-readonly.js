@@ -179,6 +179,23 @@ function adapter(request){
    throw new Error("Invalid CRM item manager identity");
   return text;
  }
+ // Queue dates are provenance, not display-only text: a malformed array,
+ // object or non-ISO string must never silently become a missing/epoch date
+ // and reorder live leads or deals in an apparently trustworthy snapshot.
+ function scalarItemTime(value,field){
+  if(value===undefined||value===null)return null;
+  const iso=typeof value==="string"
+   ?/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/.exec(value):null;
+  if(!iso||!Number.isFinite(Date.parse(value)))
+   throw new Error("Invalid CRM item "+field+" time");
+  const year=Number(iso[1]),month=Number(iso[2]),day=Number(iso[3]);
+  const hour=Number(iso[4]),minute=Number(iso[5]),second=Number(iso[6]);
+  if(year<100||month<1||month>12||day<1||
+     day>new Date(Date.UTC(year,month,0)).getUTCDate()||
+     hour>23||minute>59||second>59)
+   throw new Error("Invalid CRM item "+field+" time");
+  return value;
+ }
  function item(row,type,stage,pipeline){
   const id=Number(row.id);
   if(!Number.isInteger(id)||id<=0)return null;
@@ -194,8 +211,8 @@ function adapter(request){
    stageName:stage.name,pipelineId:pipeline?pipeline.id:null,
    pipelineName:pipeline?pipeline.name:"Лиды",
    managerId:scalarManagerId(row.assignedById),
-   createdAt:typeof row.createdTime==="string"?row.createdTime:null,
-   updatedAt:typeof row.updatedTime==="string"?row.updatedTime:null,
+   createdAt:scalarItemTime(row.createdTime,"created"),
+   updatedAt:scalarItemTime(row.updatedTime,"updated"),
    amountRUB:rub,currency,
    commercialRisk:null,discipline:null,qualificationQuality:null,
    assessment:"Недостаточно данных для оценки"};
