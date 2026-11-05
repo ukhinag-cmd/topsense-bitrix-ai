@@ -114,10 +114,25 @@ function adapter(request){
  async function stages(entityId){
   const rows=await pages("crm.status.list",{filter:{ENTITY_ID:entityId},order:{SORT:"ASC"}},null);
   return rows.map(s=>{
+   // Stage metadata controls which CRM records enter the read-only queue and
+   // which lead is classified as new. Never coerce arrays/objects to scalar
+   // semantics or SORT, or silently hide malformed open stages.
+   if(s.SEMANTICS!=null&&typeof s.SEMANTICS!=="string")
+    throw new Error("Invalid CRM stage semantics");
+   if(s.EXTRA!=null&&(typeof s.EXTRA!=="object"||Array.isArray(s.EXTRA)))
+    throw new Error("Invalid CRM stage metadata");
+   if(s.EXTRA&&s.EXTRA.SEMANTICS!=null&&typeof s.EXTRA.SEMANTICS!=="string")
+    throw new Error("Invalid CRM stage semantics");
+   const sortInput=s.SORT;
+   const sortText=typeof sortInput==="string"?sortInput:
+    typeof sortInput==="number"&&Number.isSafeInteger(sortInput)?String(sortInput):null;
+   if(sortText===null||!/^\d+$/.test(sortText)||
+      !Number.isSafeInteger(Number(sortText)))
+    throw new Error("Invalid CRM stage sort");
    let state=null;
    if(s.SEMANTICS==="S"||s.SEMANTICS==="F")state=s.SEMANTICS;
    else if(s.EXTRA&&s.EXTRA.SEMANTICS==="process")state="P";
-   return {id:String(s.STATUS_ID||""),name:String(s.NAME||""),state,sort:Number(s.SORT||0)};
+   return {id:String(s.STATUS_ID||""),name:String(s.NAME||""),state,sort:Number(sortText)};
   }).filter(s=>s.id);
  }
  // Bitrix ownership must be a canonical scalar identity. In particular,
