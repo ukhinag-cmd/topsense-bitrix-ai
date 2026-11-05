@@ -200,7 +200,7 @@ function adapter(request){
   // Date.parse permits offsets such as +23:59, which cannot occur in a
   // real UTC timezone. Use the same maximum +/-14:00 as the dormant
   // read-only activity adapter; never trust fabricated CRM chronology.
-  const offset=/[+-](\\d{2}):(\\d{2})$/.exec(value);
+  const offset=/[+-](\d{2}):(\d{2})$/.exec(value);
   if(offset&&(Number(offset[1])>14||
      (Number(offset[1])===14&&Number(offset[2])!==0)))
    throw new Error("Invalid CRM item "+field+" time");
