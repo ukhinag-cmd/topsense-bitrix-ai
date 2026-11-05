@@ -92,7 +92,7 @@ function adapter(request){
     // Category zero is valid, while a CRM lead/deal item ID must be positive.
     const idText=field==="id"?String(identity):null;
     const normalized=field==="id"?Number(idText):null;
-    if(field==="id"&&(!/^(0|[1-9]\\d*)$/.test(idText)||
+    if(field==="id"&&(!/^(0|[1-9]\d*)$/.test(idText)||
        !Number.isSafeInteger(normalized)||
        normalized<(method==="crm.item.list"?1:0)))
       throw new Error("Invalid CRM list row identity");
