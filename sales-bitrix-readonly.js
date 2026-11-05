@@ -31,6 +31,24 @@ function safeRubNumber(kopecks){
  const rub=Number(kopecks/100n)+Number(kopecks%100n)/100;
  return parseRubKopecks(String(rub))===kopecks?rub:null;
 }
+// Read transports normally return JSON data. An injected transport might
+// instead return getters/proxies that throw secret-bearing exceptions after
+// the request itself succeeds. Snapshot a JSON-shaped response while still
+// inside the redaction boundary. Preserve malformed primitive/function
+// values so downstream type checks reject them with their normal errors;
+// JSON.stringify and structuredClone would silently coerce or reject them.
+function copyReadPayload(value, ancestors=new WeakSet()){
+ if(value===null||typeof value!=="object")return value;
+ if(ancestors.has(value))throw new Error("Invalid CRM response cycle");
+ const proto=Object.getPrototypeOf(value);
+ if(!Array.isArray(value)&&proto!==Object.prototype&&proto!==null)
+  throw new Error("Invalid CRM response object");
+ ancestors.add(value);
+ const result=Array.isArray(value)?[]:Object.create(null);
+ for(const key of Object.keys(value))result[key]=copyReadPayload(value[key],ancestors);
+ ancestors.delete(value);
+ return result;
+}
 function adapter(request){
  if(typeof request!=="function")throw new TypeError("Missing explicit read-only transport");
  async function read(method,params){
@@ -42,13 +60,8 @@ function adapter(request){
   try{
    out=await request(method,params);
    if(!out||typeof out!=="object"||out.error)throw new Error("CRM read failed");
-   // Materialize the provider response before leaving the protected read
-   // boundary. A custom transport can accidentally expose accessors that
-   // throw credential-bearing exceptions only when pages()/item() read a
-   // nested field. structuredClone evaluates those getters here, inside
-   // the redaction catch, without rewriting invalid numeric JSON values.
-   // Ordinary parsed Bitrix JSON remains equivalent and contains no getters.
-   out=structuredClone(out);
+   // Any malicious getter exceptions stay inside this sanitizing catch.
+   out=copyReadPayload(out);
   }catch{
    throw new Error("CRM read failed");
   }
