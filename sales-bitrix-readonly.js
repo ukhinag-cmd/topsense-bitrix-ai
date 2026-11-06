@@ -81,6 +81,7 @@ function adapter(request){
  }
  async function pages(method,params,key){
   const all=[];let start=0;let expectedTotal=null;
+  let lastItemSort=null;
   // A stable Bitrix total does not guard against offset drift: the same CRM
   // record can appear twice on different pages while another is skipped.
   // Never certify such a scan as a complete read-only snapshot.
@@ -141,6 +142,24 @@ function adapter(request){
     const identityKey=field==="id"?String(normalized):String(identity);
     if(seenRowIdentities.has(identityKey))throw new Error("Duplicate CRM list row identity");
     seenRowIdentities.add(identityKey);
+   }
+   // The provider promises createdTime DESC, id DESC for crm.item.list.
+   // Offset drift can skip an unseen record while still returning unique
+   // IDs and an unchanged total. Verify the order within and across pages,
+   // including ties finer than JavaScript Date's millisecond precision.
+   // Missing optional creation timestamps cannot establish an order; keep
+   // the older adapter contract for those rows without inventing a date.
+   if(method==="crm.item.list"){
+    for(const row of items){
+     const createdAt=scalarItemTime(row.createdTime,"created");
+     const id=Number(row.id);
+     if(lastItemSort&&createdAt!==null&&lastItemSort.createdAt!==null){
+      const order=compareItemTimes(lastItemSort.createdAt,createdAt);
+      if(order<0||(order===0&&lastItemSort.id<=id))
+       throw new Error("Out-of-order CRM item pagination");
+     }
+     lastItemSort={createdAt,id};
+    }
    }
    all.push(...items);
    if(hasNext){start=next;continue;}
