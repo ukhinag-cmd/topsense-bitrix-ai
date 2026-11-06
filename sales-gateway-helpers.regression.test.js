@@ -76,6 +76,22 @@ test('always strips Proxy-Authorization and removes Sales or malformed Basic cre
   assert.equal('authorization' in sanitizeProxyHeaders({ authorization: 'Basic c2FsZXM6c2VjcmV0!!!' }, 'secret'), false);
 });
 
+test('case-variant Authorization aliases cannot forward Sales credentials to a legacy upstream', () => {
+  // Real Node HTTP requests normalize header names. A future programmatic
+  // proxy caller may provide both spellings; retaining one after stripping
+  // the other could leak the Dashboard Basic secret to an unrelated service.
+  const salesBasic = basic('sales:dashboard-secret');
+  for (const headers of [
+    { Authorization: 'Bearer unrelated', authorization: salesBasic },
+    { authorization: salesBasic, Authorization: 'Bearer unrelated' },
+    { Authorization: salesBasic, authorization: salesBasic },
+  ]) {
+    const filtered = sanitizeProxyHeaders({ ...headers, 'x-test': 'kept' }, 'dashboard-secret');
+    assert.equal(Object.keys(filtered).some(key => key.toLowerCase() === 'authorization'), false);
+    assert.equal(filtered['x-test'], 'kept');
+  }
+});
+
 test('preserves valid unrelated Basic and non-Basic authorization', () => {
   assert.equal(sanitizeProxyHeaders({ authorization: basic('upstream:password') }, 'dashboard-secret').authorization, basic('upstream:password'));
   assert.equal(sanitizeProxyHeaders({ authorization: 'Bearer abc' }, 'dashboard-secret').authorization, 'Bearer abc');
