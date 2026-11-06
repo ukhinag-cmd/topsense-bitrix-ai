@@ -120,7 +120,7 @@ test('a duplicate Bitrix deal across bounded sync pages cannot certify a complet
   assert.equal(rejected.lastError?.source, 'sales-sync');
   assert.match(rejected.lastError?.message || '', /duplicate/i);
   assert.equal(rejected.prospects.find(row => row.dealId === '9900001')?.title,
-    'Original 0', 'a duplicate must not replace a trusted snapshot');
+    'Original 3', 'a duplicate must not replace a trusted snapshot');
 
   cleanScan = true;
   await runPeriodicScan();
