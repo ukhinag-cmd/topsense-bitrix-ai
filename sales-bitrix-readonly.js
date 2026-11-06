@@ -47,6 +47,11 @@ function copyReadPayload(value, ancestors=new WeakSet()){
  // enumerable indexes would silently erase missing rows and undercount leads
  // or deals. Real JSON arrays are always dense; fail closed for other shapes.
  const keys=Object.keys(value);
+ // A JSON response cannot have hidden own fields. Dropping a non-enumerable
+ // total/next on copy would certify a partial CRM scan as a complete queue.
+ // Array length is the sole legitimate non-enumerable own property.
+ if(Object.getOwnPropertyNames(value).length!==keys.length+(Array.isArray(value)?1:0))
+  throw new Error("Invalid CRM response hidden properties");
  if(Array.isArray(value)&&(keys.length!==value.length||
     keys.some((key,index)=>key!==String(index))))
   throw new Error("Invalid CRM response array");
