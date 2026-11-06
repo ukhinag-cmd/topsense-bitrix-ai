@@ -6,6 +6,9 @@
 // https://apidocs.bitrix24.com/api-reference/crm/timeline/activities/activity-base/crm-activity-list.html
 const PAGE_SIZE = 50;
 const MAX_PAGES = 10;
+// Bitrix represents a missing deadline as 9999-12-31 in portal time.
+// The same placeholder serialized in UTC can be 9999-12-30T21:00:00Z.
+const NO_DEADLINE_FROM = Date.parse('9999-12-30T00:00:00Z');
 // ISO 8601 allows subsecond precision beyond milliseconds. Retain up to
 // nanoseconds while Date.parse normalizes the display instant to milliseconds.
 const DATE_WITH_ZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/;
@@ -169,9 +172,9 @@ async function probeDealNextActivity(request, dealId) {
         throw new Error('Invalid Bitrix activity deadline');
       const timestamp = Date.parse(activity.DEADLINE);
       if (!Number.isFinite(timestamp)) throw new Error('Invalid Bitrix activity deadline');
-      // Bitrix documents 9999-12-31 as the placeholder for no deadline.
-      // Do not report it as a scheduled action in the year 9999.
-      if (activity.DEADLINE.slice(0, 10) === '9999-12-31') {
+      // Check the instant, not the source date prefix: timezone conversion
+      // can move 9999-12-31 00:00+03:00 to the preceding UTC calendar day.
+      if (timestamp >= NO_DEADLINE_FROM) {
         activitiesWithNoDeadline += 1;
         continue;
       }
