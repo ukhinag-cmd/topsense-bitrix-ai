@@ -149,6 +149,24 @@ function adapter(request){
    // sub-millisecond ties). Existing single-page fixture responses are left
    // compatible; an optional missing createdTime cannot prove an order.
    if(method==="crm.item.list"&&items.length){
+    // Boundary checks alone miss an inversion *within* a page: its last
+    // row can still be older than the next page's first row. A paginated
+    // scan must honor the requested order at every adjacent row, not only
+    // at offset boundaries. Retain legacy single-page fixture compatibility.
+    const scansMultiplePages=hasNext||start>0||
+     (items.length===50&&expectedTotal===null);
+    if(scansMultiplePages){
+     for(let i=1;i<items.length;i++){
+      const previous=items[i-1],current=items[i];
+      const before=scalarItemTime(previous.createdTime,"created");
+      const after=scalarItemTime(current.createdTime,"created");
+      if(before!==null&&after!==null){
+       const order=compareItemTimes(before,after);
+       if(order<0||(order===0&&Number(previous.id)<=Number(current.id)))
+        throw new Error("Out-of-order CRM item pagination");
+      }
+     }
+    }
     const first=items[0], last=items[items.length-1];
     const firstCreatedAt=scalarItemTime(first.createdTime,"created");
     const lastCreatedAt=scalarItemTime(last.createdTime,"created");
