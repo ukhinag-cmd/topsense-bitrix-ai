@@ -1656,6 +1656,20 @@ async function syncRecentDeals(limitPages = 4) {
         }
         pageIds.add(id);
       }
+      // Bitrix was asked for DATE_MODIFY DESC, ID DESC. A malformed or
+      // drifting page may contain unique IDs and a consistent total while
+      // still violating that order. Do not certify such a scan as complete:
+      // the offset boundary may have skipped another deal. Check before
+      // applying any of this page's snapshots to the read-only Dashboard.
+      for (let i = 1; i < validatedRows.length; i += 1) {
+        const earlier = validatedRows[i - 1];
+        const later = validatedRows[i];
+        const order = compareBitrixTimestamp(earlier.DATE_MODIFY, later.DATE_MODIFY);
+        if (order === null || order < 0 ||
+            (order === 0 && Number(earlier.ID) <= Number(later.ID))) {
+          throw new Error("Out-of-order Bitrix deal list page");
+        }
+      }
       let nextStart = -1;
       if (payload.next !== undefined && payload.next !== null) {
         // A JSON array such as [1] must not be coerced to a valid cursor.
