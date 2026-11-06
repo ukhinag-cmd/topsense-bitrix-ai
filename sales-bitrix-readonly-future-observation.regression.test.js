@@ -30,7 +30,10 @@ function leadAdapter(overrides) {
 test('read-only queue rejects future Bitrix observed timestamps rather than prioritizing fictitious new leads', async () => {
   const future = new Date(Date.now() + 11 * 60_000).toISOString();
   for (const field of ['createdTime', 'updatedTime']) {
-    await assert.rejects(leadAdapter({ [field]: future }).snapshot(),
+    const values = field === 'createdTime'
+      ? { createdTime: future, updatedTime: future }
+      : { updatedTime: future };
+    await assert.rejects(leadAdapter(values).snapshot(),
       /invalid crm item (created|updated) time/i,
       'reject ' + field + ' more than 10 minutes ahead of observed wall clock');
   }
