@@ -91,23 +91,29 @@ const READ_ONLY_BITRIX_METHODS = new Set([
 // slots with null. A partial CRM page could then look complete. Verify the
 // structural properties before cloning it within the credential-redaction
 // boundary. This accepts ordinary JSON arrays/objects from any realm.
-function assertBitrixJsonShape(value, ancestors = new WeakSet()) {
-  if (value === null || typeof value !== "object") return;
+// Snapshot REST data without invoking toJSON hooks on untrusted objects.
+// JSON.parse(JSON.stringify(response)) could turn a real CRM deal page into
+// a forged empty page if a transport supplied a custom toJSON method.
+function copyBitrixJson(value, ancestors = new WeakSet()) {
+  if (value === null || typeof value === "string" || typeof value === "boolean" ||
+      (typeof value === "number" && Number.isFinite(value))) return value;
+  // Parsed JSON cannot contain functions, symbols, undefined or BigInts.
+  if (typeof value !== "object") throw new Error("Invalid Bitrix JSON value");
   if (ancestors.has(value)) throw new Error("Invalid Bitrix JSON cycle");
   const isArray = Array.isArray(value);
   const keys = Object.keys(value);
-  // Real parsed JSON has no hidden or symbol properties; an array's length
-  // is the single allowed non-enumerable own property.
-  if (Reflect.ownKeys(value).length !== keys.length + (isArray ? 1 : 0)) {
+  // Parsed JSON has no hidden or symbol properties; only an array's length
+  // can be non-enumerable. Reject hidden pagination markers before copying.
+  if (Reflect.ownKeys(value).length !== keys.length + (isArray ? 1 : 0))
     throw new Error("Invalid Bitrix JSON hidden properties");
-  }
   if (isArray && (keys.length !== value.length ||
-      keys.some((key, index) => key !== String(index)))) {
+      keys.some((key, index) => key !== String(index))))
     throw new Error("Invalid Bitrix JSON array");
-  }
   ancestors.add(value);
-  for (const key of keys) assertBitrixJsonShape(value[key], ancestors);
+  const copy = isArray ? [] : Object.create(null);
+  for (const key of keys) copy[key] = copyBitrixJson(value[key], ancestors);
   ancestors.delete(value);
+  return copy;
 }
 
 async function bitrixRaw(method, params = {}) {
@@ -147,8 +153,7 @@ async function bitrixRaw(method, params = {}) {
     safeStatus = Number.isInteger(status) && status >= 100 && status <= 599
       ? status : "unknown";
     const rawPayload = await response.json();
-    assertBitrixJsonShape(rawPayload);
-    payload = JSON.parse(JSON.stringify(rawPayload));
+    payload = copyBitrixJson(rawPayload);
   } catch {
     throw new Error("Bitrix REST " + method + " response read failed");
   }
