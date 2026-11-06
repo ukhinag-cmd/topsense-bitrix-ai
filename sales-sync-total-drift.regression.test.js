@@ -54,8 +54,8 @@ test('a changing or missing Bitrix page total cannot certify a truncated multi-p
     UF_CRM_AI_QUAL_STATUS: 'Квалифицировано',
     UF_CRM_AI_CLIENT_TYPE: 'dealer',
   });
-  const firstPage = Array.from({ length: 50 }, (_, i) => deal(9943500 + i));
-  const lastPage = [deal(9943550), deal(9943551)];
+  const firstPage = Array.from({ length: 50 }, (_, i) => deal(9943551 - i));
+  const lastPage = [deal(9943501), deal(9943500)];
   const starts = [];
   let mode = 'drift';
 

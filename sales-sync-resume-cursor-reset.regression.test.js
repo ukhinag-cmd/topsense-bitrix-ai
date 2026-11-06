@@ -67,7 +67,7 @@ test('a failed resumed Bitrix page discards its stale cursor before the next syn
     if (mode === 'partial') {
       assert.ok(start < 200, 'first scan is intentionally bounded to four pages');
       payload = {
-        result: Array.from({ length: 50 }, (_, index) => deal(start + index)),
+        result: Array.from({ length: 50 }, (_, index) => deal(199 - start - index)),
         next: start + 50,
       };
     } else if (mode === 'invalid') {

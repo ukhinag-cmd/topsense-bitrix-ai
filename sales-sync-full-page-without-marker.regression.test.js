@@ -50,8 +50,8 @@ test('full page without next or total probes the next offset before declaring sy
     DATE_CREATE: new Date(now - 86400000).toISOString(),
     DATE_MODIFY: new Date(now - 60000).toISOString(),
   });
-  const page = Array.from({ length: 50 }, (_, i) => deal(9971001 + i));
-  const extra = deal(9971051);
+  const page = Array.from({ length: 50 }, (_, i) => deal(9971051 - i));
+  const extra = deal(9971001);
   const starts = [];
   let mode = 'extra';
   global.fetch = async (input, options = {}) => {

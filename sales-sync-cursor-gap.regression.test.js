@@ -55,7 +55,7 @@ test('a skipped Bitrix pagination cursor cannot certify an incomplete Sales scan
       // A real Bitrix next: 50 follows a full 50-record page; an empty
       // page with next would itself be malformed and is tested separately.
       const page = Array.from({ length: 50 }, (_, i) => ({
-        ID: String(9930000 + i),
+        ID: String(9930049 - i),
         TITLE: 'CRM pagination fixture ' + i,
         STAGE_ID: 'NEW',
         STAGE_SEMANTIC_ID: 'P',

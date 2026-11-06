@@ -45,7 +45,7 @@ test('bounded Bitrix sync resumes later pages without claiming partial data is c
       // Populate each bounded page with distinct deals so resume testing
       // does not rely on an impossible page/cursor combination.
       const page = Array.from({ length: 50 }, (_, i) => ({
-        ID: String(9940000 + cursor + i),
+        ID: String(9940200 - cursor - i),
         TITLE: 'Deal from page ' + cursor + ' row ' + i,
         STAGE_ID: 'NEW',
         STAGE_SEMANTIC_ID: 'P',
