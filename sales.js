@@ -345,14 +345,16 @@ function dateValue(value) {
   return Number.isFinite(t) ? t : null;
 }
 
+// Unix epoch (0 ms) is a valid CRM timestamp, not a missing date.
+// Preserve it in age diagnostics, score provenance and overdue actions.
 function daysSince(value) {
   const t = dateValue(value);
-  return t ? Math.max(0, (Date.now() - t) / 86400000) : null;
+  return t !== null ? Math.max(0, (Date.now() - t) / 86400000) : null;
 }
 
 function isoOrNull(value) {
   const t = dateValue(value);
-  return t ? new Date(t).toISOString() : null;
+  return t !== null ? new Date(t).toISOString() : null;
 }
 
 // Bitrix DATE_MODIFY can include precision finer than JavaScript Date's
@@ -459,7 +461,7 @@ function money(value, currency = "RUB") {
 
 function shortDate(value) {
   const t = dateValue(value);
-  if (!t) return "—";
+  if (t === null) return "—";
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: SALES_DISPLAY_TIME_ZONE }).format(new Date(t));
 }
 
@@ -845,8 +847,8 @@ function scoreDeal(deal, previous) {
   const lastAge = daysSince(lastActivityAt);
   const dealAge = daysSince(createdAt);
   const nextTs = dateValue(nextActivityAt);
-  const hasNext = Boolean(nextTs && nextTs > Date.now() - 5 * 60 * 1000);
-  const nextOverdue = Boolean(nextTs && nextTs < Date.now() - 5 * 60 * 1000);
+  const hasNext = nextTs !== null && nextTs > Date.now() - 5 * 60 * 1000;
+  const nextOverdue = nextTs !== null && nextTs < Date.now() - 5 * 60 * 1000;
   const qual = qualificationStatus(deal);
   // Only an affirmative qualification status earns the full scoring bonus.
   // A status such as "Не квалифицировано" must not match a substring search.
