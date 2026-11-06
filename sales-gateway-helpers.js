@@ -228,7 +228,9 @@ function sanitizeProxyHeaders(headers, dashboardToken) {
     delete output[authKey];
     return output;
   }
-  // Basic authentication schemes are case-insensitive. A lowercase/mixed-case\n  // variant (or HTTP optional leading whitespace) is still a Sales credential\n  // and must not pass through to an unrelated legacy upstream.\n  if (!/^Basic\s/i.test(auth.trimStart())) return output;
+  // HTTP Basic scheme names are case-insensitive; leading whitespace is
+  // tolerated by credential decoding and must not bypass proxy redaction.
+  if (!/^Basic\s/i.test(auth.trimStart())) return output;
   const credentials = decodeBasicCredentials(auth);
   if (!credentials || credentials.username === 'sales' ||
       (typeof dashboardToken === 'string' && dashboardToken.length > 0 && credentials.password === dashboardToken)) {
