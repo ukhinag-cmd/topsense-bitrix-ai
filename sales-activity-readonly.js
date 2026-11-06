@@ -60,9 +60,16 @@ function copyReadResponse(value, ancestors = new WeakSet()) {
   const proto = Object.getPrototypeOf(value);
   if (isArray ? proto !== Array.prototype : proto !== Object.prototype && proto !== null)
     throw new Error('Invalid Bitrix activity response object');
+  // JSON arrays have one own enumerable index per position. A sparse
+  // injected page can otherwise become [] while copying, turning an
+  // unknown activity into a false "no next step" result.
+  const keys = Object.keys(value);
+  if (isArray && (keys.length !== value.length ||
+      keys.some((key, index) => key !== String(index))))
+    throw new Error('Invalid Bitrix activity response array');
   ancestors.add(value);
   const copy = isArray ? [] : Object.create(null);
-  for (const key of Object.keys(value)) {
+  for (const key of keys) {
     // defineProperty never invokes the array's inherited __proto__ setter.
     Object.defineProperty(copy, key, {
       value: copyReadResponse(value[key], ancestors),
