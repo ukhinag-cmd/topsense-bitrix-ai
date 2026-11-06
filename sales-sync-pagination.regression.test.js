@@ -33,6 +33,9 @@ test('bounded Bitrix sync resumes later pages without claiming partial data is c
     if (ms === 120000) return { unref() {} };
     return originalSetInterval(fn, ms, ...args);
   };
+  // Hold the same CRM source version across pages; ID DESC must then
+  // order the records, not incidental wall-clock timing of mock responses.
+  const modifiedAt = new Date(Date.now() - 60000).toISOString();
   global.fetch = async (url, options = {}) => {
     const path = new URL(String(url)).pathname;
     if (path.endsWith('/crm.status.list.json')) {
@@ -52,7 +55,7 @@ test('bounded Bitrix sync resumes later pages without claiming partial data is c
         OPPORTUNITY: '0',
         CURRENCY_ID: 'RUB',
         DATE_CREATE: new Date(Date.now() - 86400000).toISOString(),
-        DATE_MODIFY: new Date(Date.now() - 60000).toISOString(),
+        DATE_MODIFY: modifiedAt,
       }));
       const result = cursor < 200 ? { result: page, next: cursor + 50 } : { result: [] };
       return { ok: true, status: 200, json: async () => result };
