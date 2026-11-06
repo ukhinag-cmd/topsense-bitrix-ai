@@ -61,7 +61,7 @@ test('an overlapping Bitrix next cursor cannot certify incomplete Sales sync', a
       const start = JSON.parse(options.body).start;
       cursors.push(start);
       const result = start === 0
-        ? { result: Array.from({ length: 50 }, (_, i) => record(i + 1)), next: mode === 'overlap' ? 1 : 50 }
+        ? { result: Array.from({ length: 50 }, (_, i) => record(50 - i)), next: mode === 'overlap' ? 1 : 50 }
         : { result: [] };
       return { ok: true, status: 200, json: async () => result };
     }

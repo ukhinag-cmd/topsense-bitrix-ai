@@ -63,7 +63,7 @@ test('a short Bitrix page with a jumping next cursor cannot certify a complete S
       starts.push(start);
       const result = start !== 0 ? { result: [] } :
         mode === 'partial' ? { result: [record(1)], next: 50 } :
-        { result: Array.from({ length: 50 }, (_, i) => record(i + 1)), next: 50 };
+        { result: Array.from({ length: 50 }, (_, i) => record(50 - i)), next: 50 };
       return { ok: true, status: 200, json: async () => result };
     }
     throw new Error('Unexpected mocked Bitrix method: ' + path);
