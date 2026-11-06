@@ -180,6 +180,8 @@ async function storeRequest(action, rows = null) {
     signal: AbortSignal.timeout(20000),
   };
   let response;
+  let responseStatus;
+  let responseOk;
   for (let hops = 0; hops < 5; hops += 1) {
     try {
       response = await fetch(targetUrl, options);
@@ -188,12 +190,22 @@ async function storeRequest(action, rows = null) {
       // and other credentials in their exception text.
       throw new Error("Sales store transport failed");
     }
-    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    // A transport can resolve a response whose metadata getters then throw
+    // secret-bearing errors. Keep all response access inside redaction guards.
+    try {
+      responseStatus = response.status;
+      responseOk = response.ok === true;
+    } catch {
+      throw new Error("Sales store response metadata read failed");
+    }
+    if (![301, 302, 303, 307, 308].includes(responseStatus)) break;
     // Never replay the store secret in a POST, even to the same origin.
-    if (response.status === 307 || response.status === 308) {
+    if (responseStatus === 307 || responseStatus === 308) {
       throw new Error("Unsafe Sales store POST redirect blocked");
     }
-    const location = response.headers?.get?.("location");
+    let location;
+    try { location = response.headers?.get?.("location"); }
+    catch { throw new Error("Sales store redirect header read failed"); }
     if (!location) throw new Error("Sales store redirect missing Location");
     let nextUrl;
     try { nextUrl = new URL(location, targetUrl); }
@@ -214,7 +226,7 @@ async function storeRequest(action, rows = null) {
       signal: AbortSignal.timeout(20000),
     };
   }
-  if ([301, 302, 303, 307, 308].includes(response?.status)) {
+  if ([301, 302, 303, 307, 308].includes(responseStatus)) {
     throw new Error("Sales store redirect limit exceeded");
   }
   let text;
@@ -224,7 +236,7 @@ async function storeRequest(action, rows = null) {
   try { payload = JSON.parse(text); } catch { throw new Error("Invalid Sales store response"); }
   // HTTP 200 alone is not an acknowledgement: redirects, login pages or
   // malformed JSON must never cause pending score history to be discarded.
-  if (!response.ok || !payload || typeof payload !== "object" ||
+  if (!responseOk || !payload || typeof payload !== "object" ||
       Array.isArray(payload) || payload.ok === false) {
     // Store-provided errors can echo its shared secret or sensitive URLs.
     // Report the failure without copying untrusted response fields.
