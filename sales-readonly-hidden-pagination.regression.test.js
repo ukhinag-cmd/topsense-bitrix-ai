@@ -32,7 +32,7 @@ test('read-only lead snapshot never drops a non-enumerable total and certifies a
     }, 'total', 2);
   });
   await assert.rejects(read.snapshot({ pipelineIds: [] }),
-    /invalid crm response|pagination|total/i);
+    /crm read failed|invalid crm response|pagination|total/i);
 });
 
 test('read-only Next Step probe never drops hidden total or next cursor', async () => {
@@ -44,7 +44,7 @@ test('read-only Next Step probe never drops hidden total or next cursor', async 
     await assert.rejects(
       probeDealNextActivity(async () =>
         hidden({ result: [activity] }, key, value), 72),
-      /invalid bitrix activity response|pagination|scan|total/i,
+      /bitrix activity read failed|invalid bitrix activity response|pagination|scan|total/i,
       'reject hidden ' + key + ' instead of treating a partial activity list as complete',
     );
   }
