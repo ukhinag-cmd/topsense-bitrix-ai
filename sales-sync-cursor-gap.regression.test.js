@@ -54,6 +54,11 @@ test('a skipped Bitrix pagination cursor cannot certify an incomplete Sales scan
       cursors.push(cursor);
       // A real Bitrix next: 50 follows a full 50-record page; an empty
       // page with next would itself be malformed and is tested separately.
+      // Use one stable CRM version for the full ID-descending page.
+      // Per-row Date.now() can cross a millisecond boundary and fabricate
+      // an order inversion, making this otherwise healthy cursor test flaky.
+      const createdAt = new Date(Date.now() - 86400000).toISOString();
+      const modifiedAt = new Date(Date.now() - 60000).toISOString();
       const page = Array.from({ length: 50 }, (_, i) => ({
         ID: String(9930049 - i),
         TITLE: 'CRM pagination fixture ' + i,
@@ -61,8 +66,8 @@ test('a skipped Bitrix pagination cursor cannot certify an incomplete Sales scan
         STAGE_SEMANTIC_ID: 'P',
         OPPORTUNITY: '0',
         CURRENCY_ID: 'RUB',
-        DATE_CREATE: new Date(Date.now() - 86400000).toISOString(),
-        DATE_MODIFY: new Date(Date.now() - 60000).toISOString(),
+        DATE_CREATE: createdAt,
+        DATE_MODIFY: modifiedAt,
       }));
       const result = cursor === 0
         ? { result: mode === 'skip' ? [] : page, next: mode === 'skip' ? 5000 : 50 }
