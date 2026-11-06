@@ -156,15 +156,17 @@ function adapter(request){
     const scansMultiplePages=hasNext||start>0||
      (items.length===50&&expectedTotal===null);
     if(scansMultiplePages){
+     // createdTime is the primary requested sort key. A missing value on
+     // any paginated item makes DATE DESC, ID DESC unverifiable, even when
+     // totals, cursors and unique IDs all look consistent. Fail closed
+     // rather than reporting a complete but potentially shifted queue.
+     const times=items.map(row=>scalarItemTime(row.createdTime,"created"));
+     if(times.includes(null))
+      throw new Error("Missing CRM item pagination sort key");
      for(let i=1;i<items.length;i++){
-      const previous=items[i-1],current=items[i];
-      const before=scalarItemTime(previous.createdTime,"created");
-      const after=scalarItemTime(current.createdTime,"created");
-      if(before!==null&&after!==null){
-       const order=compareItemTimes(before,after);
-       if(order<0||(order===0&&Number(previous.id)<=Number(current.id)))
-        throw new Error("Out-of-order CRM item pagination");
-      }
+      const order=compareItemTimes(times[i-1],times[i]);
+      if(order<0||(order===0&&Number(items[i-1].id)<=Number(items[i].id)))
+       throw new Error("Out-of-order CRM item pagination");
      }
     }
     const first=items[0], last=items[items.length-1];
