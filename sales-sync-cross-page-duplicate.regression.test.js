@@ -85,7 +85,7 @@ test('a duplicate Bitrix deal across bounded sync pages cannot certify a complet
       return {
         ok: true, status: 200,
         json: async () => ({
-          result: [deal(9900001 + cursor, 'Original ' + cursor)],
+          result: [deal(9900004 - cursor, 'Original ' + cursor)],
           next: cursor + 1,
         }),
       };
