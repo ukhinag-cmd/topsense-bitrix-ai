@@ -86,8 +86,8 @@ test('updatedTime must not precede createdTime in a trusted CRM snapshot', async
 
 test('real boundary timezone offsets remain supported', async () => {
   const snapshot = await adapterFor({
-    createdTime: '2026-11-05T00:00:00+14:00',
-    updatedTime: '2026-11-05T23:59:59-12:00',
+    createdTime: '2026-11-04T00:00:00+14:00',
+    updatedTime: '2026-11-04T23:59:59-12:00',
   }).snapshot();
   assert.equal(snapshot.counts.activeDeals, 1);
 });
