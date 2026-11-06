@@ -249,6 +249,12 @@ function adapter(request){
   if(offset&&(Number(offset[1])>14||
      (Number(offset[1])===14&&Number(offset[2])!==0)))
    throw new Error("Invalid CRM item "+field+" time");
+  // Creation and modification are observations of past CRM events, not
+  // planned activity dates. Reject future provider timestamps rather than
+  // letting a fictitious item dominate the recent lead/deal queue. Allow
+  // the same ten minutes of clock skew as the active read-only Sales module.
+  if(Date.parse(value)>Date.now()+10*60*1000)
+   throw new Error("Invalid CRM item "+field+" time");
   return value;
  }
  // Date.parse retains only milliseconds. Bitrix may send additional fractional
