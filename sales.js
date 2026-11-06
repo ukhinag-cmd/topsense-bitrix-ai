@@ -16,6 +16,8 @@ const SALES = {
   // Total from an earlier Bitrix page is a scan-wide invariant. A shrinking
   // result set can shift offset pages and silently omit a deal.
   syncExpectedTotal: null,
+  // Preserve DATE_MODIFY/ID ordering across pages and scheduled scan ticks.
+  syncLastSortKey: null,
   lastError: null,
   // Track failed stage metadata independently of the most recent error.
   // Sync/event/store failures can overwrite lastError before the next retry.
@@ -1566,6 +1568,7 @@ function restartSyncScan() {
   SALES.syncSince = null;
   SALES.syncSeenIds = new Set();
   SALES.syncExpectedTotal = null;
+  SALES.syncLastSortKey = null;
 }
 
 async function syncRecentDeals(limitPages = 4) {
@@ -1600,6 +1603,7 @@ async function syncRecentDeals(limitPages = 4) {
     const seenIds = resume ? SALES.syncSeenIds : new Set();
     let expectedTotal = resume ? SALES.syncExpectedTotal : null;
     let start = resume ? SALES.syncCursor : 0;
+    let previousSortKey = resume ? SALES.syncLastSortKey : null;
     let pages = 0;
     const since = resume ? SALES.syncSince : new Date(Date.now() - 45 * 86400000).toISOString();
 
@@ -1668,6 +1672,19 @@ async function syncRecentDeals(limitPages = 4) {
         if (order === null || order < 0 ||
             (order === 0 && Number(earlier.ID) <= Number(later.ID))) {
           throw new Error("Out-of-order Bitrix deal list page");
+        }
+      }
+      // Every page can be internally sorted while the combined offset
+      // scan is not. A newer (or equal-date higher-ID) first row on a later
+      // page means records may have shifted or been skipped at the boundary.
+      // Preserve this boundary across the four-page timer limit as well.
+      if (validatedRows.length && previousSortKey) {
+        const first = validatedRows[0];
+        const order = compareBitrixTimestamp(previousSortKey.modifiedAt, first.DATE_MODIFY);
+        if (order === null || order < 0 ||
+            (order === 0 && Number(previousSortKey.id) <= Number(first.ID))) {
+          restartSyncScan();
+          throw new Error("Out-of-order Bitrix deal list across page boundary");
         }
       }
       let nextStart = -1;
@@ -1749,8 +1766,13 @@ async function syncRecentDeals(limitPages = 4) {
       // Commit the page's identities only after it has been fully applied.
       // Retain these IDs if a bounded scan resumes at a later timer tick.
       for (const id of pageIds) seenIds.add(id);
+      if (validatedRows.length) {
+        const last = validatedRows[validatedRows.length - 1];
+        previousSortKey = { modifiedAt: last.DATE_MODIFY, id: String(last.ID) };
+      }
       SALES.syncSeenIds = seenIds;
       SALES.syncExpectedTotal = expectedTotal;
+      SALES.syncLastSortKey = previousSortKey;
       pages += 1;
       start = nextStart;
 
