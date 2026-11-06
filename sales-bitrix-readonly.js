@@ -143,23 +143,21 @@ function adapter(request){
     if(seenRowIdentities.has(identityKey))throw new Error("Duplicate CRM list row identity");
     seenRowIdentities.add(identityKey);
    }
-   // The provider promises createdTime DESC, id DESC for crm.item.list.
-   // Offset drift can skip an unseen record while still returning unique
-   // IDs and an unchanged total. Verify the order within and across pages,
-   // including ties finer than JavaScript Date's millisecond precision.
-   // Missing optional creation timestamps cannot establish an order; keep
-   // the older adapter contract for those rows without inventing a date.
-   if(method==="crm.item.list"){
-    for(const row of items){
-     const createdAt=scalarItemTime(row.createdTime,"created");
-     const id=Number(row.id);
-     if(lastItemSort&&createdAt!==null&&lastItemSort.createdAt!==null){
-      const order=compareItemTimes(lastItemSort.createdAt,createdAt);
-      if(order<0||(order===0&&lastItemSort.id<=id))
-       throw new Error("Out-of-order CRM item pagination");
-     }
-     lastItemSort={createdAt,id};
+   // A stable total and unique IDs still cannot prove an offset scan if
+   // the first row on a later page is newer than the previous page's tail.
+   // Check the cross-page createdTime DESC, id DESC boundary (including
+   // sub-millisecond ties). Existing single-page fixture responses are left
+   // compatible; an optional missing createdTime cannot prove an order.
+   if(method==="crm.item.list"&&items.length){
+    const first=items[0], last=items[items.length-1];
+    const firstCreatedAt=scalarItemTime(first.createdTime,"created");
+    const lastCreatedAt=scalarItemTime(last.createdTime,"created");
+    if(lastItemSort&&firstCreatedAt!==null&&lastItemSort.createdAt!==null){
+     const order=compareItemTimes(lastItemSort.createdAt,firstCreatedAt);
+     if(order<0||(order===0&&lastItemSort.id<=Number(first.id)))
+      throw new Error("Out-of-order CRM item pagination");
     }
+    lastItemSort={createdAt:lastCreatedAt,id:Number(last.id)};
    }
    all.push(...items);
    if(hasNext){start=next;continue;}
