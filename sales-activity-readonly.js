@@ -64,6 +64,11 @@ function copyReadResponse(value, ancestors = new WeakSet()) {
   // injected page can otherwise become [] while copying, turning an
   // unknown activity into a false "no next step" result.
   const keys = Object.keys(value);
+  // Parsed JSON never has hidden own keys; only an array's length is
+  // non-enumerable. Do not discard a hidden next/total and falsely certify
+  // that all open CRM activities (and the real Next Step) were scanned.
+  if (Object.getOwnPropertyNames(value).length !== keys.length + (isArray ? 1 : 0))
+    throw new Error('Invalid Bitrix activity response hidden properties');
   if (isArray && (keys.length !== value.length ||
       keys.some((key, index) => key !== String(index))))
     throw new Error('Invalid Bitrix activity response array');
