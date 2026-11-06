@@ -212,8 +212,17 @@ function sanitizeProxyHeaders(headers, dashboardToken) {
   for (const key of Object.keys(output)) {
     if (key.toLowerCase() === 'proxy-authorization') delete output[key];
   }
-  const authKey = Object.keys(output).find(key => key.toLowerCase() === 'authorization');
-  if (!authKey) return output;
+  const authKeys = Object.keys(output).filter(key => key.toLowerCase() === 'authorization');
+  if (authKeys.length === 0) return output;
+  // HTTP authorization is one logical header regardless of capitalization.
+  // A programmatic proxy caller can still supply two case-variant keys.
+  // Never let a dangerous Basic credential survive in the second alias:
+  // ambiguous authorization metadata is safer to omit entirely.
+  if (authKeys.length > 1) {
+    for (const key of authKeys) delete output[key];
+    return output;
+  }
+  const authKey = authKeys[0];
   const auth = output[authKey];
   if (typeof auth !== 'string') {
     delete output[authKey];
