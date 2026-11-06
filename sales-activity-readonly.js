@@ -49,6 +49,30 @@ function pageNumber(value) {
   return Number(text);
 }
 
+// Treat an injected transport as untrusted even after it resolves: mock
+// getters/proxies may throw credential-bearing URL errors while reading
+// response fields. Snapshot JSON-shaped values inside the redaction boundary
+// so all later validation inspects inert data only.
+function copyReadResponse(value, ancestors = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (ancestors.has(value)) throw new Error('Invalid Bitrix activity response cycle');
+  const isArray = Array.isArray(value);
+  const proto = Object.getPrototypeOf(value);
+  if (isArray ? proto !== Array.prototype : proto !== Object.prototype && proto !== null)
+    throw new Error('Invalid Bitrix activity response object');
+  ancestors.add(value);
+  const copy = isArray ? [] : Object.create(null);
+  for (const key of Object.keys(value)) {
+    // defineProperty never invokes the array's inherited __proto__ setter.
+    Object.defineProperty(copy, key, {
+      value: copyReadResponse(value[key], ancestors),
+      enumerable: true, writable: true, configurable: true,
+    });
+  }
+  ancestors.delete(value);
+  return copy;
+}
+
 function boundToDeal(activity, id) {
   // Bitrix's documented crm.activity.list response may omit BINDINGS even
   // when a BINDINGS filter was used. Accept the primary owner only when both
@@ -82,12 +106,18 @@ async function probeDealNextActivity(request, dealId) {
   let expectedTotal = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const start = page * PAGE_SIZE;
-    const response = await request('crm.activity.list', {
+    let response;
+    try {
+      response = copyReadResponse(await request('crm.activity.list', {
       order: { ID: 'ASC' },
       filter: { BINDINGS: [{ OWNER_TYPE_ID: 2, OWNER_ID: Number(id) }], COMPLETED: 'N' },
       select: ['ID', 'OWNER_TYPE_ID', 'OWNER_ID', 'BINDINGS', 'COMPLETED', 'DEADLINE'],
       start,
-    });
+      }));
+    } catch {
+      // Never expose raw REST errors, accessors, or their causes to logs.
+      throw new Error('Bitrix activity read failed');
+    }
     if (!response || typeof response !== 'object' || Array.isArray(response) ||
         response.error || !Array.isArray(response.result) || response.result.length > PAGE_SIZE) {
       throw new Error('Invalid Bitrix activity list response');
