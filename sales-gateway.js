@@ -112,15 +112,36 @@ function createGateway({
     }
 
     if (req.method === 'GET' && pathname === '/sales') {
+      // Rendering derives from CRM/Sheet snapshots. A malformed row or an
+      // accessor error must not escape the HTTP callback (crashing Node and
+      // potentially logging a secret-bearing exception). Compute the body
+      // before sending 200 and return only a generic read-only error.
+      let page;
+      try {
+        page = salesApi.html();
+        if (typeof page !== 'string') throw new Error('Invalid Sales HTML');
+      } catch {
+        res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end('Sales Dashboard unavailable');
+      }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      return res.end(salesApi.html());
+      return res.end(page);
     }
 
     if (req.method === 'GET' && pathname === '/sales/status') {
-      const body = JSON.stringify(salesApi.status());
+      let body;
+      let length;
+      try {
+        body = JSON.stringify(salesApi.status());
+        if (typeof body !== 'string') throw new Error('Invalid Sales status');
+        length = Buffer.byteLength(body);
+      } catch {
+        res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        return res.end('Sales Dashboard unavailable');
+      }
       res.writeHead(200, {
         'content-type': 'application/json; charset=utf-8',
-        'content-length': Buffer.byteLength(body),
+        'content-length': length,
         'cache-control': 'no-store',
       });
       return res.end(body);
