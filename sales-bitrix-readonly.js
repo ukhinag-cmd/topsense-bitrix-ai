@@ -43,9 +43,16 @@ function copyReadPayload(value, ancestors=new WeakSet()){
  const proto=Object.getPrototypeOf(value);
  if(!Array.isArray(value)&&proto!==Object.prototype&&proto!==null)
   throw new Error("Invalid CRM response object");
+ // A sparse injected array is not an empty CRM list. Copying only its
+ // enumerable indexes would silently erase missing rows and undercount leads
+ // or deals. Real JSON arrays are always dense; fail closed for other shapes.
+ const keys=Object.keys(value);
+ if(Array.isArray(value)&&(keys.length!==value.length||
+    keys.some((key,index)=>key!==String(index))))
+  throw new Error("Invalid CRM response array");
  ancestors.add(value);
  const result=Array.isArray(value)?[]:Object.create(null);
- for(const key of Object.keys(value))result[key]=copyReadPayload(value[key],ancestors);
+ for(const key of keys)result[key]=copyReadPayload(value[key],ancestors);
  ancestors.delete(value);
  return result;
 }
