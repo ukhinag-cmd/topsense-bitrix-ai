@@ -43,6 +43,10 @@ const SALES = {
 const SALES_PREFIX = "sales:deal:";
 const MAX_HISTORY = 40;
 const MAX_ALERTS = 8;
+// Bitrix's unscheduled-activity sentinel is 9999-12-31 local time. When
+// normalized to UTC, the same value can fall on 9999-12-30. Interpret both
+// as missing Next Step rather than granting a fictitious future activity.
+const NO_DEADLINE_FROM = Date.parse("9999-12-30T00:00:00Z");
 // Bitrix stage edits do not necessarily update any deal's DATE_MODIFY.
 // Poll successful dictionaries periodically rather than freezing them forever.
 const STAGE_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -788,7 +792,7 @@ function validateActivityRow(activity, expectedId) {
 // Prospect Score, or suppress Risk Score. Prefer the alternate real field.
 function scheduledActivityTime(deal) {
   return [deal.ACTIVITY_TIME, deal.NEXT_ACTIVITY_TIME].find(value =>
-    value && !(typeof value === "string" && value.slice(0, 10) === "9999-12-31")) || null;
+    value && !(typeof value === "string" && Date.parse(value) >= NO_DEADLINE_FROM)) || null;
 }
 
 function scoreDeal(deal, previous) {
