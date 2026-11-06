@@ -86,6 +86,30 @@ const READ_ONLY_BITRIX_METHODS = new Set([
   "crm.deal.list",
 ]);
 
+// A resolved transport can supply a non-JSON-shaped object: JSON.stringify
+// silently drops hidden pagination keys (total/next) and replaces sparse array
+// slots with null. A partial CRM page could then look complete. Verify the
+// structural properties before cloning it within the credential-redaction
+// boundary. This accepts ordinary JSON arrays/objects from any realm.
+function assertBitrixJsonShape(value, ancestors = new WeakSet()) {
+  if (value === null || typeof value !== "object") return;
+  if (ancestors.has(value)) throw new Error("Invalid Bitrix JSON cycle");
+  const isArray = Array.isArray(value);
+  const keys = Object.keys(value);
+  // Real parsed JSON has no hidden or symbol properties; an array's length
+  // is the single allowed non-enumerable own property.
+  if (Reflect.ownKeys(value).length !== keys.length + (isArray ? 1 : 0)) {
+    throw new Error("Invalid Bitrix JSON hidden properties");
+  }
+  if (isArray && (keys.length !== value.length ||
+      keys.some((key, index) => key !== String(index)))) {
+    throw new Error("Invalid Bitrix JSON array");
+  }
+  ancestors.add(value);
+  for (const key of keys) assertBitrixJsonShape(value[key], ancestors);
+  ancestors.delete(value);
+}
+
 async function bitrixRaw(method, params = {}) {
   // POST is the Bitrix REST transport; the REST method itself must be read-only.
   // Prevent accidental CRM writes if a future caller adds a mutating method.
@@ -122,7 +146,9 @@ async function bitrixRaw(method, params = {}) {
     const status = response.status;
     safeStatus = Number.isInteger(status) && status >= 100 && status <= 599
       ? status : "unknown";
-    payload = JSON.parse(JSON.stringify(await response.json()));
+    const rawPayload = await response.json();
+    assertBitrixJsonShape(rawPayload);
+    payload = JSON.parse(JSON.stringify(rawPayload));
   } catch {
     throw new Error("Bitrix REST " + method + " response read failed");
   }
