@@ -518,6 +518,14 @@ async function loadStagesForCategory(category) {
           (row.EXTRA?.SEMANTICS != null && typeof row.EXTRA.SEMANTICS !== "string")) {
         throw new Error("Invalid Bitrix stage metadata value");
       }
+      // A stage with neither a short marker nor EXTRA semantics has no
+      // verified outcome. Bitrix uses explicit SEMANTICS:null for process,
+      // so absent is not equivalent to null. Reject the whole refresh rather
+      // than replacing a trusted pipeline cache with unknown semantics and
+      // silently changing Prospect/Risk Score while reporting healthy stages.
+      if (row.SEMANTICS === undefined && row.EXTRA?.SEMANTICS == null) {
+        throw new Error("Missing Bitrix stage semantics");
+      }
       const semanticMap = { process: "P", success: "S", failure: "F", apology: "F" };
       const extraSemantic = String(row.EXTRA?.SEMANTICS || "").trim().toLowerCase();
       const mappedSemantic = Object.prototype.hasOwnProperty.call(semanticMap, extraSemantic)
