@@ -12,6 +12,8 @@ test('malformed user.get display fields cannot poison a verified Sales manager l
     [{ ID: '8', NAME: '', LAST_NAME: ['False surname'] }],
     [{ ID: '8', NAME: '', LAST_NAME: '', EMAIL: ['fake@example.test'] }],
     [{ ID: '8', NAME: '', LAST_NAME: '', EMAIL: 'verified@example.test' }],
+    [{ ID: '9', NAME: 'Stale', LAST_NAME: 'Manager' }, { ID: 9, NAME: 'Conflicting', LAST_NAME: 'Manager' }],
+    [{ ID: 9, NAME: 'Recovered', LAST_NAME: 'Manager' }],
   ];
   const requestedIds = [];
   const context = {
@@ -43,6 +45,13 @@ test('malformed user.get display fields cannot poison a verified Sales manager l
   assert.equal(await managerName('8'), 'verified@example.test',
     'a valid email fallback must still work after malformed user responses');
   assert.equal(await managerName('8'), 'verified@example.test');
-  assert.deepEqual(requestedIds, [7, 7, 8, 8, 8],
+  assert.equal(await managerName('9'), '#9',
+    'duplicate matching user.get identities must not certify a possibly stale manager label');
+  assert.equal(await managerName('9'), 'Recovered Manager',
+    'a later unique verified user response must remain retryable');
+  assert.equal(await managerName('9'), 'Recovered Manager',
+    'a recovered unique manager identity can be cached');
+
+  assert.deepEqual(requestedIds, [7, 7, 8, 8, 8, 9, 9],
     'malformed user responses must remain retryable and never poison the cache');
 });
