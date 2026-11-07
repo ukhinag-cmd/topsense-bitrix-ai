@@ -606,10 +606,16 @@ async function managerName(id) {
     const users = await bitrixCall("user.get", { ID: Number(key) });
     // Bitrix may return a malformed/partial user list. A different user's
     // name must never be attributed to the deal's assigned manager.
-    const user = Array.isArray(users)
-      ? users.find(candidate => candidate && typeof candidate === "object" &&
-          validDealId(candidate.ID) && String(candidate.ID) === key)
-      : null;
+    // A malformed user.get response may repeat the requested identity with
+    // contradictory names. Taking the first match would display and cache an
+    // arbitrary manager. Require exactly one verified matching record; a
+    // duplicate remains retryable rather than poisoning the manager cache.
+    const matchingUsers = Array.isArray(users)
+      ? users.filter(candidate => candidate && typeof candidate === "object" &&
+          !Array.isArray(candidate) && validDealId(candidate.ID) &&
+          String(candidate.ID) === key)
+      : [];
+    const user = matchingUsers.length === 1 ? matchingUsers[0] : null;
     // user.get display fields must be scalar strings, just like the user ID.
     // String coercion otherwise turns ['Impostor'] into a believable manager
     // name and permanently caches a malformed identity for this manager.
