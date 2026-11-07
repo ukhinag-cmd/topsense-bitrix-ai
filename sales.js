@@ -523,6 +523,11 @@ async function loadStagesForCategory(category) {
       const mappedSemantic = Object.prototype.hasOwnProperty.call(semanticMap, extraSemantic)
         ? semanticMap[extraSemantic] : "";
       const shortSemantic = String(row.SEMANTICS || "").trim().toUpperCase();
+      // Bitrix crm.status.list uses an explicit null short semantic for a
+      // process stage. If optional EXTRA is missing, null still means "P",
+      // not an unknown stage. A verified EXTRA success/failure takes priority.
+      const shortProcess = Object.prototype.hasOwnProperty.call(row, "SEMANTICS") &&
+        row.SEMANTICS === null;
       if ((extraSemantic && !mappedSemantic) ||
           (shortSemantic && !["P", "S", "F"].includes(shortSemantic)) ||
           (shortSemantic && mappedSemantic && shortSemantic !== mappedSemantic)) {
@@ -532,7 +537,7 @@ async function loadStagesForCategory(category) {
       if (stages.has(stageId)) throw new Error("Duplicate Bitrix stage metadata ID");
       stages.set(stageId, {
         name: row.NAME || stageId,
-        semantics: shortSemantic || mappedSemantic || "",
+        semantics: shortSemantic || mappedSemantic || (shortProcess ? "P" : ""),
       });
     }
     // An empty refresh is not proof that all previously verified stages
