@@ -90,6 +90,38 @@ test('blank Bitrix stage semantics cannot replace a verified outcome or distort 
   assert.equal(retained?.semantic, 'P');
   assert.equal(retained?.stageName, 'Verified process');
 
+  // Even a seemingly valid second semantic must not mask an explicitly
+  // malformed first field. Otherwise a short blank with long "success"
+  // closes a verified in-progress deal while stage health looks healthy.
+  for (const [label, row] of [
+    ['blank short with valid success', {
+      STATUS_ID: 'ACTIVE', NAME: 'Invalid short',
+      SEMANTICS: '   ', EXTRA: { SEMANTICS: 'success' },
+    }],
+    ['blank short with valid process', {
+      STATUS_ID: 'ACTIVE', NAME: 'Invalid short process',
+      SEMANTICS: '', EXTRA: { SEMANTICS: 'process' },
+    }],
+    ['valid success with blank long', {
+      STATUS_ID: 'ACTIVE', NAME: 'Invalid long',
+      SEMANTICS: 'S', EXTRA: { SEMANTICS: '   ' },
+    }],
+    ['null process with blank long', {
+      STATUS_ID: 'ACTIVE', NAME: 'Invalid null/blank',
+      SEMANTICS: null, EXTRA: { SEMANTICS: '' },
+    }],
+  ]) {
+    stages = [row];
+    await sales.start();
+    state = sales.status();
+    retained = state.prospects.find(deal => deal.dealId === id);
+    assert.equal(state.lastError?.source, 'stages', label);
+    assert.equal(retained?.semantic, 'P', label);
+    assert.equal(retained?.stageName, 'Verified process', label);
+    assert.equal(retained?.prospectScore, verified.prospectScore, label);
+    assert.equal(retained?.riskScore, verified.riskScore, label);
+  }
+
   stages = [{
     STATUS_ID: 'ACTIVE', NAME: 'Verified success',
     SEMANTICS: 'S', EXTRA: { SEMANTICS: 'success' },
@@ -98,5 +130,5 @@ test('blank Bitrix stage semantics cannot replace a verified outcome or distort 
   state = sales.status();
   assert.equal(state.lastError, null, 'subsequent valid dictionary recovers health');
   assert.equal(state.wins.find(row => row.dealId === id)?.semantic, 'S');
-  assert.equal(stageReads, 4);
+  assert.equal(stageReads, 8);
 });

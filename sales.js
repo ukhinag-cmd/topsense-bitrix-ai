@@ -540,6 +540,13 @@ async function loadStagesForCategory(category) {
       // process marker (explicit null). Likewise an empty/whitespace-only
       // EXTRA.SEMANTICS does not establish any stage outcome. Keep the last
       // verified dictionary instead of silently rescoring deals as unknown.
+      // A present-but-blank semantic marker is malformed even when the
+      // other marker appears valid. Do not borrow a plausible P/S/F value
+      // and silently replace the last verified pipeline classification.
+      if ((typeof row.SEMANTICS === "string" && !row.SEMANTICS.trim()) ||
+          (typeof row.EXTRA?.SEMANTICS === "string" && !row.EXTRA.SEMANTICS.trim())) {
+        throw new Error("Blank Bitrix stage semantic marker");
+      }
       if (!shortProcess && !shortSemantic && !mappedSemantic) {
         throw new Error("Missing Bitrix stage semantics");
       }
