@@ -30,12 +30,12 @@ test('Bitrix deal stage EXTRA.SEMANTICS determines open, won and lost status wit
   global.setInterval = (fn, ms, ...args) =>
     ms === 120000 ? { unref() {} } : originalInterval(fn, ms, ...args);
 
-  // Bitrix24 crm.status.list documents EXTRA.SEMANTICS as the readable stage
-  // state even when the top-level SEMANTICS is null.
+  // Bitrix24 crm.status.list provides short null/S/F semantics, with a
+  // matching EXTRA process/success/failure label for the UI.
   let stageRows = [
     { STATUS_ID: 'NEW', NAME: 'В работе', SEMANTICS: null, EXTRA: { SEMANTICS: 'process' } },
-    { STATUS_ID: 'WON', NAME: 'Успешно', SEMANTICS: null, EXTRA: { SEMANTICS: 'success' } },
-    { STATUS_ID: 'LOST', NAME: 'Закрыто', SEMANTICS: null, EXTRA: { SEMANTICS: 'failure' } },
+    { STATUS_ID: 'WON', NAME: 'Успешно', SEMANTICS: 'S', EXTRA: { SEMANTICS: 'success' } },
+    { STATUS_ID: 'LOST', NAME: 'Закрыто', SEMANTICS: 'F', EXTRA: { SEMANTICS: 'failure' } },
   ];
   const now = Date.now();
   const stages = new Map([
