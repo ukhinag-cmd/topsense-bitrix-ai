@@ -536,6 +536,13 @@ async function loadStagesForCategory(category) {
       // when EXTRA exists, its outcome must agree with the short marker.
       const shortProcess = Object.prototype.hasOwnProperty.call(row, "SEMANTICS") &&
         row.SEMANTICS === null;
+      // A present but blank short semantic is not Bitrix's documented
+      // process marker (explicit null). Likewise an empty/whitespace-only
+      // EXTRA.SEMANTICS does not establish any stage outcome. Keep the last
+      // verified dictionary instead of silently rescoring deals as unknown.
+      if (!shortProcess && !shortSemantic && !mappedSemantic) {
+        throw new Error("Missing Bitrix stage semantics");
+      }
       if ((extraSemantic && !mappedSemantic) ||
           (shortSemantic && !["P", "S", "F"].includes(shortSemantic)) ||
           (shortSemantic && mappedSemantic && shortSemantic !== mappedSemantic) ||
