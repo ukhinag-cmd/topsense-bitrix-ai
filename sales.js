@@ -524,8 +524,8 @@ async function loadStagesForCategory(category) {
         ? semanticMap[extraSemantic] : "";
       const shortSemantic = String(row.SEMANTICS || "").trim().toUpperCase();
       // Bitrix crm.status.list uses an explicit null short semantic for a
-      // process stage. If optional EXTRA is missing, null still means "P",
-      // not an unknown stage. A verified EXTRA success/failure takes priority.
+      // process stage. If optional EXTRA is missing, null still means "P";
+      // when EXTRA exists, its outcome must agree with the short marker.
       const shortProcess = Object.prototype.hasOwnProperty.call(row, "SEMANTICS") &&
         row.SEMANTICS === null;
       if ((extraSemantic && !mappedSemantic) ||
