@@ -530,7 +530,11 @@ async function loadStagesForCategory(category) {
         row.SEMANTICS === null;
       if ((extraSemantic && !mappedSemantic) ||
           (shortSemantic && !["P", "S", "F"].includes(shortSemantic)) ||
-          (shortSemantic && mappedSemantic && shortSemantic !== mappedSemantic)) {
+          (shortSemantic && mappedSemantic && shortSemantic !== mappedSemantic) ||
+          // The short null marker explicitly means a process stage. A long
+          // success/failure alongside it is contradictory, not an accepted
+          // closed outcome: keep the last verified stage cache instead.
+          (shortProcess && mappedSemantic && mappedSemantic !== "P")) {
         throw new Error("Conflicting or unknown Bitrix stage semantics");
       }
       const stageId = row.STATUS_ID.trim();
