@@ -57,7 +57,7 @@ test('stage semantics and names are scoped to the Bitrix deal pipeline, and fail
         return { ok: true, status: 200, json: async () => ({
           result: [
             { STATUS_ID: 'NEW', NAME: 'Воронка 7: в работе', SEMANTICS: null, EXTRA: { SEMANTICS: 'process' } },
-            { STATUS_ID: 'WON', NAME: 'Воронка 7: успех', SEMANTICS: null, EXTRA: { SEMANTICS: 'success' } },
+            { STATUS_ID: 'WON', NAME: 'Воронка 7: успех', SEMANTICS: 'S', EXTRA: { SEMANTICS: 'success' } },
           ],
         }) };
       }
