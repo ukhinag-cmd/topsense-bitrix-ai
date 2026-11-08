@@ -122,7 +122,7 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
   // with U+FFFD, even if the token and deal ID are unaffected. Reject lossy
   // or malformed percent encoding before interpreting authenticated fields.
   if (mediaType === 'application/x-www-form-urlencoded') {
-    try { decodeURIComponent(bytes.toString('utf8').replace(/\\+/g, ' ')); }
+    try { decodeURIComponent(bytes.toString('utf8').replace(/\+/g, ' ')); }
     catch { return null; }
   }
 
