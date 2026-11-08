@@ -185,6 +185,41 @@ function storeConfigured() {
   );
 }
 
+// JSON.parse silently keeps only the last occurrence of a duplicate key.
+// A Sheet store or intermediate proxy could return {"ok":false,"ok":true}
+// and make us discard unsaved score history. Inspect the original, syntactically
+// valid JSON (including Unicode-escaped key aliases) before trusting any
+// read or persistence acknowledgement. This is a lexical scan, not eval.
+function hasDuplicateStoreJsonKeys(json) {
+  const stack = [];
+  for (let i = 0; i < json.length; i += 1) {
+    const char = json[i];
+    if (char === '"') {
+      const start = i;
+      for (i += 1; i < json.length; i += 1) {
+        if (json[i] === '\\') { i += 1; continue; }
+        if (json[i] === '"') break;
+      }
+      const container = stack[stack.length - 1];
+      if (container?.kind === "object" && container.expectKey) {
+        const name = JSON.parse(json.slice(start, i + 1));
+        if (container.keys.has(name)) return true;
+        container.keys.add(name);
+        container.expectKey = false;
+      }
+    } else if (char === "{") {
+      stack.push({ kind: "object", expectKey: true, keys: new Set() });
+    } else if (char === "[") {
+      stack.push({ kind: "array" });
+    } else if (char === "}" || char === "]") {
+      stack.pop();
+    } else if (char === "," && stack[stack.length - 1]?.kind === "object") {
+      stack[stack.length - 1].expectKey = true;
+    }
+  }
+  return false;
+}
+
 async function storeRequest(action, rows = null) {
   if (!storeConfigured()) return null;
   const body = {
@@ -271,7 +306,12 @@ async function storeRequest(action, rows = null) {
   try { text = await response.text(); }
   catch { throw new Error("Sales store response read failed"); }
   let payload;
-  try { payload = JSON.parse(text); } catch { throw new Error("Invalid Sales store response"); }
+  try {
+    payload = JSON.parse(text);
+    // A conflicting duplicate "ok" or "rows" must not certify persistence
+    // or make a partial stored history appear complete.
+    if (hasDuplicateStoreJsonKeys(text)) throw new Error("Ambiguous store JSON keys");
+  } catch { throw new Error("Invalid Sales store response"); }
   // HTTP 200 alone is not an acknowledgement: redirects, login pages or
   // malformed JSON must never cause pending score history to be discarded.
   if (!responseOk || !payload || typeof payload !== "object" ||
