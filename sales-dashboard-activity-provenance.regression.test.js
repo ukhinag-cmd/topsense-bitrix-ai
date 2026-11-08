@@ -11,4 +11,9 @@ test('Sales Dashboard labels Bitrix timeline activity without claiming customer 
   const html = sales.html();
   assert.match(html, /<th>Последняя активность CRM<\/th>/);
   assert.doesNotMatch(html, /<th>Последний контакт<\/th>/);
+  // Risk scoring uses the same timeline proxy, not a validated outbound or
+  // inbound customer communication. Operators must see the limitation.
+  assert.match(html, /Risk Score оценивает давность по последней активности в CRM-таймлайне/);
+  assert.match(html, /LAST_ACTIVITY_TIME/);
+  assert.match(html, /проверьте звонки и переписку в Bitrix24/);
 });
