@@ -2074,6 +2074,12 @@ function status() {
       deletedDealsReconciled: false,
       deletedActivitiesReconciled: false,
     },
+    scoringLimitations: {
+      // DATE_MODIFY is the latest confirmed deal edit, not a proven stage
+      // transition timestamp. Initial stage ages (and later observed moves)
+      // are source-version estimates until CRM stage history is integrated.
+      stageAgeEstimatedFromDateModify: true,
+    },
     counts: {
       tracked: all.length,
       open: open.length,
@@ -2196,7 +2202,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 </div>
 <div class="layout"><main>
 <div class="panel"><h2>⭐ Перспективные сделки</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Score</th><th>Этап</th><th>Последняя активность CRM</th><th>Next Step</th><th>Что делать</th></tr></thead><tbody>${prospectRows || '<tr><td colspan="8">Пока нет сделок с score ≥60. База заполняется из Bitrix.</td></tr>'}</tbody></table></div></div>
-<div class="panel"><h2>🔴 Требуют внимания</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Risk</th><th>Next Step</th><th>Квалификация</th><th>Действие</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7">Критичных отклонений не найдено.</td></tr>'}</tbody></table></div><div class="note">Risk Score оценивает давность по последней активности в CRM-таймлайне (LAST_ACTIVITY_TIME), а не по подтверждённому контакту с клиентом. Перед выводами проверьте звонки и переписку в Bitrix24.</div></div>
+<div class="panel"><h2>🔴 Требуют внимания</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Risk</th><th>Next Step</th><th>Квалификация</th><th>Действие</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7">Критичных отклонений не найдено.</td></tr>'}</tbody></table></div><div class="note">Risk Score оценивает давность по последней активности в CRM-таймлайне (LAST_ACTIVITY_TIME), а не по подтверждённому контакту с клиентом. Перед выводами проверьте звонки и переписку в Bitrix24. Кроме того, возраст стадии оценивается по DATE_MODIFY, а не по подтверждённой дате перехода: после недавнего редактирования сделки это может занижать риск. Проверьте историю стадий Bitrix24.</div></div>
 <div class="panel"><h2>История оценок</h2><div class="tablewrap"><table><thead><tr><th>Время</th><th>Сделка</th><th>Менеджер</th><th>Этап</th><th>Результат</th><th>Prospect</th><th>Risk</th><th>Сумма</th></tr></thead><tbody>${historyRows || '<tr><td colspan="8">История появится после загрузки сделок.</td></tr>'}</tbody></table></div><div class="note">Последние 25 наблюдений: первичная загрузка, изменение стадии или оценок.</div></div>
 </main><aside><div class="panel"><h2>Уведомления</h2><div class="alerts">${alertRows || '<div class="note">События появятся после изменений сделок.</div>'}</div></div>
 <div class="panel"><h2>Статус</h2><div class="note">Отслеживается: ${s.counts.tracked} сделок<br>Последний webhook: ${escapeHtml(s.lastEventAt || "—")}<br>Обработан CRM: ${escapeHtml(s.lastProcessedEventAt || "—")}<br>Ошибка обработки: ${escapeHtml(s.lastFailedEventAt || "—")}<br>Пропущен без сделки: ${escapeHtml(s.lastIgnoredEventAt || "—")}<br>Последняя синхронизация: ${escapeHtml(s.lastSyncAt || "—")}<br>Ошибка: ${escapeHtml(s.lastError?.message || "нет")}</div></div></aside></div>
