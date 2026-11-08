@@ -44,6 +44,10 @@ function canonicalRequestPath(rawPath) {
   // Encoded query/fragment delimiters make route interpretation ambiguous.
   if (decoded.includes('?') || decoded.includes('#')) return null;
   decoded = decoded.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  // URL() removes dot segments. Reject them *before* normalization: otherwise
+  // /sales/../legacy or /bitrix/events/%2e%2e/legacy escapes the protected
+  // namespace and gets forwarded to an explicitly configured CRM upstream.
+  if (decoded.split('/').some(segment => segment === '.' || segment === '..')) return null;
   try {
     decoded = new URL('http://localhost' + (decoded.startsWith('/') ? decoded : '/' + decoded)).pathname;
   } catch { return null; }
