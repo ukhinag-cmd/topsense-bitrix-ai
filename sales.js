@@ -813,7 +813,7 @@ function validateDealRow(deal, expectedId = null) {
   // legitimate updates look stale; a future contact hides risk indefinitely.
   // Allow 10 minutes of clock skew, as for snapshots loaded from the store.
   const latestPlausible = Date.now() + 10 * 60 * 1000;
-  for (const field of ["DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME"]) {
+  for (const field of ["DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME", "MOVED_TIME"]) {
     const value = deal[field];
     if (value == null || value === "") continue;
     const timestamp = timezoneQualifiedCrmDateTime(value) ? dateValue(value) : null;
@@ -834,6 +834,14 @@ function validateDealRow(deal, expectedId = null) {
   // its creation. Reuse the source-version comparator's full precision.
   if (deal.DATE_CREATE && compareBitrixTimestamp(deal.DATE_CREATE, deal.DATE_MODIFY) > 0) {
     throw new Error("Invalid Bitrix deal DATE_CREATE chronology");
+  }
+  // A newer change to the deal must not predate its last stage move. Trust
+  // MOVED_TIME only when it describes a possible transition within the
+  // deal's lifetime; otherwise fail closed before altering Risk/history.
+  if (deal.MOVED_TIME &&
+      (compareBitrixTimestamp(deal.MOVED_TIME, deal.DATE_MODIFY) > 0 ||
+       (deal.DATE_CREATE && compareBitrixTimestamp(deal.MOVED_TIME, deal.DATE_CREATE) < 0))) {
+    throw new Error("Invalid Bitrix deal MOVED_TIME chronology");
   }
   // Future scheduled actions are legitimate, but a malformed non-empty
   // activity date would otherwise erase the verified Next Step and inflate
@@ -906,7 +914,11 @@ function scoreDeal(deal, previous) {
   const stageId = String(deal.STAGE_ID || "");
   const nowIso = new Date().toISOString();
 
-  let stageEnteredAt = previous?.stageEnteredAt || deal.DATE_MODIFY || deal.DATE_CREATE || nowIso;
+  // Bitrix exposes the last actual stage transition separately from edits.
+  // Prefer that verified CRM timestamp; older snapshots and portals without
+  // MOVED_TIME retain their explicit DATE_MODIFY estimate.
+  let stageEnteredAt = deal.MOVED_TIME ||
+    previous?.stageEnteredAt || deal.DATE_MODIFY || deal.DATE_CREATE || nowIso;
   // Pipeline IDs scope stage IDs: moving between pipelines counts as
   // entering a new stage even when both pipelines call that stage "NEW".
   // Otherwise stale stage age can add 15-25 phantom Risk Score points.
@@ -916,7 +928,7 @@ function scoreDeal(deal, previous) {
     // DATE_MODIFY is the latest verified time that the move could have
     // happened; using observation time would erase overdue stage-age risk.
     // CRM versions are validated before scoreDeal is called for live rows.
-    stageEnteredAt = isoOrNull(deal.DATE_MODIFY) || nowIso;
+    stageEnteredAt = isoOrNull(deal.MOVED_TIME) || isoOrNull(deal.DATE_MODIFY) || nowIso;
   }
   const stageAge = daysSince(stageEnteredAt);
 
@@ -1667,7 +1679,7 @@ async function syncRecentDeals(limitPages = 4) {
         filter: { ">DATE_MODIFY": since },
         select: [
           "ID","TITLE","ASSIGNED_BY_ID","SOURCE_ID","CATEGORY_ID","STAGE_ID","STAGE_SEMANTIC_ID",
-          "OPPORTUNITY","CURRENCY_ID","DATE_CREATE","DATE_MODIFY","BEGINDATE","CLOSEDATE",
+          "OPPORTUNITY","CURRENCY_ID","DATE_CREATE","DATE_MODIFY","MOVED_TIME","BEGINDATE","CLOSEDATE",
           "LAST_ACTIVITY_TIME","ACTIVITY_TIME","NEXT_ACTIVITY_TIME",
           "UF_CRM_AI_QUAL_STATUS","UF_CRM_AI_CLIENT_TYPE"
         ],
@@ -2079,6 +2091,9 @@ function status() {
       // transition timestamp. Initial stage ages (and later observed moves)
       // are source-version estimates until CRM stage history is integrated.
       stageAgeEstimatedFromDateModify: true,
+      // Where Bitrix returns its actual stage-transition timestamp, Risk
+      // uses that instead of treating an unrelated deal edit as a stage move.
+      stageAgeUsesMovedTimeWhenAvailable: true,
     },
     counts: {
       tracked: all.length,
@@ -2202,7 +2217,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 </div>
 <div class="layout"><main>
 <div class="panel"><h2>⭐ Перспективные сделки</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Score</th><th>Этап</th><th>Последняя активность CRM</th><th>Next Step</th><th>Что делать</th></tr></thead><tbody>${prospectRows || '<tr><td colspan="8">Пока нет сделок с score ≥60. База заполняется из Bitrix.</td></tr>'}</tbody></table></div></div>
-<div class="panel"><h2>🔴 Требуют внимания</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Risk</th><th>Next Step</th><th>Квалификация</th><th>Действие</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7">Критичных отклонений не найдено.</td></tr>'}</tbody></table></div><div class="note">Risk Score оценивает давность по последней активности в CRM-таймлайне (LAST_ACTIVITY_TIME), а не по подтверждённому контакту с клиентом. Перед выводами проверьте звонки и переписку в Bitrix24. Кроме того, возраст стадии оценивается по DATE_MODIFY, а не по подтверждённой дате перехода: после недавнего редактирования сделки это может занижать риск. Проверьте историю стадий Bitrix24.</div></div>
+<div class="panel"><h2>🔴 Требуют внимания</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Risk</th><th>Next Step</th><th>Квалификация</th><th>Действие</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7">Критичных отклонений не найдено.</td></tr>'}</tbody></table></div><div class="note">Risk Score оценивает давность по последней активности в CRM-таймлайне (LAST_ACTIVITY_TIME), а не по подтверждённому контакту с клиентом. Перед выводами проверьте звонки и переписку в Bitrix24. При наличии MOVED_TIME возраст стадии берётся из Bitrix24; если поле отсутствует, возраст стадии оценивается по DATE_MODIFY, а не по подтверждённой дате перехода: после недавнего редактирования сделки это может занижать риск. Проверьте историю стадий Bitrix24.</div></div>
 <div class="panel"><h2>История оценок</h2><div class="tablewrap"><table><thead><tr><th>Время</th><th>Сделка</th><th>Менеджер</th><th>Этап</th><th>Результат</th><th>Prospect</th><th>Risk</th><th>Сумма</th></tr></thead><tbody>${historyRows || '<tr><td colspan="8">История появится после загрузки сделок.</td></tr>'}</tbody></table></div><div class="note">Последние 25 наблюдений: первичная загрузка, изменение стадии или оценок.</div></div>
 </main><aside><div class="panel"><h2>Уведомления</h2><div class="alerts">${alertRows || '<div class="note">События появятся после изменений сделок.</div>'}</div></div>
 <div class="panel"><h2>Статус</h2><div class="note">Отслеживается: ${s.counts.tracked} сделок<br>Последний webhook: ${escapeHtml(s.lastEventAt || "—")}<br>Обработан CRM: ${escapeHtml(s.lastProcessedEventAt || "—")}<br>Ошибка обработки: ${escapeHtml(s.lastFailedEventAt || "—")}<br>Пропущен без сделки: ${escapeHtml(s.lastIgnoredEventAt || "—")}<br>Последняя синхронизация: ${escapeHtml(s.lastSyncAt || "—")}<br>Ошибка: ${escapeHtml(s.lastError?.message || "нет")}</div></div></aside></div>
