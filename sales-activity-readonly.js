@@ -96,11 +96,20 @@ function boundToDeal(activity, id) {
     return canonicalId(activity.OWNER_TYPE_ID) === '2' && canonicalId(activity.OWNER_ID) === id;
   }
   if (!Array.isArray(activity.BINDINGS)) throw new Error('Invalid Bitrix activity bindings');
-  // When explicit bindings are supplied they are authoritative; never
-  // override contradictory bindings just because the primary ID matches.
-  return activity.BINDINGS.some(binding =>
-    binding && typeof binding === 'object' && !Array.isArray(binding) &&
-    canonicalId(binding.OWNER_TYPE_ID) === '2' && canonicalId(binding.OWNER_ID) === id);
+  // Explicit bindings are the activity's identity evidence. Validate every
+  // entry before trusting a match: Array.some() stops at the first valid deal
+  // binding and would silently discard malformed later entries.
+  let matched = false;
+  for (const binding of activity.BINDINGS) {
+    if (!binding || typeof binding !== 'object' || Array.isArray(binding) ||
+        canonicalId(binding.OWNER_TYPE_ID) === null ||
+        canonicalId(binding.OWNER_ID) === null) {
+      throw new Error('Invalid Bitrix activity binding');
+    }
+    if (canonicalId(binding.OWNER_TYPE_ID) === '2' &&
+        canonicalId(binding.OWNER_ID) === id) matched = true;
+  }
+  return matched;
 }
 
 /**
