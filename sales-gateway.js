@@ -227,6 +227,22 @@ function createGateway({
         res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
         return res.end('Bitrix event validation is not configured');
       }
+      // Node retains duplicate Content-Type lines in rawHeaders but uses
+      // just one in req.headers. A proxy and this event parser can disagree
+      // about which media type applies, including for authenticated webhooks.
+      // Reject ambiguous declarations before trusting the event identity.
+      if (Array.isArray(req.rawHeaders)) {
+        let contentTypeHeaders = 0;
+        for (let i = 0; i < req.rawHeaders.length; i += 2) {
+          if (typeof req.rawHeaders[i] === 'string' &&
+              req.rawHeaders[i].toLowerCase() === 'content-type') contentTypeHeaders += 1;
+        }
+        if (contentTypeHeaders > 1) {
+          req.resume();
+          res.writeHead(400, { 'cache-control': 'no-store' });
+          return res.end('Ambiguous Bitrix event Content-Type');
+        }
+      }
       const chunks = [];
       let size = 0;
       let rejected = false;
