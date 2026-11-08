@@ -155,7 +155,22 @@ async function bitrixRaw(method, params = {}) {
     const status = response.status;
     safeStatus = Number.isInteger(status) && status >= 100 && status <= 599
       ? status : "unknown";
-    const rawPayload = await response.json();
+    // A native fetch Response exposes the raw JSON text. JSON.parse alone
+    // silently keeps the last duplicate object property, so an intermediary
+    // could return {"result":[...],"result":[]} and falsely certify a
+    // complete CRM read or overwrite a deal's score/history. Inspect the
+    // actual wire response before trusting its parsed object. Mock-only
+    // transports that implement json() without text() remain supported.
+    let rawPayload;
+    if (typeof response.text === "function") {
+      const rawText = await response.text();
+      rawPayload = JSON.parse(rawText);
+      if (hasDuplicateJsonObjectKeys(rawText)) {
+        throw new Error("Ambiguous Bitrix REST JSON keys");
+      }
+    } else {
+      rawPayload = await response.json();
+    }
     payload = copyBitrixJson(rawPayload);
   } catch {
     throw new Error("Bitrix REST " + method + " response read failed");
@@ -186,11 +201,11 @@ function storeConfigured() {
 }
 
 // JSON.parse silently keeps only the last occurrence of a duplicate key.
-// A Sheet store or intermediate proxy could return {"ok":false,"ok":true}
+// A CRM/Sheet intermediary could return {"ok":false,"ok":true}
 // and make us discard unsaved score history. Inspect the original, syntactically
 // valid JSON (including Unicode-escaped key aliases) before trusting any
 // read or persistence acknowledgement. This is a lexical scan, not eval.
-function hasDuplicateStoreJsonKeys(json) {
+function hasDuplicateJsonObjectKeys(json) {
   const stack = [];
   for (let i = 0; i < json.length; i += 1) {
     const char = json[i];
@@ -310,7 +325,7 @@ async function storeRequest(action, rows = null) {
     payload = JSON.parse(text);
     // A conflicting duplicate "ok" or "rows" must not certify persistence
     // or make a partial stored history appear complete.
-    if (hasDuplicateStoreJsonKeys(text)) throw new Error("Ambiguous store JSON keys");
+    if (hasDuplicateJsonObjectKeys(text)) throw new Error("Ambiguous store JSON keys");
   } catch { throw new Error("Invalid Sales store response"); }
   // HTTP 200 alone is not an acknowledgement: redirects, login pages or
   // malformed JSON must never cause pending score history to be discarded.
