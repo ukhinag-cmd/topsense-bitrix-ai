@@ -50,7 +50,8 @@ function copyReadPayload(value, ancestors=new WeakSet()){
  // A JSON response cannot have hidden own fields. Dropping a non-enumerable
  // total/next on copy would certify a partial CRM scan as a complete queue.
  // Array length is the sole legitimate non-enumerable own property.
- if(Object.getOwnPropertyNames(value).length!==keys.length+(Array.isArray(value)?1:0))
+ // Symbol keys are also impossible in parsed JSON; never drop them silently.
+ if(Reflect.ownKeys(value).length!==keys.length+(Array.isArray(value)?1:0))
   throw new Error("Invalid CRM response hidden properties");
  if(Array.isArray(value)&&(keys.length!==value.length||
     keys.some((key,index)=>key!==String(index))))
