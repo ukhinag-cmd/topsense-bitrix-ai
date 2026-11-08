@@ -22,6 +22,18 @@ const SALES_RESPONSE_SECURITY_HEADERS = Object.freeze({
 
 function dashboardAuthorized(req, expectedToken) {
   if (!expectedToken) return false;
+  // The HTTP parser retains repeated header lines in rawHeaders, but
+  // req.headers.authorization normally contains only the first value.
+  // Different intermediaries may choose a different duplicate. Never
+  // authorize a private Dashboard using ambiguous HTTP credentials.
+  if (Array.isArray(req.rawHeaders)) {
+    let count = 0;
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      if (typeof req.rawHeaders[i] === 'string' &&
+          req.rawHeaders[i].toLowerCase() === 'authorization') count += 1;
+    }
+    if (count !== 1) return false;
+  }
   const credentials = decodeBasicCredentials(req.headers.authorization);
   if (!credentials || credentials.username !== 'sales') return false;
   const supplied = Buffer.from(credentials.password, 'utf8');
