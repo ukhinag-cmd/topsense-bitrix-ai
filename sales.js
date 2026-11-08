@@ -690,6 +690,17 @@ function validDealId(value) {
   return /^[1-9]\d{0,14}$/.test(id) && Number.isSafeInteger(Number(id));
 }
 
+// CRM event and sync provenance must be an unambiguous datetime. JavaScript
+// interprets an offset-free ISO timestamp in the host timezone (UTC in CI,
+// potentially different on Render) and a date-only value as UTC midnight.
+// Both can change version ordering, Risk Score or scheduled Next Step without
+// any real Bitrix change. Bitrix REST datetime examples include Z/UTC offset.
+// Keep dateValue's legacy date-only support for persisted/other display data.
+function timezoneQualifiedCrmDateTime(value) {
+  return typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+}
+
 function validateDealRow(deal, expectedId = null) {
   if (!deal || typeof deal !== "object" || Array.isArray(deal) ||
       !validDealId(deal.ID) ||
@@ -804,7 +815,7 @@ function validateDealRow(deal, expectedId = null) {
   for (const field of ["DATE_MODIFY", "DATE_CREATE", "LAST_ACTIVITY_TIME"]) {
     const value = deal[field];
     if (value == null || value === "") continue;
-    const timestamp = typeof value === "string" ? dateValue(value) : null;
+    const timestamp = timezoneQualifiedCrmDateTime(value) ? dateValue(value) : null;
     // An unparseable observed date can silently erase stale-contact risk,
     // and a malformed DATE_MODIFY can bypass source-version ordering.
     // Reject malformed fields as well as dates too far in the future.
@@ -829,7 +840,7 @@ function validateDealRow(deal, expectedId = null) {
   for (const field of ["ACTIVITY_TIME", "NEXT_ACTIVITY_TIME"]) {
     const value = deal[field];
     if (value == null || value === "") continue;
-    if (typeof value !== "string" || dateValue(value) === null) {
+    if (!timezoneQualifiedCrmDateTime(value) || dateValue(value) === null) {
       throw new Error("Invalid Bitrix deal " + field + " timestamp");
     }
   }
