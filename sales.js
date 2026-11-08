@@ -881,10 +881,16 @@ function validateActivityRow(activity, expectedId) {
 // Bitrix crm.activity.list uses 9999-12-31 for an activity without a
 // deadline. A legacy/extended deal response may carry that sentinel in an
 // activity-time field; it must not appear as a future Next Step, increase
-// Prospect Score, or suppress Risk Score. Prefer the alternate real field.
+// Prospect Score, or suppress Risk Score. Neither optional deal field has
+// established priority: when both contain real dates, use the earliest
+// candidate, including an overdue date, rather than the first array slot.
+// Activity-list verification is still required for a trusted Next Step.
 function scheduledActivityTime(deal) {
-  return [deal.ACTIVITY_TIME, deal.NEXT_ACTIVITY_TIME].find(value =>
-    value && !(typeof value === "string" && Date.parse(value) >= NO_DEADLINE_FROM)) || null;
+  return [deal.ACTIVITY_TIME, deal.NEXT_ACTIVITY_TIME].reduce((earliest, value) => {
+    if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) ||
+        Date.parse(value) >= NO_DEADLINE_FROM) return earliest;
+    return earliest === null || Date.parse(value) < Date.parse(earliest) ? value : earliest;
+  }, null);
 }
 
 function scoreDeal(deal, previous) {
