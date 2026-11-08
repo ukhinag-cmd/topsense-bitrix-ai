@@ -2094,6 +2094,11 @@ function status() {
       // Where Bitrix returns its actual stage-transition timestamp, Risk
       // uses that instead of treating an unrelated deal edit as a stage move.
       stageAgeUsesMovedTimeWhenAvailable: true,
+      // Live scoring has no confirmed activity-list read. Optional deal
+      // fields ACTIVITY_TIME and NEXT_ACTIVITY_TIME are absent from the
+      // documented crm.deal.fields contract; missing fields cannot prove
+      // that the deal has no pending actions.
+      nextStepNotVerifiedByActivityList: true,
     },
     counts: {
       tracked: all.length,
@@ -2217,6 +2222,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-a
 </div>
 <div class="layout"><main>
 <div class="panel"><h2>⭐ Перспективные сделки</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Score</th><th>Этап</th><th>Последняя активность CRM</th><th>Next Step</th><th>Что делать</th></tr></thead><tbody>${prospectRows || '<tr><td colspan="8">Пока нет сделок с score ≥60. База заполняется из Bitrix.</td></tr>'}</tbody></table></div></div>
+<div class="coverage-warning" role="note">Next Step не подтверждён crm.activity.list: текущий расчёт использует поля сделки ACTIVITY_TIME / NEXT_ACTIVITY_TIME, отсутствующие в стандартном списке crm.deal.fields. Отсутствие даты в ответе сделки не доказывает отсутствие запланированных дел. Перед решениями проверьте Next Step и зависящие от него Prospect/Risk Score в Bitrix24.</div>
 <div class="panel"><h2>🔴 Требуют внимания</h2><div class="tablewrap"><table><thead><tr><th>Сделка</th><th>Менеджер</th><th>Сумма</th><th>Risk</th><th>Next Step</th><th>Квалификация</th><th>Действие</th></tr></thead><tbody>${attentionRows || '<tr><td colspan="7">Критичных отклонений не найдено.</td></tr>'}</tbody></table></div><div class="note">Risk Score оценивает давность по последней активности в CRM-таймлайне (LAST_ACTIVITY_TIME), а не по подтверждённому контакту с клиентом. Перед выводами проверьте звонки и переписку в Bitrix24. При наличии MOVED_TIME возраст стадии берётся из Bitrix24; если поле отсутствует, возраст стадии оценивается по DATE_MODIFY, а не по подтверждённой дате перехода: после недавнего редактирования сделки это может занижать риск. Проверьте историю стадий Bitrix24.</div></div>
 <div class="panel"><h2>История оценок</h2><div class="tablewrap"><table><thead><tr><th>Время</th><th>Сделка</th><th>Менеджер</th><th>Этап</th><th>Результат</th><th>Prospect</th><th>Risk</th><th>Сумма</th></tr></thead><tbody>${historyRows || '<tr><td colspan="8">История появится после загрузки сделок.</td></tr>'}</tbody></table></div><div class="note">Последние 25 наблюдений: первичная загрузка, изменение стадии или оценок.</div></div>
 </main><aside><div class="panel"><h2>Уведомления</h2><div class="alerts">${alertRows || '<div class="note">События появятся после изменений сделок.</div>'}</div></div>
