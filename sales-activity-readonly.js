@@ -68,9 +68,8 @@ function copyReadResponse(value, ancestors = new WeakSet()) {
   // unknown activity into a false "no next step" result.
   const keys = Object.keys(value);
   // Parsed JSON never has hidden own keys; only an array's length is
-  // non-enumerable. Symbol-keyed own fields are impossible in JSON too;
-  // reject them instead of discarding unknown response metadata.
-  // that all open CRM activities (and the real Next Step) were scanned.
+  // non-enumerable. Reject hidden strings and symbols rather than silently
+  // discarding pagination metadata and claiming a complete Next Step scan.
   if (Reflect.ownKeys(value).length !== keys.length + (isArray ? 1 : 0))
     throw new Error('Invalid Bitrix activity response hidden properties');
   if (isArray && (keys.length !== value.length ||
