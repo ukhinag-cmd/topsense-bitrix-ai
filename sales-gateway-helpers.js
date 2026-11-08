@@ -88,6 +88,14 @@ function hasDuplicateJsonObjectKeys(json) {
 function parseBitrixEvent(raw, contentType, expectedToken) {
   const expected = typeof expectedToken === 'string' ? expectedToken : '';
   if (!expected) return null;
+  // A substring search would treat "text/plain; note=application/json" as
+  // JSON, and every other unknown media type as URL-encoded form data.
+  // Require one unambiguous declared media type before authenticating the
+  // event; continue accepting ordinary charset parameters for both types.
+  if (typeof contentType !== 'string' || /[,\r\n]/.test(contentType)) return null;
+  const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
+  if (mediaType !== 'application/json' &&
+      mediaType !== 'application/x-www-form-urlencoded') return null;
   const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw || ''), 'utf8');
   if (!bytes.length || bytes.length > MAX_EVENT_BODY) return null;
 
@@ -98,7 +106,7 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
   let activityOwnerTypeId = null;
   let suppliedToken;
 
-  if (String(contentType || '').toLowerCase().includes('application/json')) {
+  if (mediaType === 'application/json') {
     let body;
     const json = bytes.toString('utf8');
     try { body = JSON.parse(json); } catch { return null; }
