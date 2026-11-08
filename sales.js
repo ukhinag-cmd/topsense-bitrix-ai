@@ -45,6 +45,7 @@ const SALES = {
 const SALES_PREFIX = "sales:deal:";
 const MAX_HISTORY = 40;
 const MAX_ALERTS = 8;
+const DEAL_SYNC_LOOKBACK_DAYS = 45;
 // Bitrix's unscheduled-activity sentinel is 9999-12-31 local time. When
 // normalized to UTC, the same value can fall on 9999-12-30. Interpret both
 // as missing Next Step rather than granting a fictitious future activity.
@@ -1655,7 +1656,7 @@ async function syncRecentDeals(limitPages = 4) {
     let start = resume ? SALES.syncCursor : 0;
     let previousSortKey = resume ? SALES.syncLastSortKey : null;
     let pages = 0;
-    const since = resume ? SALES.syncSince : new Date(Date.now() - 45 * 86400000).toISOString();
+    const since = resume ? SALES.syncSince : new Date(Date.now() - DEAL_SYNC_LOOKBACK_DAYS * 86400000).toISOString();
 
     do {
       const payload = await bitrixRaw("crm.deal.list", {
@@ -2066,6 +2067,13 @@ function status() {
     // while earlier stage metadata failures are still awaiting a retry.
     lastError: SALES.lastError || (SALES.stageLookupFailed
       ? SALES.stageErrors.values().next().value || null : null),
+    coverage: {
+      // Scheduled reads do not enumerate the full CRM or reconcile deleted
+      // deals/activities. A recent successful scan is not a complete census.
+      recentDealLookbackDays: DEAL_SYNC_LOOKBACK_DAYS,
+      deletedDealsReconciled: false,
+      deletedActivitiesReconciled: false,
+    },
     counts: {
       tracked: all.length,
       open: open.length,
@@ -2174,9 +2182,10 @@ body{margin:0;background:#07111f}.wrap{padding:18px;max-width:1900px;margin:auto
 table{width:100%;border-collapse:collapse;font-size:13px}th{color:#8ea0b8;text-align:left;font-size:11px;text-transform:uppercase;border-bottom:1px solid #263a53;padding:8px}td{padding:9px 8px;border-bottom:1px solid #1b2c42;vertical-align:top}a{color:#d8e8ff;text-decoration:none}a:hover{text-decoration:underline}
 .score{display:inline-flex;min-width:34px;justify-content:center;padding:3px 7px;border-radius:999px;font-weight:700}.score.good{background:#123d31;color:#84e0b0}.score.warn{background:#493819;color:#ffd27c}.score.bad{background:#4b2028;color:#ff9ea9}
 .red{color:#ff8e9b}.alerts{display:flex;flex-direction:column;gap:7px}.alert{display:flex;gap:9px;padding:9px;border-radius:10px;background:#101f33}.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex:0 0 auto}.dot.ok{background:#44d98b}.dot.bad{background:#ff5f6d}.dot.star{background:#ffd05a}.dot.warn{background:#f2a742}.alert small{color:#8ea0b8}
-.note{font-size:12px;color:#8ea0b8;margin-top:7px}@media(max-width:1200px){.cards{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}@media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:10px}.tablewrap{overflow:auto}table{min-width:900px}}
+.note{font-size:12px;color:#8ea0b8;margin-top:7px}.coverage-warning{margin:12px 0;padding:10px 12px;border:1px solid #765531;border-radius:9px;background:#322719;color:#ffe1ad;font-size:13px}@media(max-width:1200px){.cards{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}@media(max-width:700px){.cards{grid-template-columns:repeat(2,1fr)}.wrap{padding:10px}.tablewrap{overflow:auto}table{min-width:900px}}
 </style></head><body><div class="wrap">
 <div class="top"><div><h1>TOP-SENS · Sales Control</h1><div class="sub">MVP контроля перспективных и проблемных сделок из Bitrix24</div></div><div class="live ${syncState}">${syncState === "ok" ? "● " : "○ "}${escapeHtml(syncLabel)} · автообновление 20 сек</div></div>
+<div class="coverage-warning" role="note"><strong>Ограничение охвата:</strong> проверяются только сделки, изменённые за последние ${s.coverage.recentDealLookbackDays} дней. Удаления сделок и активностей Bitrix24 не сверяются. Итоги, Prospect/Risk Score и Next Step могут включать устаревшие записи даже после успешной синхронизации.</div>
 <div class="cards">
 <div class="card"><div class="k">Открытые</div><div class="v">${s.counts.open}</div><div class="hint">${escapeHtml(sumHint("open"))}</div></div>
 <div class="card"><div class="k">Перспективные</div><div class="v">${s.counts.prospects}</div><div class="hint">${escapeHtml(sumHint("prospects"))}</div></div>
