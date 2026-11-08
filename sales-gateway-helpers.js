@@ -6,6 +6,12 @@ const MAX_EVENT_BODY = 1024 * 1024;
 const ALLOWED_EVENTS = new Set([
   'ONCRMDEALADD',
   'ONCRMDEALUPDATE',
+  // Bitrix emits a pipeline transfer as a separate application event, not
+  // ONCRMDEALUPDATE. Accept its authenticated ID and re-read crm.deal.get;
+  // never trust stage/category values supplied by the event payload.
+  // This event needs an app event.bind subscription; outgoing webhooks alone
+  // cannot subscribe to it. Do not change Bitrix settings from this module.
+  'ONCRMDEALMOVETOCATEGORY',
   'ONCRMACTIVITYADD',
   // Bitrix also emits updates when an existing scheduled activity is changed.
   // The same read-only activity.get -> deal.get path refreshes Next Step.
