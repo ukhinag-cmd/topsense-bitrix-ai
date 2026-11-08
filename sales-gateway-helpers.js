@@ -117,6 +117,14 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
   // an exact round-trip check a valid event ID and token could mask malformed
   // bytes elsewhere in the authenticated payload.
   if (!Buffer.from(bytes.toString('utf8'), 'utf8').equals(bytes)) return null;
+  // In URL-encoded forms, %XX octets are decoded *after* the raw-body UTF-8
+  // check. URLSearchParams silently replaces invalid percent-decoded UTF-8
+  // with U+FFFD, even if the token and deal ID are unaffected. Reject lossy
+  // or malformed percent encoding before interpreting authenticated fields.
+  if (mediaType === 'application/x-www-form-urlencoded') {
+    try { decodeURIComponent(bytes.toString('utf8').replace(/\\+/g, ' ')); }
+    catch { return null; }
+  }
 
   let event;
   let entityId;
