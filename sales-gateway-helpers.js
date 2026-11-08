@@ -93,11 +93,30 @@ function parseBitrixEvent(raw, contentType, expectedToken) {
   // Require one unambiguous declared media type before authenticating the
   // event; continue accepting ordinary charset parameters for both types.
   if (typeof contentType !== 'string' || /[,\r\n]/.test(contentType)) return null;
-  const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
+  const mediaParts = contentType.split(';');
+  const mediaType = mediaParts.shift().trim().toLowerCase();
   if (mediaType !== 'application/json' &&
       mediaType !== 'application/x-www-form-urlencoded') return null;
+  // An explicitly declared non-UTF-8 charset contradicts our UTF-8 JSON/form
+  // decoder. Reject it rather than authenticating bytes that intermediaries
+  // could decode differently. Duplicate charset declarations are ambiguous.
+  let charsetDeclared = false;
+  for (const part of mediaParts) {
+    const equals = part.indexOf('=');
+    if (equals <= 0) return null;
+    const parameter = part.slice(0, equals).trim().toLowerCase();
+    if (!parameter) return null;
+    if (parameter === 'charset') {
+      if (charsetDeclared || !/^(?:utf-8|"utf-8")$/i.test(part.slice(equals + 1).trim())) return null;
+      charsetDeclared = true;
+    }
+  }
   const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw || ''), 'utf8');
   if (!bytes.length || bytes.length > MAX_EVENT_BODY) return null;
+  // Buffer.toString('utf8') replaces illegal sequences with U+FFFD. Without
+  // an exact round-trip check a valid event ID and token could mask malformed
+  // bytes elsewhere in the authenticated payload.
+  if (!Buffer.from(bytes.toString('utf8'), 'utf8').equals(bytes)) return null;
 
   let event;
   let entityId;
