@@ -1481,8 +1481,19 @@ function validPersistedSnapshot(row) {
         ["updatedAt", "sourceUpdatedAt", "modifiedAt"].some(field =>
           row[field] != null && dateValue(row.createdAt) > dateValue(row[field]))) ||
       !optionalPastDate(row.modifiedAt) ||
+      // DATE_MODIFY is the observed CRM version, never a later event than
+      // updatedAt. A forged later value makes the saved chronology disagree
+      // with the Bitrix source version even though both dates parse.
+      (row.modifiedAt != null &&
+        dateValue(row.modifiedAt) > dateValue(row.updatedAt)) ||
       !optionalPastDate(row.lastActivityAt) ||
       !optionalPastDate(row.stageEnteredAt) ||
+      // A stage transition must be observable in the deal's DATE_MODIFY.
+      // A later stored stage date can erase weeks of stage-age Risk Score
+      // while the recorded CRM version remains unchanged. This matches the
+      // chronology enforced for live Bitrix MOVED_TIME.
+      (row.stageEnteredAt != null &&
+        dateValue(row.stageEnteredAt) > dateValue(row.updatedAt)) ||
       // The recorded stage cannot have started before the deal existed.
       // A poisoned older stage date otherwise adds phantom stage-age Risk
       // points on every timed dashboard refresh, even without CRM changes.
