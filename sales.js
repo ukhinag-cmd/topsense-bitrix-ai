@@ -2098,6 +2098,12 @@ function refreshTimedScores() {
 
 function status() {
   refreshTimedScores();
+  // Bitrix audit timestamps can differ inside a single millisecond. A
+  // Date.parse-only comparison would drop the newest cross-deal observation
+  // at the top-25 boundary and misorder same-ms alerts in the Dashboard.
+  const compareAuditTime = (left, right) =>
+    compareBitrixTimestamp(left, right) ??
+      ((dateValue(left) || 0) - (dateValue(right) || 0));
   const all = sortedDeals();
   const open = all.filter(x => x.open);
   const prospects = open.filter(x => x.prospectScore >= 60);
@@ -2115,9 +2121,8 @@ function status() {
   const historyLimit = 25;
   for (const deal of all) {
     for (const entry of (Array.isArray(deal.scoreHistory) ? deal.scoreHistory : [])) {
-      const at = dateValue(entry.at) || 0;
       const tail = recentHistory[recentHistory.length - 1];
-      if (recentHistory.length >= historyLimit && at <= (dateValue(tail.at) || 0)) continue;
+      if (recentHistory.length >= historyLimit && compareAuditTime(entry.at, tail.at) <= 0) continue;
       recentHistory.push({
         ...entry, dealId: deal.dealId,
         // Legacy saved histories did not record a per-observation title.
@@ -2128,7 +2133,7 @@ function status() {
         // observations lack this field and retain the legacy fallback.
         manager: typeof entry.manager === "string" ? entry.manager : deal.manager,
       });
-      recentHistory.sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0));
+      recentHistory.sort((a, b) => compareAuditTime(b.at, a.at));
       if (recentHistory.length > historyLimit) recentHistory.pop();
     }
   }
@@ -2145,7 +2150,7 @@ function status() {
       amount: typeof a.amount === "number" && Number.isFinite(a.amount) ? a.amount : x.amount,
       currency: typeof a.currency === "string" ? a.currency : x.currency,
     })))
-    .sort((a, b) => (dateValue(b.at) || 0) - (dateValue(a.at) || 0))
+    .sort((a, b) => compareAuditTime(b.at, a.at))
     .slice(0, 30);
 
   // Dashboard totals are deliberately RUB-only. Other currencies are shown
