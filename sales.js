@@ -1546,7 +1546,7 @@ function validPersistedSnapshot(row) {
     timezoneQualifiedCrmDateTime(entry.at) && plausibleVersion(entry.at) &&
     // Score observations cannot predate the deal that was scored. A poisoned
     // Sheet audit row otherwise creates a fictitious pre-creation history.
-    (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
+    (row.createdAt == null || compareBitrixTimestamp(entry.at, row.createdAt) >= 0) &&
     typeof entry.amount === "number" && Number.isFinite(entry.amount) &&
     Math.abs(entry.amount) <= Number.MAX_SAFE_INTEGER &&
     scoreValid(entry.prospectScore) && scoreValid(entry.riskScore) &&
@@ -1568,7 +1568,7 @@ function validPersistedSnapshot(row) {
     timezoneQualifiedCrmDateTime(entry.at) && plausibleVersion(entry.at) &&
       // Sales alerts are generated only after the underlying CRM deal exists.
       // Old snapshots without a creation timestamp remain compatible.
-      (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
+      (row.createdAt == null || compareBitrixTimestamp(entry.at, row.createdAt) >= 0) &&
       // addAlert appends observations and retains the newest MAX_ALERTS.
       // Unordered persisted alerts can instead make the tail discard a
       // recent warning while displaying an older one as its replacement.
