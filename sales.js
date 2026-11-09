@@ -1555,7 +1555,9 @@ function validPersistedSnapshot(row) {
     // stages are written with an empty semantic until a verified dictionary
     // is available. Accept that canonical unknown value across restarts.
     (entry.semantic == null || ["", "P", "S", "F"].includes(entry.semantic)) &&
-    (index === 0 || dateValue(entry.at) >= dateValue(row.scoreHistory[index - 1].at)))) {
+    // Keep fractional precision: two audit instants can differ inside the
+    // same millisecond even though Date.parse reports them as identical.
+    (index === 0 || compareBitrixTimestamp(entry.at, row.scoreHistory[index - 1].at) >= 0))) {
     return false;
   }
   // Validate alerts independently: legacy deals may have an empty score history.
@@ -1571,7 +1573,8 @@ function validPersistedSnapshot(row) {
       // Unordered persisted alerts can instead make the tail discard a
       // recent warning while displaying an older one as its replacement.
       // Multiple alerts from one observation may share a timestamp.
-      (index === 0 || dateValue(entry.at) >= dateValue(row.alerts[index - 1].at)) &&
+      // A reversed sub-millisecond alert must not replace the newest warning.
+      (index === 0 || compareBitrixTimestamp(entry.at, row.alerts[index - 1].at) >= 0) &&
       // addAlert emits only these four categories. Unknown stored types
       // would otherwise render as generic warnings and pollute the audit.
       ["success", "prospect", "risk", "warning"].includes(entry.type) &&
