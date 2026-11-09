@@ -1491,6 +1491,11 @@ function validPersistedSnapshot(row) {
         dateValue(row.stageEnteredAt) < dateValue(row.createdAt)) ||
       !optionalPastDate(row.observedAt) ||
       !optionalScheduledDate(row.nextActivityAt) ||
+      // Bitrix uses 9999-12-31 (sometimes 9999-12-30 UTC after timezone
+      // normalization) as its "no deadline" sentinel. The live CRM parser
+      // excludes it; do not let an untrusted Sheet row resurrect that value
+      // as a planned activity and inflate the score after a restart.
+      (row.nextActivityAt != null && dateValue(row.nextActivityAt) >= NO_DEADLINE_FROM) ||
       // scoreDeal derives scheduled/overdue flags from the same activity
       // instant. A missing (null or omitted) date cannot truthfully justify
       // either flag, nor can both flags ever be true. Legacy rows without
