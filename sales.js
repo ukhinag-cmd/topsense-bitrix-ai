@@ -2012,8 +2012,15 @@ async function syncRecentDeals(limitPages = 4) {
 }
 
 function sortedDeals() {
+  // sourceUpdatedAt retains Bitrix's sub-millisecond DATE_MODIFY digits,
+  // while updatedAt is normalized to ISO milliseconds for persistence.
+  // At the 20-win Dashboard boundary, sorting only the latter can hide the
+  // most recent win and show an older one instead. Older Sheet snapshots
+  // without a source version retain their updatedAt ordering.
   return Array.from(SALES.deals.values()).sort((a, b) =>
-    (dateValue(b.updatedAt) || 0) - (dateValue(a.updatedAt) || 0)
+    compareBitrixTimestamp(b.sourceUpdatedAt || b.updatedAt,
+      a.sourceUpdatedAt || a.updatedAt) ??
+    ((dateValue(b.updatedAt) || 0) - (dateValue(a.updatedAt) || 0))
   );
 }
 
