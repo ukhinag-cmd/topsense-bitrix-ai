@@ -1536,8 +1536,10 @@ function validPersistedSnapshot(row) {
       // recent warning while displaying an older one as its replacement.
       // Multiple alerts from one observation may share a timestamp.
       (index === 0 || dateValue(entry.at) >= dateValue(row.alerts[index - 1].at)) &&
-      typeof entry.type === "string" && typeof entry.title === "string" &&
-      typeof entry.detail === "string" &&
+      // addAlert emits only these four categories. Unknown stored types
+      // would otherwise render as generic warnings and pollute the audit.
+      ["success", "prospect", "risk", "warning"].includes(entry.type) &&
+      typeof entry.title === "string" && typeof entry.detail === "string" &&
       // Legacy alerts omit attribution. New stored attribution must be scalar
       // to prevent poisoned Sheet values leaking into Dashboard rendering.
       optionalText(entry.titleDeal) && optionalText(entry.manager) &&
