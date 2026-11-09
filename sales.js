@@ -1378,8 +1378,11 @@ async function flushDirty() {
 // not authoritative. A valid sales:deal:<id> key alone cannot guarantee that
 // an older/corrupt Sheet payload is safe to render or use in score totals.
 function validPersistedSnapshot(row) {
-  const scoreValid = score => typeof score === "number" &&
-    Number.isFinite(score) && score >= 0 && score <= 100;
+  // scoreDeal uses whole-point rules only. A fractional Sheet score is
+    // not a legitimate Sales observation, even when its forged audit tail
+    // agrees with the displayed snapshot.
+    const scoreValid = score => typeof score === "number" &&
+    Number.isInteger(score) && score >= 0 && score <= 100;
   const record = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   // Present persisted metadata must match the scalar types emitted by Sales.
   // An object with a non-callable toString can crash the Dashboard's temporal
