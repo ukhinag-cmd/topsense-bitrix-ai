@@ -1452,9 +1452,15 @@ function validPersistedSnapshot(row) {
       typeof row.amount !== "number" || !Number.isFinite(row.amount) ||
       Math.abs(row.amount) > Number.MAX_SAFE_INTEGER ||
       !scoreValid(row.prospectScore) || !scoreValid(row.riskScore) ||
-      typeof row.updatedAt !== "string" || !plausibleVersion(row.updatedAt) ||
+      // A CRM version must include an explicit Z/UTC offset. Date-only and
+      // offset-free values parse in the host's timezone, so a forged Sheet
+      // snapshot could suppress a real newer Bitrix update after restart.
+      // Sales writes normalized UTC updatedAt and a timezone-qualified
+      // Bitrix DATE_MODIFY in sourceUpdatedAt; legacy null sources remain.
+      !timezoneQualifiedCrmDateTime(row.updatedAt) || !plausibleVersion(row.updatedAt) ||
       (row.sourceUpdatedAt != null &&
-        (typeof row.sourceUpdatedAt !== "string" || !plausibleVersion(row.sourceUpdatedAt))) ||
+        (!timezoneQualifiedCrmDateTime(row.sourceUpdatedAt) ||
+         !plausibleVersion(row.sourceUpdatedAt))) ||
       // Sales never records an authoritative CRM source version later than
       // its displayed update time. Old snapshots may record a later local
       // observation, so only reject the impossible reverse ordering.
