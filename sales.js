@@ -1487,6 +1487,11 @@ function validPersistedSnapshot(row) {
       // Legacy rows omitting optional date/overdue metadata stay loadable.
       (row.nextActivityAt === null && (row.hasNext || row.nextOverdue === true)) ||
       (row.hasNext && row.nextOverdue === true) ||
+      // A deadline still in the future cannot have been overdue or missing
+      // at any earlier saved observation. A past deadline with old scheduled
+      // flags remains valid: time passing is not evidence of Sheet corruption.
+      (row.nextActivityAt != null && dateValue(row.nextActivityAt) > Date.now() &&
+        (!row.hasNext || row.nextOverdue === true)) ||
       !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
       !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS ||
       ["managerId", "sourceId", "categoryId", "stageName",
