@@ -1481,6 +1481,12 @@ function validPersistedSnapshot(row) {
         dateValue(row.stageEnteredAt) < dateValue(row.createdAt)) ||
       !optionalPastDate(row.observedAt) ||
       !optionalScheduledDate(row.nextActivityAt) ||
+      // scoreDeal derives scheduled/overdue flags from the same activity
+      // instant. A Sheet row explicitly stating that no date exists cannot
+      // truthfully claim either flag, nor can both flags ever be true.
+      // Legacy rows omitting optional date/overdue metadata stay loadable.
+      (row.nextActivityAt === null && (row.hasNext || row.nextOverdue === true)) ||
+      (row.hasNext && row.nextOverdue === true) ||
       !Array.isArray(row.scoreHistory) || row.scoreHistory.length > MAX_HISTORY ||
       !Array.isArray(row.alerts) || row.alerts.length > MAX_ALERTS ||
       ["managerId", "sourceId", "categoryId", "stageName",
