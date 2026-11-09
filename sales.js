@@ -417,6 +417,18 @@ function isoOrNull(value) {
   return t !== null ? new Date(t).toISOString() : null;
 }
 
+// Keep Bitrix's extra fractional digits for activity provenance. JavaScript
+// Date truncates them, so an equal-version contact/schedule refresh could
+// otherwise erase which of two same-millisecond events actually came later.
+// Normalize the timezone to UTC, then restore only the verified fractional
+// digits beyond milliseconds. Other presentation dates remain millisecond ISO.
+function activityIsoOrNull(value) {
+  const normalized = isoOrNull(value);
+  if (normalized === null || typeof value !== "string") return normalized;
+  const extra = /[T ]\d{2}:\d{2}:\d{2}\.\d{3}(\d+)(?:Z|[+-]\d{2}:\d{2})$/i.exec(value)?.[1];
+  return extra ? normalized.slice(0, -1) + extra + "Z" : normalized;
+}
+
 // Bitrix DATE_MODIFY can include precision finer than JavaScript Date's
 // millisecond resolution. Preserve that precision when ordering snapshots.
 function compareBitrixTimestamp(left, right) {
@@ -1067,8 +1079,8 @@ function scoreDeal(deal, previous) {
     amount,
     createdAt: isoOrNull(createdAt),
     modifiedAt: isoOrNull(modifiedAt),
-    lastActivityAt: isoOrNull(lastActivityAt),
-    nextActivityAt: isoOrNull(nextActivityAt),
+    lastActivityAt: activityIsoOrNull(lastActivityAt),
+    nextActivityAt: activityIsoOrNull(nextActivityAt),
     stageEnteredAt: isoOrNull(stageEnteredAt) || nowIso,
     stageAgeDays: stageAge === null ? null : Math.round(stageAge * 10) / 10,
     dealAgeDays: dealAge === null ? null : Math.round(dealAge * 10) / 10,
@@ -1178,9 +1190,12 @@ async function snapshotDeal(deal, source = "event") {
         const incomingNext = dateValue(scheduledActivityTime(deal));
         const currentNext = dateValue(latest.nextActivityAt);
         activityContactAdvanced = incomingLast !== null &&
-          (currentLast === null || incomingLast > currentLast);
+          (currentLast === null ||
+            compareBitrixTimestamp(deal.LAST_ACTIVITY_TIME, latest.lastActivityAt) > 0);
+        const nextCandidate = scheduledActivityTime(deal);
         activityNextAdvanced = incomingNext !== null &&
-          (currentNext === null || incomingNext > currentNext);
+          (currentNext === null ||
+            compareBitrixTimestamp(nextCandidate, latest.nextActivityAt) > 0);
         if (activityContactAdvanced || activityNextAdvanced) {
           activityOnlyRefresh = true;
         } else {
