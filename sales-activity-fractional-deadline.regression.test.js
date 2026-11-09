@@ -12,8 +12,8 @@ const activity = deadline => ({
 test('read-only activity probe accepts ISO fractional seconds through nanoseconds without altering deadline minutes', async () => {
   for (const [deadline, expected] of [
     ['2026-11-07T09:30:00.1+03:00', '2026-11-07T06:30:00.100Z'],
-    ['2026-11-07T09:30:00.123456+03:00', '2026-11-07T06:30:00.123Z'],
-    ['2026-11-07T09:30:00.123456789+03:00', '2026-11-07T06:30:00.123Z'],
+    ['2026-11-07T09:30:00.123456+03:00', '2026-11-07T06:30:00.123456Z'],
+    ['2026-11-07T09:30:00.123456789+03:00', '2026-11-07T06:30:00.123456789Z'],
   ]) {
     const observed = await probeDealNextActivity(async () => ({
       result: [activity(deadline)], total: 1,
