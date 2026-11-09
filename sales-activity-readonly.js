@@ -52,6 +52,27 @@ function pageNumber(value) {
   return Number(text);
 }
 
+// Injected transports may parse their JSON in a separate JS realm. Ordinary
+// cross-realm Object/Array prototypes are safe to copy, but custom prototypes
+// can conceal inherited pagination or activity identity metadata.
+function sameIntrinsicKeys(prototype, intrinsic) {
+  if (!prototype) return false;
+  const keys = Reflect.ownKeys(prototype);
+  const expected = Reflect.ownKeys(intrinsic);
+  return keys.length === expected.length &&
+    expected.every(key => Object.prototype.hasOwnProperty.call(prototype, key));
+}
+function plainObjectPrototype(prototype) {
+  return prototype === null ||
+    (Object.getPrototypeOf(prototype) === null &&
+     sameIntrinsicKeys(prototype, Object.prototype));
+}
+function plainArrayPrototype(prototype) {
+  return prototype !== null && Array.isArray(prototype) &&
+    sameIntrinsicKeys(prototype, Array.prototype) &&
+    plainObjectPrototype(Object.getPrototypeOf(prototype));
+}
+
 // Treat an injected transport as untrusted even after it resolves: mock
 // getters/proxies may throw credential-bearing URL errors while reading
 // response fields. Snapshot JSON-shaped values inside the redaction boundary
@@ -61,7 +82,7 @@ function copyReadResponse(value, ancestors = new WeakSet()) {
   if (ancestors.has(value)) throw new Error('Invalid Bitrix activity response cycle');
   const isArray = Array.isArray(value);
   const proto = Object.getPrototypeOf(value);
-  if (isArray ? proto !== Array.prototype : proto !== Object.prototype && proto !== null)
+  if (isArray ? !plainArrayPrototype(proto) : !plainObjectPrototype(proto))
     throw new Error('Invalid Bitrix activity response object');
   // JSON arrays have one own enumerable index per position. A sparse
   // injected page can otherwise become [] while copying, turning an
