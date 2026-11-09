@@ -1400,10 +1400,14 @@ function validPersistedSnapshot(row) {
   // A stored future contact or stage date would make Risk Score look safer
   // indefinitely; a future alert time suppresses subsequent warnings.
   // Only planned nextActivityAt may legitimately be in the future.
+  // Sales persists these provenance fields as absolute ISO instants.
+  // A timezone-free or date-only Sheet value can shift contact/stage age,
+  // observed chronology and scheduled Next Step after a host timezone change.
+  // Preserve omitted/null legacy fields, but never interpret ambiguous dates.
   const optionalPastDate = value => value == null ||
-    (typeof value === "string" && plausibleVersion(value));
+    (timezoneQualifiedCrmDateTime(value) && plausibleVersion(value));
   const optionalScheduledDate = value => value == null ||
-    (typeof value === "string" && dateValue(value) !== null);
+    (timezoneQualifiedCrmDateTime(value) && dateValue(value) !== null);
 
   if (!record(row) || row.kind !== "salesDeal" ||
       typeof row.title !== "string" || typeof row.manager !== "string" ||
