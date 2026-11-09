@@ -1468,8 +1468,10 @@ function validPersistedSnapshot(row) {
       // Sales never records an authoritative CRM source version later than
       // its displayed update time. Old snapshots may record a later local
       // observation, so only reject the impossible reverse ordering.
-      // Compare millisecond instants: Bitrix can supply sub-ms precision,
-      // while updatedAt is normalized to a JavaScript ISO timestamp.
+      // Compare millisecond instants here: Bitrix sourceUpdatedAt can
+      // contain sub-ms precision, while Sales normalizes updatedAt to whole
+      // milliseconds. Other CRM chronology checks below retain full
+      // fractional precision to reject impossible stored timelines.
       (row.sourceUpdatedAt != null &&
         dateValue(row.sourceUpdatedAt) > dateValue(row.updatedAt)) ||
       !optionalPastDate(row.createdAt) ||
@@ -1479,13 +1481,15 @@ function validPersistedSnapshot(row) {
       // and persisted history. Older rows may omit optional source dates.
       (row.createdAt != null &&
         ["updatedAt", "sourceUpdatedAt", "modifiedAt"].some(field =>
-          row[field] != null && dateValue(row.createdAt) > dateValue(row[field]))) ||
+          row[field] != null && compareBitrixTimestamp(row.createdAt, row[field]) > 0)) ||
       !optionalPastDate(row.modifiedAt) ||
       // DATE_MODIFY cannot outrun the authoritative CRM source version.
+      // A forged .1232 date must not exceed a .1231 source version merely
+      // because Date.parse rounds both to the same millisecond.
       // updatedAt can be a later local observation, not a new CRM change.
       // Legacy snapshots without a source version still use updatedAt.
       (row.modifiedAt != null &&
-        dateValue(row.modifiedAt) > dateValue(row.sourceUpdatedAt || row.updatedAt)) ||
+        compareBitrixTimestamp(row.modifiedAt, row.sourceUpdatedAt || row.updatedAt) > 0) ||
       !optionalPastDate(row.lastActivityAt) ||
       !optionalPastDate(row.stageEnteredAt) ||
       // A stage transition must be observable in the deal's DATE_MODIFY.
@@ -1493,13 +1497,13 @@ function validPersistedSnapshot(row) {
       // while the recorded source version remains unchanged. The local
       // updatedAt observation alone is not proof of a CRM stage transition.
       (row.stageEnteredAt != null &&
-        dateValue(row.stageEnteredAt) > dateValue(row.sourceUpdatedAt || row.updatedAt)) ||
+        compareBitrixTimestamp(row.stageEnteredAt, row.sourceUpdatedAt || row.updatedAt) > 0) ||
       // The recorded stage cannot have started before the deal existed.
       // A poisoned older stage date otherwise adds phantom stage-age Risk
       // points on every timed dashboard refresh, even without CRM changes.
       // Preserve older Sheet rows that do not know the creation date.
       (row.createdAt != null && row.stageEnteredAt != null &&
-        dateValue(row.stageEnteredAt) < dateValue(row.createdAt)) ||
+        compareBitrixTimestamp(row.stageEnteredAt, row.createdAt) < 0) ||
       !optionalPastDate(row.observedAt) ||
       !optionalScheduledDate(row.nextActivityAt) ||
       // Bitrix uses 9999-12-31 (sometimes 9999-12-30 UTC after timezone
