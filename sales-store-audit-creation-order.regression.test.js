@@ -44,4 +44,21 @@ test('persisted Sales audit observations cannot predate CRM deal creation', () =
     'a pre-creation alert must not be trusted');
   assert.equal(valid({ ...base, createdAt: null, scoreHistory: [history(beforeCreation)] }), true,
     'legacy rows without a known creation timestamp remain supported');
+  // Date.parse drops precision after milliseconds: .1231Z is earlier than
+  // .1232Z even though they parse to the same JS millisecond. A forged audit
+  // observation must never precede CRM deal creation at that precision.
+  const preciseCreation = creation.replace(/Z$/, '2Z');
+  const justBefore = creation.replace(/Z$/, '1Z');
+  assert.equal(Date.parse(preciseCreation), Date.parse(justBefore),
+    'test covers a sub-millisecond ordering collision');
+  const preciseRow = {
+    ...base, createdAt: preciseCreation, stageEnteredAt: preciseCreation,
+    scoreHistory: [history(preciseCreation)], alerts: [alert(preciseCreation)],
+  };
+  assert.equal(valid(preciseRow), true, 'audits exactly at fractional creation stay valid');
+  assert.equal(valid({ ...preciseRow, scoreHistory: [history(justBefore)] }), false,
+    'score history cannot predate creation within the same millisecond');
+  assert.equal(valid({ ...preciseRow, alerts: [alert(justBefore)] }), false,
+    'alerts cannot predate creation within the same millisecond');
+
 });
