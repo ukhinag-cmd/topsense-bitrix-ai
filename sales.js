@@ -97,6 +97,31 @@ const READ_ONLY_BITRIX_METHODS = new Set([
 // Snapshot REST data without invoking toJSON hooks on untrusted objects.
 // JSON.parse(JSON.stringify(response)) could turn a real CRM deal page into
 // a forged empty page if a transport supplied a custom toJSON method.
+// A normal JSON object has no application-defined prototype. Inherited
+// `total` or `next` getters on an injected transport object would disappear
+// during an own-key copy, potentially certifying an incomplete CRM page. Match
+// intrinsic prototype shapes instead of strict identity so ordinary parsed
+// objects and arrays from another JS realm remain supported.
+function sameIntrinsicKeys(prototype, intrinsic) {
+  if (!prototype) return false;
+  const keys = Reflect.ownKeys(prototype);
+  const expected = Reflect.ownKeys(intrinsic);
+  return keys.length === expected.length &&
+    expected.every(key => Object.prototype.hasOwnProperty.call(prototype, key));
+}
+
+function plainObjectPrototype(prototype) {
+  return prototype === null ||
+    (Object.getPrototypeOf(prototype) === null &&
+     sameIntrinsicKeys(prototype, Object.prototype));
+}
+
+function plainArrayPrototype(prototype) {
+  return prototype !== null && Array.isArray(prototype) &&
+    sameIntrinsicKeys(prototype, Array.prototype) &&
+    plainObjectPrototype(Object.getPrototypeOf(prototype));
+}
+
 function copyBitrixJson(value, ancestors = new WeakSet()) {
   if (value === null || typeof value === "string" || typeof value === "boolean" ||
       (typeof value === "number" && Number.isFinite(value))) return value;
@@ -104,6 +129,9 @@ function copyBitrixJson(value, ancestors = new WeakSet()) {
   if (typeof value !== "object") throw new Error("Invalid Bitrix JSON value");
   if (ancestors.has(value)) throw new Error("Invalid Bitrix JSON cycle");
   const isArray = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value);
+  if (isArray ? !plainArrayPrototype(prototype) : !plainObjectPrototype(prototype))
+    throw new Error("Invalid Bitrix JSON prototype");
   const keys = Object.keys(value);
   // Parsed JSON has no hidden or symbol properties; only an array's length
   // can be non-enumerable. Reject hidden pagination markers before copying.
