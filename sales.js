@@ -330,7 +330,11 @@ async function storeRequest(action, rows = null) {
   // HTTP 200 alone is not an acknowledgement: redirects, login pages or
   // malformed JSON must never cause pending score history to be discarded.
   if (!responseOk || !payload || typeof payload !== "object" ||
-      Array.isArray(payload) || payload.ok === false) {
+      Array.isArray(payload) ||
+      // A legacy load may omit ok, but a present marker is a contract:
+      // false, null, strings and objects cannot certify restored history.
+      // HTTP 200 with {ok:"false",rows:[]} must not appear healthy.
+      (Object.prototype.hasOwnProperty.call(payload, "ok") && payload.ok !== true)) {
     // Store-provided errors can echo its shared secret or sensitive URLs.
     // Report the failure without copying untrusted response fields.
     throw new Error("Sales store response failed");
