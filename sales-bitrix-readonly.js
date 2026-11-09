@@ -31,6 +31,25 @@ function safeRubNumber(kopecks){
  const rub=Number(kopecks/100n)+Number(kopecks%100n)/100;
  return parseRubKopecks(String(rub))===kopecks?rub:null;
 }
+// Real JSON responses can be parsed by an injected client in a different
+// JavaScript realm. Prototype identity alone rejects those ordinary objects.
+// Accept only prototypes shaped like intrinsic Object/Array prototypes,
+// including foreign realms; inherited application metadata must still fail.
+function sameIntrinsicKeys(prototype,intrinsic){
+ if(!prototype)return false;
+ const keys=Reflect.ownKeys(prototype),expected=Reflect.ownKeys(intrinsic);
+ return keys.length===expected.length&&
+  expected.every(key=>Object.prototype.hasOwnProperty.call(prototype,key));
+}
+function plainObjectPrototype(prototype){
+ return prototype===null||
+  (Object.getPrototypeOf(prototype)===null&&sameIntrinsicKeys(prototype,Object.prototype));
+}
+function plainArrayPrototype(prototype){
+ return prototype!==null&&Array.isArray(prototype)&&
+  sameIntrinsicKeys(prototype,Array.prototype)&&
+  plainObjectPrototype(Object.getPrototypeOf(prototype));
+}
 // Read transports normally return JSON data. An injected transport might
 // instead return getters/proxies that throw secret-bearing exceptions after
 // the request itself succeeds. Snapshot a JSON-shaped response while still
@@ -40,8 +59,9 @@ function safeRubNumber(kopecks){
 function copyReadPayload(value, ancestors=new WeakSet()){
  if(value===null||typeof value!=="object")return value;
  if(ancestors.has(value))throw new Error("Invalid CRM response cycle");
+ const isArray=Array.isArray(value);
  const proto=Object.getPrototypeOf(value);
- if(!Array.isArray(value)&&proto!==Object.prototype&&proto!==null)
+ if(isArray?!plainArrayPrototype(proto):!plainObjectPrototype(proto))
   throw new Error("Invalid CRM response object");
  // A sparse injected array is not an empty CRM list. Copying only its
  // enumerable indexes would silently erase missing rows and undercount leads
