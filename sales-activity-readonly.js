@@ -197,7 +197,7 @@ async function probeDealNextActivity(request, dealId) {
       const extra = fraction.padEnd(9, '0').slice(3);
       if (earliest === null || timestamp < earliest.timestamp ||
           (timestamp === earliest.timestamp && extra < earliest.extra)) {
-        earliest = { timestamp, extra };
+        earliest = { timestamp, extra, sourceExtra: fraction.slice(3) };
       }
     }
     const next = response.next == null ? null : pageNumber(response.next);
@@ -210,7 +210,7 @@ async function probeDealNextActivity(request, dealId) {
     // If a full page has neither next nor total, probe one additional page.
     const more = next !== null || (rows.length === PAGE_SIZE && expectedTotal === null);
     if (!more) {
-      const preciseExtra = earliest === null ? '' : earliest.extra.replace(/0+$/, '');
+      const preciseExtra = earliest === null ? '' : earliest.sourceExtra;
       const normalized = earliest === null ? null : new Date(earliest.timestamp).toISOString();
       return {
         nextActivityAt: normalized === null ? null : normalized.slice(0, -1) + preciseExtra + 'Z',
