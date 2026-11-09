@@ -950,7 +950,9 @@ function scheduledActivityTime(deal) {
   return [deal.ACTIVITY_TIME, deal.NEXT_ACTIVITY_TIME].reduce((earliest, value) => {
     if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) ||
         Date.parse(value) >= NO_DEADLINE_FROM) return earliest;
-    return earliest === null || Date.parse(value) < Date.parse(earliest) ? value : earliest;
+    // Date.parse loses fractional precision after milliseconds. Preserve
+    // the true ordering of two valid Bitrix candidate deadlines.
+    return earliest === null || compareBitrixTimestamp(value, earliest) < 0 ? value : earliest;
   }, null);
 }
 
