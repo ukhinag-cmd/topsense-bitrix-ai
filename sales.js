@@ -444,11 +444,13 @@ function compareBitrixTimestamp(left, right) {
 // an already-recorded time-based score observation. Keep history chronological
 // without changing the authoritative sourceUpdatedAt or inventing CRM changes.
 function chronologicalHistoryAt(candidateAt, previousAt, observedAt = candidateAt) {
-  const previous = dateValue(previousAt);
-  const candidate = dateValue(candidateAt);
-  if (previous === null || (candidate !== null && candidate >= previous)) return candidateAt;
-  const observed = dateValue(observedAt);
-  return observed !== null && observed >= previous ? observedAt : previousAt;
+  if (dateValue(previousAt) === null) return candidateAt;
+  // Date.parse rounds fractional CRM timestamps down to milliseconds. A
+  // delayed source/observation inside that same millisecond can otherwise
+  // append an earlier instant, making the persisted history fail hydration.
+  if ((compareBitrixTimestamp(candidateAt, previousAt) ?? -1) >= 0) return candidateAt;
+  return (compareBitrixTimestamp(observedAt, previousAt) ?? -1) >= 0
+    ? observedAt : previousAt;
 }
 
 function stageCategoryId(value) {
