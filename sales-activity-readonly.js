@@ -124,6 +124,8 @@ async function probeDealNextActivity(request, dealId) {
   if (!id) throw new TypeError('Invalid Bitrix deal ID');
   const seen = new Set();
   let lastActivityId = 0;
+  // Preserve the full verified nanosecond remainder when choosing the
+  // earliest activity in a single JavaScript millisecond.
   let earliest = null;
   let checked = 0;
   let activitiesWithNoDeadline = 0;
@@ -187,7 +189,16 @@ async function probeDealNextActivity(request, dealId) {
         activitiesWithNoDeadline += 1;
         continue;
       }
-      if (earliest === null || timestamp < earliest) earliest = timestamp;
+      // Date.parse truncates after milliseconds. Comparing only timestamps
+      // could choose a later Next Step when Bitrix deadlines share the same
+      // millisecond. Canonical nine-digit fractions compare lexicographically
+      // after their millisecond instants have been normalized to UTC.
+      const fraction = DATE_WITH_ZONE.exec(activity.DEADLINE)[7] || '';
+      const extra = fraction.padEnd(9, '0').slice(3);
+      if (earliest === null || timestamp < earliest.timestamp ||
+          (timestamp === earliest.timestamp && extra < earliest.extra)) {
+        earliest = { timestamp, extra };
+      }
     }
     const next = response.next == null ? null : pageNumber(response.next);
     if (response.next != null && (next === null || next !== consumed || rows.length !== PAGE_SIZE))
@@ -198,7 +209,14 @@ async function probeDealNextActivity(request, dealId) {
     // Bitrix normally includes a next marker for pages with more data.
     // If a full page has neither next nor total, probe one additional page.
     const more = next !== null || (rows.length === PAGE_SIZE && expectedTotal === null);
-    if (!more) return { nextActivityAt: earliest === null ? null : new Date(earliest).toISOString(), activitiesWithNoDeadline, checked };
+    if (!more) {
+      const preciseExtra = earliest === null ? '' : earliest.extra.replace(/0+$/, '');
+      const normalized = earliest === null ? null : new Date(earliest.timestamp).toISOString();
+      return {
+        nextActivityAt: normalized === null ? null : normalized.slice(0, -1) + preciseExtra + 'Z',
+        activitiesWithNoDeadline, checked,
+      };
+    }
   }
   throw new Error('Bitrix activity page limit reached; incomplete scan');
 }
