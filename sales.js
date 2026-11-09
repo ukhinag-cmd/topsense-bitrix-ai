@@ -1492,10 +1492,10 @@ function validPersistedSnapshot(row) {
       !optionalPastDate(row.observedAt) ||
       !optionalScheduledDate(row.nextActivityAt) ||
       // scoreDeal derives scheduled/overdue flags from the same activity
-      // instant. A Sheet row explicitly stating that no date exists cannot
-      // truthfully claim either flag, nor can both flags ever be true.
-      // Legacy rows omitting optional date/overdue metadata stay loadable.
-      (row.nextActivityAt === null && (row.hasNext || row.nextOverdue === true)) ||
+      // instant. A missing (null or omitted) date cannot truthfully justify
+      // either flag, nor can both flags ever be true. Legacy rows without
+      // date and without either flag remain loadable.
+      (row.nextActivityAt == null && (row.hasNext || row.nextOverdue === true)) ||
       (row.hasNext && row.nextOverdue === true) ||
       // A deadline still in the future cannot have been overdue or missing
       // at any earlier saved observation. A past deadline with old scheduled
