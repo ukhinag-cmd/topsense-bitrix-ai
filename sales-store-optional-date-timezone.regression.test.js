@@ -42,7 +42,7 @@ test('stored optional deal/activity timestamps require explicit zones', () => {
       field + ' must reject date-only value');
     assert.equal(validate({ ...row, [field]: original.replace('Z', '+00:00') }), true,
       field + ' must accept an explicit UTC offset');
-    assert.equal(validate({ ...row, [field]: null }), true,
-      field + ' remains optional for legacy records');
+    assert.equal(validate({ ...row, [field]: null }), field === 'nextActivityAt' ? false : true,
+      field + ' preserves nullable-field/Next Step consistency');
   }
 });
