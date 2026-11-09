@@ -1516,7 +1516,10 @@ function validPersistedSnapshot(row) {
   // break the score timeline after the next webhook or temporal refresh.
   // Preserve equal-millisecond observations; reject reversed sequences.
   if (!row.scoreHistory.every((entry, index) =>
-    record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
+    record(entry) && typeof entry.at === "string" &&
+    // Sales emits absolute observation instants. An unzoned Sheet datetime
+    // would be parsed in the host timezone and misorder the audit trail.
+    timezoneQualifiedCrmDateTime(entry.at) && plausibleVersion(entry.at) &&
     // Score observations cannot predate the deal that was scored. A poisoned
     // Sheet audit row otherwise creates a fictitious pre-creation history.
     (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
@@ -1533,7 +1536,10 @@ function validPersistedSnapshot(row) {
   }
   // Validate alerts independently: legacy deals may have an empty score history.
   if (!row.alerts.every((entry, index) =>
-      record(entry) && typeof entry.at === "string" && plausibleVersion(entry.at) &&
+      record(entry) && typeof entry.at === "string" &&
+    // Sales emits absolute observation instants. An unzoned Sheet datetime
+    // would be parsed in the host timezone and misorder the audit trail.
+    timezoneQualifiedCrmDateTime(entry.at) && plausibleVersion(entry.at) &&
       // Sales alerts are generated only after the underlying CRM deal exists.
       // Old snapshots without a creation timestamp remain compatible.
       (row.createdAt == null || dateValue(entry.at) >= dateValue(row.createdAt)) &&
