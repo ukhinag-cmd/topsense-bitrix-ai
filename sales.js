@@ -624,6 +624,14 @@ async function loadStagesForCategory(category) {
       }
     }
     if (payload.next != null) throw new Error("Incomplete Bitrix stage dictionary page");
+    // crm.status.list has a 50-row page limit. A complete-looking page of
+    // exactly 50 rows without total/next may conceal more stages; a response
+    // larger than 50 cannot be a valid Bitrix page. Keep the last verified
+    // cache and retry instead of erasing a winning/losing stage and silently
+    // rewriting Dashboard scoring from a truncated dictionary.
+    if (result.length > 50 || (result.length === 50 && payload.total == null)) {
+      throw new Error("Ambiguous or oversized Bitrix stage dictionary page");
+    }
     const stages = new Map();
     for (const row of result) {
       // A list may be an array but still contain malformed stage records.
