@@ -97,7 +97,7 @@ test('partial stage dictionary metadata fails closed and retains last verified o
 
   // A next cursor likewise signals an unfinished dictionary read even
   // when its partial result is nonempty. Never certify it as authoritative.
-  stageEnvelope = { result: [verified[0]], next: 50, total: 51 };
+  stageEnvelope = { result: [verified[0]], next: 50, total: 1 };
   await scheduledSync();
   status = sales.status();
   assert.equal(status.lastError?.source, 'stages');
