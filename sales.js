@@ -1044,8 +1044,13 @@ function scoreDeal(deal, previous) {
   const lastAge = daysSince(lastActivityAt);
   const dealAge = daysSince(createdAt);
   const nextTs = dateValue(nextActivityAt);
-  const hasNext = nextTs !== null && nextTs > Date.now() - 5 * 60 * 1000;
-  const nextOverdue = nextTs !== null && nextTs < Date.now() - 5 * 60 * 1000;
+  // Both sides of the grace window must use the same clock instant.
+  // Reading Date.now() twice can mark one activity as both scheduled and
+  // overdue if the deadline crosses the boundary between the two calls.
+  // Those contradictory flags also fail persisted-snapshot validation.
+  const nextGraceCutoff = Date.now() - 5 * 60 * 1000;
+  const hasNext = nextTs !== null && nextTs > nextGraceCutoff;
+  const nextOverdue = nextTs !== null && nextTs < nextGraceCutoff;
   const qual = qualificationStatus(deal);
   // Only an affirmative qualification status earns the full scoring bonus.
   // A status such as "Не квалифицировано" must not match a substring search.
