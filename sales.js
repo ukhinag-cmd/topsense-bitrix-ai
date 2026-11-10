@@ -203,7 +203,10 @@ async function bitrixRaw(method, params = {}) {
   } catch {
     throw new Error("Bitrix REST " + method + " response read failed");
   }
-  if (!responseOk || payload?.error) {
+  // An explicit Bitrix error member is an error envelope even if its value
+  // is false/null/0/empty. Truthiness would accept a fabricated success.
+  if (!responseOk || (payload !== null && typeof payload === "object" &&
+      Object.prototype.hasOwnProperty.call(payload, "error"))) {
     // Remote error codes/descriptions are untrusted and may include a token.
     // Only the validated numeric HTTP status is safe diagnostic context.
     throw new Error("Bitrix REST " + method + " failed (HTTP " + safeStatus + ")");
