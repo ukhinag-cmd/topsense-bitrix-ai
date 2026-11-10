@@ -104,6 +104,34 @@ test('partial stage dictionary metadata fails closed and retains last verified o
   assert.equal(status.wins[0]?.semantic, 'S');
   assert.equal(status.recentHistory.length, 1);
 
+  // Bitrix lists at most 50 status rows per page. An exactly full page
+  // without total or next could be truncated even when every row is valid.
+  // Accepting it would erase the known-good WON stage while reporting healthy.
+  const ambiguousStages = Array.from({ length: 50 }, (_, index) => ({
+    STATUS_ID: index === 0 ? 'NEW' : 'EXTRA_' + index,
+    NAME: 'Additional stage ' + index,
+    SEMANTICS: null, EXTRA: { SEMANTICS: 'process' },
+  }));
+  stageEnvelope = { result: ambiguousStages };
+  await scheduledSync();
+  status = sales.status();
+  assert.equal(status.lastError?.source, 'stages',
+    'full markerless stage page must fail closed, not certify a truncated dictionary');
+  assert.equal(status.wins[0]?.semantic, 'S', 'retain last verified winning classification');
+  assert.equal(status.recentHistory.length, 1, 'do not invent a score/outcome transition');
+
+  // A response with more rows than the Bitrix page limit is malformed even
+  // without an explicit next or total marker.
+  stageEnvelope = { result: [...ambiguousStages, {
+    STATUS_ID: 'EXTRA_50', NAME: 'Additional stage 50', SEMANTICS: null,
+  }] };
+  await scheduledSync();
+  status = sales.status();
+  assert.equal(status.lastError?.source, 'stages',
+    'oversized stage list must not replace the verified pipeline');
+  assert.equal(status.wins[0]?.semantic, 'S');
+  assert.equal(status.recentHistory.length, 1);
+
   stageEnvelope = { result: [
     verified[0], { ...verified[1], NAME: 'Успех подтверждён' },
   ], total: 2 };
@@ -113,7 +141,7 @@ test('partial stage dictionary metadata fails closed and retains last verified o
   assert.equal(status.wins[0]?.stageName, 'Успех подтверждён');
   assert.equal(status.wins[0]?.sourceUpdatedAt, deal.DATE_MODIFY);
   assert.equal(status.recentHistory.length, 1);
-  assert.equal(stageReads, 4);
+  assert.equal(stageReads, 6);
   assert.ok(methods.every(method => [
     'crm.status.list.json', 'crm.deal.get.json', 'crm.deal.list.json',
   ].includes(method)), 'all CRM methods were intercepted, read-only mocks');
