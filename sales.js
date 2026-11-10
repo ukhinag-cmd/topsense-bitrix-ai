@@ -1314,7 +1314,12 @@ async function snapshotDeal(deal, source = "event") {
     last.currency !== row.currency ||
     // A true CRM manager transfer is itself a significant audit change.
     // Use the identity, not a mutable display-name lookup, as the trigger.
-    (previous && previous.managerId !== row.managerId)
+    // Bitrix sends the unassigned ID both as numeric 0 (stored as "") and
+    // string "0". Both mean the same unassigned owner; their JSON type is
+    // not evidence of a real manager handoff or a new score observation.
+    (previous && previous.managerId !== row.managerId &&
+      !((previous.managerId === "" || previous.managerId === "0") &&
+        (row.managerId === "" || row.managerId === "0")))
   ) {
     history.push({
       // For an activity-only refresh the CRM DATE_MODIFY is unchanged; use
