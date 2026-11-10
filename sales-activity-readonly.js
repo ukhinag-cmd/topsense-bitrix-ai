@@ -166,7 +166,8 @@ async function probeDealNextActivity(request, dealId) {
       throw new Error('Bitrix activity read failed');
     }
     if (!response || typeof response !== 'object' || Array.isArray(response) ||
-        response.error || !Array.isArray(response.result) || response.result.length > PAGE_SIZE) {
+        Object.prototype.hasOwnProperty.call(response, "error") ||
+        !Array.isArray(response.result) || response.result.length > PAGE_SIZE) {
       throw new Error('Invalid Bitrix activity list response');
     }
     const rows = response.result;
