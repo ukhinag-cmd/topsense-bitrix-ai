@@ -92,7 +92,8 @@ function adapter(request){
   let out;
   try{
    out=await request(method,params);
-   if(!out||typeof out!=="object"||out.error)throw new Error("CRM read failed");
+   if(!out||typeof out!=="object"||Object.prototype.hasOwnProperty.call(out,"error"))
+    throw new Error("CRM read failed");
    // Any malicious getter exceptions stay inside this sanitizing catch.
    out=copyReadPayload(out);
   }catch{
