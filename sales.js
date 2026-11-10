@@ -596,14 +596,34 @@ async function loadStagesForCategory(category) {
       throw new Error("Invalid Bitrix stage category");
     }
     const entityId = category === "0" ? "DEAL_STAGE" : "DEAL_STAGE_" + category;
-    const result = await bitrixCall("crm.status.list", {
+    // The stage dictionary is a source of truth for every inferred outcome.
+    // bitrixCall() discards REST pagination metadata; a nonempty but partial
+    // result can therefore delete a trusted won/lost stage and silently
+    // rewrite Prospect/Risk Score without a CRM deal change. Inspect the
+    // complete envelope before replacing any pipeline's cached dictionary.
+    const payload = await bitrixRaw("crm.status.list", {
       filter: { ENTITY_ID: entityId },
       order: { SORT: "ASC" },
     });
+    const result = payload.result;
     // Keep the last known-good stage semantics on partial/malformed reads.
     // Clearing the live cache before validating the response could make a
     // new deal appear less qualified or more risky for no CRM reason.
     if (!Array.isArray(result)) throw new Error("Invalid Bitrix stage list response");
+    // crm.status.list documents a total count for the filtered dictionary.
+    // When supplied, it must match the delivered row count. A non-null next
+    // marker also means the stage list is incomplete: this reader does not
+    // claim a fully verified pipeline from one paginated page.
+    if (payload.total != null) {
+      const totalText = typeof payload.total === "string" ||
+        typeof payload.total === "number" ? String(payload.total) : "";
+      if (!/^(0|[1-9][0-9]*)$/.test(totalText) ||
+          !Number.isSafeInteger(Number(totalText)) ||
+          Number(totalText) !== result.length) {
+        throw new Error("Incomplete Bitrix stage dictionary total");
+      }
+    }
+    if (payload.next != null) throw new Error("Incomplete Bitrix stage dictionary page");
     const stages = new Map();
     for (const row of result) {
       // A list may be an array but still contain malformed stage records.
