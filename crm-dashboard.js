@@ -1,5 +1,6 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
+const memoryGuard=require("./analytics-memory-guard");
 const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,pilotRetryAt:null,pilotLastError:"",paidControl:{},refreshFailures:0,nextRetryAt:null};
 let companyRetryTimer=null,contactRetryTimer=null,salesAuditStartTimer=null;
 function analyticSeeds(){
@@ -227,11 +228,18 @@ async function refresh(){
      require("./crm-sales-audit").run(state.companies).catch(()=>{});
    },120000);
   }
-  require("./crm-mail-evidence").enqueue(state.companies);
-  require("./website-profiler").enqueue(state.companies);
-  enqueueLinkedContactSites();
-  enqueuePreviousPilotSites();
-  if(state.contactsAt)enqueueMissingSiteNameSearch();
+  // Under memory pressure, keep fresh CRM companies available but do not
+  // start expensive optional site/mail research until pressure clears.
+  if(memoryGuard.shouldDefer()){
+   console.warn(JSON.stringify({component:"topsense-dashboard",event:"research-deferred-memory",
+    ...memoryGuard.sample(),at:new Date().toISOString()}));
+  }else{
+   require("./crm-mail-evidence").enqueue(state.companies);
+   require("./website-profiler").enqueue(state.companies);
+   enqueueLinkedContactSites();
+   enqueuePreviousPilotSites();
+   if(state.contactsAt)enqueueMissingSiteNameSearch();
+  }
   state.status="ready";state.updatedAt=new Date().toISOString();
   state.error=null;state.refreshFailures=0;state.nextRetryAt=null;
   if(companyRetryTimer){clearTimeout(companyRetryTimer);companyRetryTimer=null;}
@@ -910,6 +918,11 @@ function route(req,res,pathname,known){
 // An empty crawl queue does not prove every company has a subtype.
 function coverageLog(){
  if(!state.companies.length)return;
+ if(memoryGuard.shouldDefer()){
+  console.warn(JSON.stringify({component:"topsense-dashboard",event:"coverage-deferred-memory",
+   ...memoryGuard.sample(),at:new Date().toISOString()}));
+  return;
+ }
  try{
   const snap=data(()=>[]);
   // Progressive read-only first-letter and follow-up research for all
