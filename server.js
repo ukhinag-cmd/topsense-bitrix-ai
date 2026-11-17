@@ -7,6 +7,9 @@ const pdfParse = require("pdf-parse");
 const PORT = process.env.PORT || 10000;
 // Production analytics must never mutate Bitrix24 when this guard is active.
 function analyticsReadOnly(){return String(process.env.TOPSENSE_ANALYTICS_READONLY||"")==="1";}
+// Keep the webhook receiver and read-only dashboard responsive while resource-heavy
+// historical research is moved out of this single-process service.
+function heavyPaused(){return String(process.env.TOPSENSE_ANALYTICS_PAUSE_HEAVY||"1")!=="0";}
 const MAX_BODY = 1024 * 1024;
 
 // Periodic lightweight memory diagnostic for Render's 512 MB container.
@@ -7274,6 +7277,7 @@ const server = http.createServer((req, res) => {
       service: "topsense-bitrix-ai",
       status: "ready",
       bitrixReadConfigured: Boolean(process.env.BITRIX_WEBHOOK_BASE),
+      analyticsHeavyPaused: heavyPaused(),
       openAIConfigured: Boolean(process.env.OPENAI_API_KEY),
       openAIModel: process.env.OPENAI_MODEL || "gpt-6-sol",
       bitrixWriteEnabled: "test-deals-only",
@@ -7421,7 +7425,7 @@ server.listen(PORT, "0.0.0.0", () => {
   // private store before billing, with an explicit budget ceiling.
   let paidClientCheckRunning=false,paidClientNextCheck=0;
   async function paidClientCoverageTick(){
-    if (!analyticsReadOnly() ||
+    if (!analyticsReadOnly() || heavyPaused() ||
         String(process.env.TOPSENSE_PAID_CLASSIFICATION_ENABLED||"").trim()!=="1"||
         paidClientCheckRunning||Date.now()<paidClientNextCheck)return;
     // The old paid cohort is nearly exhausted. Avoid another full private
@@ -7453,6 +7457,7 @@ server.listen(PORT, "0.0.0.0", () => {
   // existing private analytics store. Missing scans are caught up via the
   // durable prior watermark.
   function dailyReadOnlyCrmChanges(){
+    if(heavyPaused())return;
     require("./crm-morning-monitor").tick().catch(error=>{
       console.warn(JSON.stringify({component:"crm-morning-monitor",
         event:"cycle-error",error:String(error?.message||error).slice(0,140)}));
