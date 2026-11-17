@@ -1,5 +1,9 @@
 "use strict";
 const crypto=require("crypto"),fs=require("fs"),path=require("path");
+const memoryGuard=require("./analytics-memory-guard");
+// Safe operational mode is the default until historical scans run in a
+// separate worker. To opt back in after capacity testing set to "0".
+const heavyPaused=()=>String(process.env.TOPSENSE_ANALYTICS_PAUSE_HEAVY||"1")!=="0";
 const state={status:"starting",updatedAt:null,error:null,companies:[],excludedCompanies:[],rawCrmTotal:0,refreshing:false,linkedContacts:new Map(),contactsLoading:false,contactsAt:null,pilot:new Map(),pilotUpdatedAt:null,pilotLoading:false,pilotRetryAt:null,pilotLastError:"",paidControl:{},refreshFailures:0,nextRetryAt:null};
 let companyRetryTimer=null,contactRetryTimer=null,salesAuditStartTimer=null;
 function analyticSeeds(){
@@ -220,18 +224,25 @@ async function refresh(){
   // Running the full 17k+ deal and 130k+ email audit alongside the company
   // snapshot overloads some Bitrix24 portals and causes INTERNAL_SERVER_ERROR.
   // Start it after core company/contact reconciliation gets a head start.
-  if(!salesAuditStartTimer&&require("./crm-sales-audit").stats().status==="not_started"){
+  if(!heavyPaused()&&!salesAuditStartTimer&&require("./crm-sales-audit").stats().status==="not_started"){
    salesAuditStartTimer=setTimeout(()=>{
     salesAuditStartTimer=null;
     if(state.companies.length)
      require("./crm-sales-audit").run(state.companies).catch(()=>{});
    },120000);
   }
-  require("./crm-mail-evidence").enqueue(state.companies);
-  require("./website-profiler").enqueue(state.companies);
-  enqueueLinkedContactSites();
-  enqueuePreviousPilotSites();
-  if(state.contactsAt)enqueueMissingSiteNameSearch();
+  // Under memory pressure, keep fresh CRM companies available but do not
+  // start expensive optional site/mail research until pressure clears.
+  if(heavyPaused()||memoryGuard.shouldDefer()){
+   console.warn(JSON.stringify({component:"topsense-dashboard",event:"research-deferred-memory",
+    ...memoryGuard.sample(),at:new Date().toISOString()}));
+  }else{
+   require("./crm-mail-evidence").enqueue(state.companies);
+   require("./website-profiler").enqueue(state.companies);
+   enqueueLinkedContactSites();
+   enqueuePreviousPilotSites();
+   if(state.contactsAt)enqueueMissingSiteNameSearch();
+  }
   state.status="ready";state.updatedAt=new Date().toISOString();
   state.error=null;state.refreshFailures=0;state.nextRetryAt=null;
   if(companyRetryTimer){clearTimeout(companyRetryTimer);companyRetryTimer=null;}
@@ -527,13 +538,15 @@ async function loadLinkedContacts(){
    websiteCandidates.push({...cand.company,corporateDomain,
     siteSource:"Непривязанные CRM-контакты: совпали название и корпоративный домен"});
   }
-  if(websiteCandidates.length)require("./website-profiler").enqueue(websiteCandidates);
+  if(!heavyPaused()&&websiteCandidates.length)require("./website-profiler").enqueue(websiteCandidates);
   console.log(JSON.stringify({component:"client-segments",event:"unlinked-contact-domain-candidates",
    unlinkedContacts:orphanContacts.length,siteCandidates:websiteCandidates.length}));
   state.linkedContacts=by;state.contactsAt=new Date().toISOString();
   if(contactRetryTimer){clearTimeout(contactRetryTimer);contactRetryTimer=null;}
-  enqueueMissingSiteNameSearch();
-  enqueueLinkedContactSites();
+  if(!heavyPaused()){
+   enqueueMissingSiteNameSearch();
+   enqueueLinkedContactSites();
+  }
   console.log(JSON.stringify({component:"client-segments",event:"linked-contacts-loaded",contacts:all.length,companies:by.size}));
  }catch(e){
   console.warn(JSON.stringify({component:"client-segments",
@@ -567,7 +580,7 @@ async function readPrivateStore(endpoint,secret){
  throw lastError||Error("private AI store unavailable");
 }
 async function loadPilot(){
- if(state.pilotLoading)return;
+ if(heavyPaused()||state.pilotLoading)return;
  const endpoint=String(process.env.GOOGLE_SHEET_STORE_URL||"");
  const secret=String(process.env.GOOGLE_SHEET_STORE_SECRET||"");
  if(!endpoint||!secret)return;
@@ -909,7 +922,12 @@ function route(req,res,pathname,known){
 // Log only aggregate classification coverage; never log customer names, URLs or email.
 // An empty crawl queue does not prove every company has a subtype.
 function coverageLog(){
- if(!state.companies.length)return;
+ if(!state.companies.length||heavyPaused())return;
+ if(memoryGuard.shouldDefer()){
+  console.warn(JSON.stringify({component:"topsense-dashboard",event:"coverage-deferred-memory",
+   ...memoryGuard.sample(),at:new Date().toISOString()}));
+  return;
+ }
  try{
   const snap=data(()=>[]);
   // Progressive read-only first-letter and follow-up research for all
@@ -998,8 +1016,8 @@ setTimeout(() => loadPilot().catch(() => {}), 1500);
 // scans must not start together with CRM company pagination at process startup.
 setTimeout(() => loadLinkedContacts().catch(() => {}), 35000);
 setTimeout(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 80000);
-setTimeout(() => require("./company-requisites").refresh()
- .then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 170000);
+setTimeout(() => {if(!heavyPaused())require("./company-requisites").refresh()
+ .then(()=>enqueueMissingSiteNameSearch()).catch(()=>{});}, 170000);
 // Keep the CRM company/contact snapshot fresh without repeating paid AI research.
 // Site profiler fingerprints prevent unchanged completed site evidence being crawled again.
 setInterval(() => {
@@ -1008,8 +1026,8 @@ setInterval(() => {
 }, 2*60*60*1000);
 // Explore an alternate linked-contact domain only after a primary site failed.
 // Bounded retries are conditional on temporary transport failures and cooldown.
-setTimeout(resumeUnresolvedCompanySites,10*60*1000);
-setInterval(resumeUnresolvedCompanySites,5*60*1000);
+setTimeout(()=>{if(!heavyPaused())resumeUnresolvedCompanySites()},10*60*1000);
+setInterval(()=>{if(!heavyPaused())resumeUnresolvedCompanySites()},5*60*1000);
 setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*1000);
 // A transient Bitrix24 deal pagination timeout must not permanently strand the
 // lifetime deal inventory after one startup attempt. Already fetched pages
@@ -1017,8 +1035,8 @@ setInterval(() => require("./crm-lead-inbox").refresh().catch(()=>{}), 10*60*100
 setInterval(() => {
  const audit=require("./crm-sales-audit");
  const status=audit.stats().status;
- if(state.companies.length&&status==="incomplete")
+ if(!heavyPaused()&&state.companies.length&&status==="incomplete")
   audit.run(state.companies).catch(()=>{});
 }, 12*60*1000);
-setInterval(() => require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{}), 24*60*60*1000);
+setInterval(() => {if(!heavyPaused())require("./company-requisites").refresh().then(()=>enqueueMissingSiteNameSearch()).catch(()=>{});}, 24*60*60*1000);
 module.exports={route,refresh,data};
