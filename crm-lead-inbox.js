@@ -17,6 +17,13 @@ function clean(lead){
   crmUrl:"https://topsense.bitrix24.ru/crm/lead/details/"+encodeURIComponent(str(lead.ID))+"/"};
 }
 async function refresh(){
+ // The read-only inbound scan fans out into thousands of deal/activity reads.
+ // Keep the event receiver responsive in protected mode; the separate
+ // historical research worker will resume this scan after memory repair.
+ if(String(process.env.TOPSENSE_ANALYTICS_PAUSE_HEAVY||"1")!=="0"){
+  state.status=state.updatedAt?"paused_with_previous_snapshot":"paused_for_safety";
+  return {status:state.status};
+ }
  if(state.loading||!str(process.env.BITRIX_WEBHOOK_BASE))return;
  state.loading=true;
  try{
